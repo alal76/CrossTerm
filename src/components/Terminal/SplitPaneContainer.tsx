@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import clsx from "clsx";
 import { useSessionStore } from "@/stores/sessionStore";
+import { useTerminalStore } from "@/stores/terminalStore";
 import { SplitDirection, SessionType } from "@/types";
 import type { SplitPane, SplitPaneLeaf, SplitPaneContainer as SplitPaneContainerType } from "@/types";
 import TerminalTab from "@/components/Terminal/TerminalTab";
@@ -76,7 +77,10 @@ function LeafPane({
 }) {
   const openTabs = useSessionStore((s) => s.openTabs);
   const sessions = useSessionStore((s) => s.sessions);
+  const activePaneId = useTerminalStore((s) => s.activePaneId);
+  const setActivePaneId = useTerminalStore((s) => s.setActivePaneId);
 
+  const isFocusedPane = activePaneId === pane.tabId;
   const tab = openTabs.find((t) => t.id === pane.tabId);
   if (!tab) {
     return (
@@ -88,21 +92,29 @@ function LeafPane({
 
   const session = sessions.find((s) => s.id === tab.sessionId);
 
-  if (tab.sessionType === SessionType.SSH && session) {
-    const username = (session.connection.protocolOptions?.["username"] as string) ?? "root";
-    return (
-      <SshTerminalTab
-        sessionId={tab.sessionId}
-        isActive={isActive}
-        host={session.connection.host}
-        port={session.connection.port}
-        username={username}
-        auth={{ type: "password", password: (session.connection.protocolOptions?.["password"] as string) ?? "" }}
-      />
-    );
-  }
-
-  return <TerminalTab sessionId={tab.sessionId} isActive={isActive} />;
+  return (
+    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
+    <div
+      className={clsx(
+        "h-full w-full border-2 transition-colors duration-[var(--duration-micro)]",
+        isFocusedPane ? "border-accent-primary" : "border-transparent",
+      )}
+      onClick={() => setActivePaneId(pane.tabId)}
+    >
+      {tab.sessionType === SessionType.SSH && session ? (
+        <SshTerminalTab
+          sessionId={tab.sessionId}
+          isActive={isActive}
+          host={session.connection.host}
+          port={session.connection.port}
+          username={(session.connection.protocolOptions?.["username"] as string) ?? "root"}
+          auth={{ type: "password", password: (session.connection.protocolOptions?.["password"] as string) ?? "" }}
+        />
+      ) : (
+        <TerminalTab sessionId={tab.sessionId} isActive={isActive} />
+      )}
+    </div>
+  );
 }
 
 // ── Container Renderer ──
@@ -168,7 +180,7 @@ function SplitContainer({
   );
 }
 
-// ── Main Entry Point ──
+// ── Dispatch Renderer ──
 
 function SplitPaneRenderer({
   pane,
@@ -178,15 +190,19 @@ function SplitPaneRenderer({
   readonly activeTabId: string | null;
 }) {
   if (pane.type === "leaf") {
-    return (
-      <div className="h-full w-full overflow-hidden">
-        <LeafPane pane={pane} isActive={pane.tabId === activeTabId} />
-      </div>
-    );
+    return <LeafPane pane={pane} isActive={activeTabId === pane.tabId} />;
   }
-
   return <SplitContainer pane={pane} activeTabId={activeTabId} />;
 }
+
+// ── Pane ID collection helper ──
+
+function collectLeafIds(pane: SplitPane): string[] {
+  if (pane.type === "leaf") return [pane.tabId];
+  return pane.children.flatMap(collectLeafIds);
+}
+
+// ── Main Export ──
 
 export default function SplitPaneContainer({
   pane,
@@ -195,6 +211,37 @@ export default function SplitPaneContainer({
   readonly pane: SplitPane;
   readonly activeTabId: string | null;
 }) {
+  const activePaneId = useTerminalStore((s) => s.activePaneId);
+  const setActivePaneId = useTerminalStore((s) => s.setActivePaneId);
+
+  useEffect(() => {
+    const leafIds = collectLeafIds(pane);
+    if (leafIds.length <= 1) return;
+
+    function handleKeyDown(e: KeyboardEvent) {
+      if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+
+      const arrows = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"];
+      if (!arrows.includes(e.key)) return;
+
+      e.preventDefault();
+      const ids = collectLeafIds(pane);
+      const currentIdx = ids.indexOf(activePaneId ?? "");
+      let nextIdx: number;
+
+      if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+        nextIdx = currentIdx < ids.length - 1 ? currentIdx + 1 : 0;
+      } else {
+        nextIdx = currentIdx > 0 ? currentIdx - 1 : ids.length - 1;
+      }
+
+      setActivePaneId(ids[nextIdx]);
+    }
+
+    globalThis.addEventListener("keydown", handleKeyDown);
+    return () => globalThis.removeEventListener("keydown", handleKeyDown);
+  }, [pane, activePaneId, setActivePaneId]);
+
   return (
     <div className="h-full w-full bg-surface-sunken">
       <SplitPaneRenderer pane={pane} activeTabId={activeTabId} />

@@ -7,7 +7,9 @@ import { SearchAddon } from "@xterm/addon-search";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { useTerminalStore } from "@/stores/terminalStore";
+import { useAppStore } from "@/stores/appStore";
 import { ConnectionStatus } from "@/types";
 import TerminalSearch from "@/components/Terminal/TerminalSearch";
 import "@xterm/xterm/css/xterm.css";
@@ -54,12 +56,15 @@ export default function TerminalView({ terminalId, isActive }: TerminalViewProps
   const updateTerminalDimensions = useTerminalStore((s) => s.updateTerminalDimensions);
   const updateTerminalStatus = useTerminalStore((s) => s.updateTerminalStatus);
   const removeTerminal = useTerminalStore((s) => s.removeTerminal);
+  const cursorStyle = useAppStore((s) => s.cursorStyle);
+  const cursorBlink = useAppStore((s) => s.cursorBlink);
 
   const [searchVisible, setSearchVisible] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [pasteConfirm, setPasteConfirm] = useState<{ text: string; lines: string[] } | null>(null);
   const [suppressPasteConfirm, setSuppressPasteConfirm] = useState(false);
   const [dontAskAgain, setDontAskAgain] = useState(false);
+  const [bellFlash, setBellFlash] = useState(false);
   const { t } = useTranslation();
 
   const handleResize = useCallback(() => {
@@ -85,19 +90,19 @@ export default function TerminalView({ terminalId, isActive }: TerminalViewProps
     const theme = getTerminalTheme();
 
     const term = new Terminal({
-      fontFamily: "'JetBrains Mono', monospace",
-      fontSize: 14,
-      lineHeight: 1.2,
-      scrollback: 10000,
-      cursorBlink: true,
-      cursorStyle: "block",
+      cursorBlink,
+      cursorStyle,
+      cursorStyle,
       allowProposedApi: true,
       theme,
     });
 
     const fitAddon = new FitAddon();
     const searchAddon = new SearchAddon();
-    const webLinksAddon = new WebLinksAddon();
+    const webLinksAddon = new WebLinksAddon((_event, uri) => {
+      shellOpen(uri).catch(() => {});
+    }
+    });
 
     term.loadAddon(fitAddon);
     term.loadAddon(searchAddon);
@@ -141,6 +146,43 @@ export default function TerminalView({ terminalId, isActive }: TerminalViewProps
       }
     );
 
+    // Listen for terminal bell
+    const bellDisposable = term.onBell(() => {
+      const currentBellStyle = useAppStore.getState().bellStyle;
+      if (currentBellStyle === "visual") {
+        setBellFlash(true);
+        setTimeout(() => setBellFlash(false), 200);
+      } else if (currentBellStyle === "audio") {
+        const audioCtx = new AudioContext();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.frequency.value = 800;
+        gain.gain.value = 0.1;
+       Bell event handler
+    const bellDisposable = term.onBell(() => {
+      if (bellStyle === "visual") {
+        setBellFlash(true);
+        setTimeout(() => setBellFlash(false), 200);
+      } else if (bellStyle === "audio") {
+        const ctx = new AudioContext();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = 800;
+        gain.gain.value = 0.1;
+        osc.start();
+        osc.stop(ctx.currentTime + 0.08);
+      }
+    });
+
+    //  osc.start();
+        osc.stop(audioCtx.currentTime + 0.1);
+      }
+    });
+
     // Listen for terminal exit
     const exitUnlisten = listen<{ terminal_id: string; exit_code: number }>(
       "terminal:exit",
@@ -152,9 +194,6 @@ export default function TerminalView({ terminalId, isActive }: TerminalViewProps
       }
     );
 
-    updateTerminalStatus(terminalId, ConnectionStatus.Connected);
-
-    // ResizeObserver for auto-fit
     const resizeObserver = new ResizeObserver(() => {
       requestAnimationFrame(() => {
         try {
@@ -172,6 +211,7 @@ export default function TerminalView({ terminalId, isActive }: TerminalViewProps
     return () => {
       resizeObserver.disconnect();
       dataDisposable.dispose();
+      bellDisposable.dispose();
       outputUnlisten.then((fn) => fn());
       exitUnlisten.then((fn) => fn());
       term.dispose();
@@ -179,7 +219,7 @@ export default function TerminalView({ terminalId, isActive }: TerminalViewProps
       fitAddonRef.current = null;
       searchAddonRef.current = null;
     };
-  }, [terminalId, updateTerminalDimensions, updateTerminalStatus, removeTerminal]);
+  }, [terminalId, updateTerminalDimensions, updateTerminalStatus, removeTerminal, cursorStyle, cursorBlink]);
 
   // Re-fit when tab becomes active
   useEffect(() => {
@@ -297,6 +337,10 @@ export default function TerminalView({ terminalId, isActive }: TerminalViewProps
 
   return (
     <div className="relative w-full h-full">
+      {/* Visual bell flash */}
+      {bellFlash && (
+        <div className="absolute inset-0 z-20 bg-text-primary/10 pointer-events-none animate-bell-flash" />
+      )}
       <TerminalSearch
         searchAddon={searchAddonRef.current}
         visible={searchVisible}

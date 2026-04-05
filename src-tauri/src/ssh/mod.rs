@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use russh::client;
 use russh::keys::key::PublicKey;
-use russh::{ChannelId, ChannelMsg, Disconnect};
+use russh::{ChannelId, ChannelMsg, CryptoVec, Disconnect};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
@@ -13,6 +13,9 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, Mutex as TokioMutex, RwLock};
 use uuid::Uuid;
 use zeroize::Zeroizing;
+
+#[cfg(unix)]
+use tokio::net::UnixStream as TokioUnixStream;
 
 // ── Error ───────────────────────────────────────────────────────────────
 
@@ -32,6 +35,8 @@ pub enum SshError {
     PortForward(String),
     #[error("IO error: {0}")]
     Io(String),
+    #[error("Agent forwarding error: {0}")]
+    AgentForward(String),
     #[error("Host key changed for {0} — possible MITM attack")]
     HostKeyChanged(String),
 }
@@ -163,6 +168,11 @@ pub(crate) struct SshClientHandler {
     port: u16,
     /// Remote forward configs: remote bind -> local target
     remote_forwards: Arc<TokioMutex<HashMap<(String, u32), (String, u16)>>>,
+    /// Whether SSH agent forwarding is enabled for this connection.
+    agent_enabled: bool,
+    /// Active agent forwarding sockets keyed by channel ID (Unix only).
+    #[cfg(unix)]
+    agent_sockets: HashMap<ChannelId, TokioUnixStream>,
 }
 
 #[async_trait]
@@ -293,10 +303,33 @@ impl client::Handler for SshClientHandler {
 
     async fn data(
         &mut self,
-        _channel: ChannelId,
+        channel: ChannelId,
         data: &[u8],
-        _session: &mut client::Session,
+        session: &mut client::Session,
     ) -> Result<(), Self::Error> {
+        // Handle agent forwarding channels
+        #[cfg(unix)]
+        if let Some(socket) = self.agent_sockets.get_mut(&channel) {
+            // Forward data to local SSH agent
+            socket.write_all(data).await
+                .map_err(|e| SshError::AgentForward(e.to_string()))?;
+
+            // Read response: SSH agent protocol uses 4-byte length prefix
+            let mut len_buf = [0u8; 4];
+            socket.read_exact(&mut len_buf).await
+                .map_err(|e| SshError::AgentForward(e.to_string()))?;
+            let msg_len = u32::from_be_bytes(len_buf) as usize;
+            let mut body = vec![0u8; msg_len];
+            socket.read_exact(&mut body).await
+                .map_err(|e| SshError::AgentForward(e.to_string()))?;
+
+            let mut response = CryptoVec::new();
+            response.extend(&len_buf);
+            response.extend(&body);
+            session.data(channel, response);
+            return Ok(());
+        }
+
         let text = String::from_utf8_lossy(data).to_string();
         let _ = self.app_handle.emit(
             "ssh:output",
@@ -307,6 +340,22 @@ impl client::Handler for SshClientHandler {
         );
         Ok(())
     }
+
+    async fn server_channel_open_agent_forward(
+        &mut self,
+        channel: ChannelId,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        #[cfg(unix)]
+        if self.agent_enabled {
+            if let Ok(sock_path) = std::env::var("SSH_AUTH_SOCK") {
+                if let Ok(stream) = TokioUnixStream::connect(&sock_path).await {
+                    self.agent_sockets.insert(channel, stream);
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 // ── Connection ──────────────────────────────────────────────────────────
@@ -314,6 +363,8 @@ impl client::Handler for SshClientHandler {
 pub(crate) struct SshConnection {
     pub(crate) info: SshConnectionInfo,
     pub(crate) handle: client::Handle<SshClientHandler>,
+    /// Handle for the jump host connection, if connected via ProxyJump.
+    pub(crate) jump_host_handle: Option<client::Handle<SshClientHandler>>,
     cmd_tx: mpsc::Sender<SshCommand>,
     forward_tasks: HashMap<String, tokio::task::JoinHandle<()>>,
     remote_forwards: Arc<TokioMutex<HashMap<(String, u32), (String, u16)>>>,
@@ -346,6 +397,33 @@ fn build_config(keep_alive_secs: Option<u64>) -> Arc<client::Config> {
     let mut config = client::Config::default();
     config.keepalive_interval = Some(std::time::Duration::from_secs(keep_alive_secs.unwrap_or(30)));
     config.keepalive_max = 3;
+
+    // Enforce secure cipher/kex policy – only modern, audited algorithms
+    config.preferred = russh::Preferred {
+        kex: std::borrow::Cow::Borrowed(&[
+            russh::kex::CURVE25519,
+            russh::kex::CURVE25519_PRE_RFC_8731,
+            russh::kex::EXTENSION_SUPPORT_AS_CLIENT,
+            russh::kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT,
+        ]),
+        key: std::borrow::Cow::Borrowed(&[
+            russh::keys::key::ED25519,
+            russh::keys::key::RSA_SHA2_512,
+            russh::keys::key::RSA_SHA2_256,
+        ]),
+        cipher: std::borrow::Cow::Borrowed(&[
+            russh::cipher::CHACHA20_POLY1305,
+            russh::cipher::AES_256_GCM,
+            russh::cipher::AES_256_CTR,
+        ]),
+        mac: std::borrow::Cow::Borrowed(&[
+            russh::mac::HMAC_SHA256_ETM,
+            russh::mac::HMAC_SHA512_ETM,
+            russh::mac::HMAC_SHA256,
+        ]),
+        compression: std::borrow::Cow::Borrowed(&[russh::compression::NONE]),
+    };
+
     Arc::new(config)
 }
 
@@ -398,6 +476,95 @@ async fn connect_and_auth(
     Ok(handle)
 }
 
+/// Connect to a target host by tunneling through a jump host (ProxyJump).
+///
+/// 1. Connects and authenticates to the jump host
+/// 2. Opens a direct-tcpip channel from the jump host to the target
+/// 3. Runs the SSH handshake over that channel to the target
+///
+/// Returns `(target_handle, jump_host_handle)`.
+async fn connect_via_jump(
+    jump: &JumpHost,
+    target_host: &str,
+    target_port: u16,
+    target_username: &str,
+    target_auth: &SshAuth,
+    target_handler: SshClientHandler,
+    app_handle: &AppHandle,
+    connection_id: &str,
+    keep_alive_secs: Option<u64>,
+) -> Result<(client::Handle<SshClientHandler>, client::Handle<SshClientHandler>), SshError> {
+    let jump_handler = SshClientHandler {
+        app_handle: app_handle.clone(),
+        connection_id: format!("{}-jump", connection_id),
+        host: jump.host.clone(),
+        port: jump.port,
+        remote_forwards: Arc::new(TokioMutex::new(HashMap::new())),
+        agent_enabled: false,
+        #[cfg(unix)]
+        agent_sockets: HashMap::new(),
+    };
+
+    let jump_handle = connect_and_auth(
+        &jump.host, jump.port, &jump.username, &jump.auth,
+        jump_handler, keep_alive_secs,
+    ).await.map_err(|e| SshError::ConnectionFailed(
+        format!("Jump host connection failed: {}", e)
+    ))?;
+
+    // Open direct-tcpip channel through jump host to the actual target
+    let channel = jump_handle
+        .channel_open_direct_tcpip(target_host, target_port as u32, "127.0.0.1", 0)
+        .await
+        .map_err(|e| SshError::ConnectionFailed(
+            format!("Jump host tunnel to {}:{} failed: {}", target_host, target_port, e)
+        ))?;
+
+    let stream = channel.into_stream();
+    let config = build_config(keep_alive_secs);
+
+    // Run the SSH handshake to the target over the tunneled stream
+    let mut target_handle = client::connect_stream(config, stream, target_handler)
+        .await
+        .map_err(|e| SshError::ConnectionFailed(
+            format!("SSH through jump host failed: {}", e)
+        ))?;
+
+    // Authenticate to the target host
+    let authenticated = match target_auth {
+        SshAuth::Password { password } => {
+            let password = Zeroizing::new(password.clone());
+            target_handle
+                .authenticate_password(target_username, (*password).clone())
+                .await
+                .map_err(|e| SshError::ConnectionFailed(e.to_string()))?
+        }
+        SshAuth::PrivateKey { key_data, passphrase } => {
+            let key_pair = if let Some(pass) = passphrase {
+                let pass = Zeroizing::new(pass.clone());
+                russh_keys::decode_secret_key(key_data, Some(pass.as_str()))
+                    .map_err(|e| SshError::Key(e.to_string()))?
+            } else {
+                russh_keys::decode_secret_key(key_data, None)
+                    .map_err(|e| SshError::Key(e.to_string()))?
+            };
+            target_handle
+                .authenticate_publickey(target_username, Arc::new(key_pair))
+                .await
+                .map_err(|e| SshError::ConnectionFailed(e.to_string()))?
+        }
+    };
+
+    if !authenticated {
+        let _ = jump_handle
+            .disconnect(Disconnect::ByApplication, "Target auth failed", "en")
+            .await;
+        return Err(SshError::AuthFailed);
+    }
+
+    Ok((target_handle, jump_handle))
+}
+
 // ── Tauri Commands ──────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -410,13 +577,15 @@ pub async fn ssh_connect(
     port: u16,
     username: String,
     auth: SshAuth,
-    _jump_host: Option<JumpHost>,
+    jump_host: Option<JumpHost>,
+    agent_forwarding: Option<bool>,
     cols: Option<u32>,
     rows: Option<u32>,
 ) -> Result<String, SshError> {
     let connection_id = Uuid::new_v4().to_string();
     let cols = cols.unwrap_or(80);
     let rows = rows.unwrap_or(24);
+    let agent_fwd = agent_forwarding.unwrap_or(false);
 
     // Look up session config for keep-alive interval and startup script
     let (keep_alive_secs, startup_script) = {
@@ -444,15 +613,35 @@ pub async fn ssh_connect(
         host: host.clone(),
         port,
         remote_forwards: Arc::new(TokioMutex::new(HashMap::new())),
+        agent_enabled: agent_fwd,
+        #[cfg(unix)]
+        agent_sockets: HashMap::new(),
     };
 
     let remote_forwards = handler.remote_forwards.clone();
 
-    let handle = match connect_and_auth(&host, port, &username, &auth, handler, keep_alive_secs).await {
-        Ok(h) => h,
-        Err(e) => {
-            crate::audit::append_event(&pid, crate::audit::AuditEventType::SessionConnect, &format!("SSH connect FAILED {}@{}:{} - {}", username, host, port, e));
-            return Err(e);
+    // Connect — either directly or via jump host
+    let (handle, jump_host_handle) = if let Some(ref jump) = jump_host {
+        match connect_via_jump(
+            jump, &host, port, &username, &auth,
+            handler, &app_handle, &connection_id, keep_alive_secs,
+        ).await {
+            Ok((h, jh)) => (h, Some(jh)),
+            Err(e) => {
+                crate::audit::append_event(&pid, crate::audit::AuditEventType::SessionConnect,
+                    &format!("SSH connect FAILED {}@{}:{} via jump {}:{} - {}",
+                        username, host, port, jump.host, jump.port, e));
+                return Err(e);
+            }
+        }
+    } else {
+        match connect_and_auth(&host, port, &username, &auth, handler, keep_alive_secs).await {
+            Ok(h) => (h, None),
+            Err(e) => {
+                crate::audit::append_event(&pid, crate::audit::AuditEventType::SessionConnect,
+                    &format!("SSH connect FAILED {}@{}:{} - {}", username, host, port, e));
+                return Err(e);
+            }
         }
     };
 
@@ -460,6 +649,11 @@ pub async fn ssh_connect(
         .channel_open_session()
         .await
         .map_err(|e| SshError::Channel(e.to_string()))?;
+
+    // Request agent forwarding before PTY/shell (if enabled)
+    if agent_fwd {
+        let _ = channel.agent_forward(false).await;
+    }
 
     channel
         .request_pty(false, "xterm-256color", cols, rows, 0, 0, &[])
@@ -570,6 +764,7 @@ pub async fn ssh_connect(
             port_forwards: Vec::new(),
         },
         handle,
+        jump_host_handle,
         cmd_tx,
         forward_tasks: HashMap::new(),
         remote_forwards,
@@ -636,6 +831,13 @@ pub async fn ssh_disconnect(
         .handle
         .disconnect(Disconnect::ByApplication, "User disconnected", "en")
         .await;
+
+    // Clean up jump host connection if present
+    if let Some(ref jh) = conn.jump_host_handle {
+        let _ = jh
+            .disconnect(Disconnect::ByApplication, "User disconnected", "en")
+            .await;
+    }
 
     let _ = app_handle.emit(
         "ssh:disconnected",
@@ -1254,7 +1456,90 @@ mod tests {
         // Would test: connect to localhost:2222 with password auth,
         // verify connection_id is returned and state has the connection.
     }
+    #[test]
+    fn test_agent_forward_error() {
+        let err = SshError::AgentForward("socket closed".into());
+        assert_eq!(
+            err.to_string(),
+            "Agent forwarding error: socket closed"
+        );
+        let json = serde_json::to_string(&err).unwrap();
+        assert!(json.contains("socket closed"));
+    }
 
+    #[test]
+    fn test_jump_host_serde_with_key_auth() {
+        let jh = JumpHost {
+            host: "bastion.example.com".to_string(),
+            port: 2222,
+            username: "jump_user".to_string(),
+            auth: SshAuth::PrivateKey {
+                key_data: "-----BEGIN OPENSSH PRIVATE KEY-----\ntest\n-----END OPENSSH PRIVATE KEY-----".to_string(),
+                passphrase: None,
+            },
+        };
+        let json = serde_json::to_string(&jh).unwrap();
+        let deserialized: JumpHost = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.host, "bastion.example.com");
+        assert_eq!(deserialized.port, 2222);
+        match deserialized.auth {
+            SshAuth::PrivateKey { key_data, passphrase } => {
+                assert!(key_data.contains("OPENSSH"));
+                assert!(passphrase.is_none());
+            }
+            _ => panic!("Expected PrivateKey variant"),
+        }
+    }
+
+    // ── Integration tests for Jump Host (BE-SSH-01) ─────────────────────
+
+    #[tokio::test]
+    #[ignore = "Requires two SSH servers. Setup:\n\
+        docker network create ssh-test\n\
+        docker run -d --name target --network ssh-test -e PASSWORD_ACCESS=true \
+        -e USER_PASSWORD=test -e USER_NAME=test lscr.io/linuxserver/openssh-server\n\
+        docker run -d --name bastion --network ssh-test -p 2222:2222 -e PASSWORD_ACCESS=true \
+        -e USER_PASSWORD=jump -e USER_NAME=jump lscr.io/linuxserver/openssh-server\n\
+        Then run: cargo test -- --ignored test_ssh_connect_via_jump_host"]
+    async fn test_ssh_connect_via_jump_host() {
+        // Would test: connect to 'target' host through 'bastion' jump host,
+        // verify the connection is established and shell output is received.
+    }
+
+    #[tokio::test]
+    #[ignore = "Requires two SSH servers — see test_ssh_connect_via_jump_host for Docker setup"]
+    async fn test_ssh_jump_host_cleanup_on_disconnect() {
+        // Would test: connect via jump host, then disconnect.
+        // Verify both the target connection and jump host connection are cleaned up.
+    }
+
+    #[tokio::test]
+    #[ignore = "Requires two SSH servers — see test_ssh_connect_via_jump_host for Docker setup"]
+    async fn test_ssh_jump_host_target_auth_failure() {
+        // Would test: connect to jump host successfully but fail auth on the target.
+        // Verify that the jump host connection is cleaned up after the failure.
+    }
+
+    // ── Integration tests for Agent Forwarding (BE-SSH-02) ──────────────
+
+    #[tokio::test]
+    #[ignore = "Requires a running SSH server with agent forwarding support and a local SSH agent.\n\
+        Setup: ensure SSH_AUTH_SOCK env variable is set (ssh-agent running).\n\
+        docker run -d -p 2222:22 -e PASSWORD_ACCESS=true -e USER_PASSWORD=test \
+        -e USER_NAME=test lscr.io/linuxserver/openssh-server\n\
+        Then run: cargo test -- --ignored test_ssh_agent_forward_connect"]
+    async fn test_ssh_agent_forward_connect() {
+        // Would test: connect with agent_forwarding=true,
+        // verify agent forwarding was requested on the channel.
+    }
+
+    #[tokio::test]
+    #[ignore = "Requires SSH server + local SSH agent — see test_ssh_agent_forward_connect for setup"]
+    async fn test_ssh_agent_forward_no_agent_sock() {
+        // Would test: connect with agent_forwarding=true but SSH_AUTH_SOCK unset/invalid.
+        // Connection should still succeed (agent forwarding silently fails).
+
+    }
     #[tokio::test]
     #[ignore = "Requires a running SSH server — use Docker openssh-server container"]
     async fn test_ssh_connect_and_exec() {

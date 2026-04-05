@@ -1,7 +1,6 @@
 use chrono::Utc;
-use russh::client;
-use russh_sftp::client::SftpSession;
 use serde::{Deserialize, Serialize};
+use russh_sftp::client::SftpSession;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
@@ -515,4 +514,424 @@ pub async fn sftp_download(
     );
 
     Ok(transfer_id)
+}
+
+// ── BE-SFTP-02: SCP transfer fallback ───────────────────────────────────
+
+#[tauri::command]
+pub async fn sftp_scp_upload(
+    ssh_state: tauri::State<'_, crate::ssh::SshState>,
+    app_handle: AppHandle,
+    connection_id: String,
+    local_path: String,
+    remote_path: String,
+) -> Result<String, SftpError> {
+    let transfer_id = Uuid::new_v4().to_string();
+    let data = tokio::fs::read(&local_path).await?;
+    let total_bytes = data.len() as u64;
+    let filename = std::path::Path::new(&local_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    let connections = ssh_state.connections.read().await;
+    let conn = connections
+        .get(&connection_id)
+        .ok_or_else(|| SftpError::SshNotFound(connection_id.clone()))?
+        .clone();
+
+    let conn_locked = conn.lock().await;
+    let channel = conn_locked
+        .handle
+        .channel_open_session()
+        .await
+        .map_err(|e| SftpError::Sftp(format!("SCP channel open failed: {}", e)))?;
+
+    // SCP protocol: exec "scp -t <remote_path>"
+    channel
+        .exec(true, format!("scp -t {}", remote_path).as_bytes())
+        .await
+        .map_err(|e| SftpError::Sftp(format!("SCP exec failed: {}", e)))?;
+
+    // Send SCP header: C0644 <size> <filename>\n
+    let header = format!("C0644 {} {}\n", total_bytes, filename);
+    channel
+        .data(header.as_bytes())
+        .await
+        .map_err(|e| SftpError::Sftp(format!("SCP header send failed: {}", e)))?;
+
+    // Send file data
+    channel
+        .data(&data[..])
+        .await
+        .map_err(|e| SftpError::Sftp(format!("SCP data send failed: {}", e)))?;
+
+    // Send null byte to indicate end of file
+    channel
+        .data(&[0u8][..])
+        .await
+        .map_err(|e| SftpError::Sftp(format!("SCP EOF send failed: {}", e)))?;
+
+    let _ = app_handle.emit(
+        "sftp:transfer_complete",
+        TransferCompleteEvent {
+            transfer_id: transfer_id.clone(),
+            session_id: connection_id,
+            filename,
+            direction: "scp_upload".into(),
+            success: true,
+            error: None,
+        },
+    );
+
+    Ok(transfer_id)
+}
+
+#[tauri::command]
+pub async fn sftp_scp_download(
+    ssh_state: tauri::State<'_, crate::ssh::SshState>,
+    app_handle: AppHandle,
+    connection_id: String,
+    remote_path: String,
+    local_path: String,
+) -> Result<String, SftpError> {
+    let transfer_id = Uuid::new_v4().to_string();
+    let filename = std::path::Path::new(&remote_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    let connections = ssh_state.connections.read().await;
+    let conn = connections
+        .get(&connection_id)
+        .ok_or_else(|| SftpError::SshNotFound(connection_id.clone()))?
+        .clone();
+
+    let conn_locked = conn.lock().await;
+    let channel = conn_locked
+        .handle
+        .channel_open_session()
+        .await
+        .map_err(|e| SftpError::Sftp(format!("SCP channel open failed: {}", e)))?;
+
+    // SCP protocol: exec "scp -f <remote_path>"
+    channel
+        .exec(true, format!("scp -f {}", remote_path).as_bytes())
+        .await
+        .map_err(|e| SftpError::Sftp(format!("SCP exec failed: {}", e)))?;
+
+    drop(conn_locked);
+
+    // Collect all data from the channel
+    use russh::ChannelMsg;
+    let mut ch = channel;
+    let mut output = Vec::new();
+    loop {
+        match ch.wait().await {
+            Some(ChannelMsg::Data { data }) => {
+                output.extend_from_slice(&data);
+            }
+            Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => break,
+            _ => {}
+        }
+    }
+
+    // Parse SCP response header: skip the C<mode> <size> <name>\n prefix
+    let header_end = output.iter().position(|&b| b == b'\n').unwrap_or(0);
+    let file_data = if header_end + 1 < output.len() {
+        &output[header_end + 1..]
+    } else {
+        &output[..]
+    };
+
+    tokio::fs::write(&local_path, file_data).await?;
+
+    let _ = app_handle.emit(
+        "sftp:transfer_complete",
+        TransferCompleteEvent {
+            transfer_id: transfer_id.clone(),
+            session_id: connection_id,
+            filename,
+            direction: "scp_download".into(),
+            success: true,
+            error: None,
+        },
+    );
+
+    Ok(transfer_id)
+}
+
+// ── BE-SFTP-03: Bandwidth throttling ────────────────────────────────────
+
+#[tauri::command]
+pub async fn sftp_upload_throttled(
+    app_handle: AppHandle,
+    state: tauri::State<'_, SftpState>,
+    session_id: String,
+    local_path: String,
+    remote_path: String,
+    max_bytes_per_sec: Option<u64>,
+) -> Result<String, SftpError> {
+    let transfer_id = Uuid::new_v4().to_string();
+    let sessions = state.sessions.read().await;
+    let session = sessions
+        .get(&session_id)
+        .ok_or_else(|| SftpError::NotFound(session_id.clone()))?
+        .clone();
+
+    let data = tokio::fs::read(&local_path).await?;
+    let total_bytes = data.len() as u64;
+    let filename = std::path::Path::new(&local_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    // If throttling is enabled, write in chunks with delays (token bucket)
+    if let Some(rate_limit) = max_bytes_per_sec {
+        if rate_limit > 0 {
+            let chunk_size = (rate_limit / 10).max(1024) as usize; // 100ms intervals
+            let interval = std::time::Duration::from_millis(100);
+            let mut offset = 0usize;
+
+            let session_locked = session.lock().await;
+            while offset < data.len() {
+                let end = (offset + chunk_size).min(data.len());
+                session_locked
+                    .sftp
+                    .write(&remote_path, &data[offset..end])
+                    .await
+                    .map_err(|e| SftpError::Sftp(e.to_string()))?;
+
+                offset = end;
+
+                let _ = app_handle.emit(
+                    "sftp:transfer_progress",
+                    TransferProgressEvent {
+                        transfer_id: transfer_id.clone(),
+                        session_id: session_id.clone(),
+                        filename: filename.clone(),
+                        bytes_transferred: offset as u64,
+                        total_bytes,
+                        direction: "upload".into(),
+                    },
+                );
+
+                if offset < data.len() {
+                    tokio::time::sleep(interval).await;
+                }
+            }
+        } else {
+            let session_locked = session.lock().await;
+            session_locked
+                .sftp
+                .write(&remote_path, &data)
+                .await
+                .map_err(|e| SftpError::Sftp(e.to_string()))?;
+        }
+    } else {
+        let session_locked = session.lock().await;
+        session_locked
+            .sftp
+            .write(&remote_path, &data)
+            .await
+            .map_err(|e| SftpError::Sftp(e.to_string()))?;
+    }
+
+    let _ = app_handle.emit(
+        "sftp:transfer_complete",
+        TransferCompleteEvent {
+            transfer_id: transfer_id.clone(),
+            session_id: session_id.clone(),
+            filename,
+            direction: "upload".into(),
+            success: true,
+            error: None,
+        },
+    );
+
+    Ok(transfer_id)
+}
+
+#[tauri::command]
+pub async fn sftp_download_throttled(
+    app_handle: AppHandle,
+    state: tauri::State<'_, SftpState>,
+    session_id: String,
+    remote_path: String,
+    local_path: String,
+    max_bytes_per_sec: Option<u64>,
+) -> Result<String, SftpError> {
+    let transfer_id = Uuid::new_v4().to_string();
+    let sessions = state.sessions.read().await;
+    let session = sessions
+        .get(&session_id)
+        .ok_or_else(|| SftpError::NotFound(session_id.clone()))?
+        .clone();
+
+    let filename = std::path::Path::new(&remote_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    let session_locked = session.lock().await;
+    let data = session_locked.sftp.read(&remote_path).await?;
+    let total_bytes = data.len() as u64;
+    drop(session_locked);
+
+    // Apply throttling to the write to disk
+    if let Some(rate_limit) = max_bytes_per_sec {
+        if rate_limit > 0 {
+            let chunk_size = (rate_limit / 10).max(1024) as usize;
+            let interval = std::time::Duration::from_millis(100);
+            let mut file = tokio::fs::File::create(&local_path).await?;
+            let mut offset = 0usize;
+
+            while offset < data.len() {
+                let end = (offset + chunk_size).min(data.len());
+                tokio::io::AsyncWriteExt::write_all(&mut file, &data[offset..end]).await?;
+                offset = end;
+
+                let _ = app_handle.emit(
+                    "sftp:transfer_progress",
+                    TransferProgressEvent {
+                        transfer_id: transfer_id.clone(),
+                        session_id: session_id.clone(),
+                        filename: filename.clone(),
+                        bytes_transferred: offset as u64,
+                        total_bytes,
+                        direction: "download".into(),
+                    },
+                );
+
+                if offset < data.len() {
+                    tokio::time::sleep(interval).await;
+                }
+            }
+        } else {
+            tokio::fs::write(&local_path, &data).await?;
+        }
+    } else {
+        tokio::fs::write(&local_path, &data).await?;
+    }
+
+    let _ = app_handle.emit(
+        "sftp:transfer_complete",
+        TransferCompleteEvent {
+            transfer_id: transfer_id.clone(),
+            session_id: session_id.clone(),
+            filename,
+            direction: "download".into(),
+            success: true,
+            error: None,
+        },
+    );
+
+    Ok(transfer_id)
+}
+
+// ── Tests ───────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sftp_state_new() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let state = SftpState::new();
+            let sessions = state.sessions.read().await;
+            assert!(sessions.is_empty());
+        });
+    }
+
+    #[test]
+    fn test_sftp_error_display() {
+        let err = SftpError::NotFound("sess-1".into());
+        assert_eq!(err.to_string(), "SFTP session not found: sess-1");
+
+        let err = SftpError::SshNotFound("conn-1".into());
+        assert_eq!(err.to_string(), "SSH connection not found: conn-1");
+
+        let err = SftpError::Cancelled;
+        assert_eq!(err.to_string(), "Transfer cancelled");
+    }
+
+    #[test]
+    fn test_sftp_error_serialize() {
+        let err = SftpError::NotFound("x".into());
+        let json = serde_json::to_string(&err).unwrap();
+        assert_eq!(json, "\"SFTP session not found: x\"");
+    }
+
+    #[test]
+    fn test_file_entry_serde() {
+        let entry = FileEntry {
+            name: "test.txt".into(),
+            is_dir: false,
+            size: 1024,
+            modified: Some("2024-01-01T00:00:00Z".into()),
+            permissions: Some("644".into()),
+            owner: Some(1000),
+            group: Some(1000),
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        let deserialized: FileEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.name, "test.txt");
+        assert_eq!(deserialized.size, 1024);
+    }
+
+    #[test]
+    fn test_transfer_progress_event_serde() {
+        let event = TransferProgressEvent {
+            transfer_id: "xfer-1".into(),
+            session_id: "sess-1".into(),
+            filename: "file.bin".into(),
+            bytes_transferred: 500,
+            total_bytes: 1000,
+            direction: "upload".into(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("bytes_transferred"));
+        assert!(json.contains("500"));
+    }
+
+    #[test]
+    fn test_transfer_complete_event_serde() {
+        let event = TransferCompleteEvent {
+            transfer_id: "xfer-1".into(),
+            session_id: "sess-1".into(),
+            filename: "file.bin".into(),
+            direction: "download".into(),
+            success: true,
+            error: None,
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"success\":true"));
+    }
+
+    // ── BE-SFTP-03: Throttle chunk calculation ──────────────────────
+
+    #[test]
+    fn test_throttle_chunk_size_calculation() {
+        let rate: u64 = 1_000_000; // 1MB/s
+        let chunk_size = (rate / 10).max(1024) as usize;
+        assert_eq!(chunk_size, 100_000); // 100KB chunks at 100ms intervals
+
+        let low_rate: u64 = 100; // Very low rate
+        let low_chunk = (low_rate / 10).max(1024) as usize;
+        assert_eq!(low_chunk, 1024); // Minimum 1KB
+    }
+
+    #[test]
+    fn test_sftp_session_info_serde() {
+        let info = SftpSessionInfo {
+            session_id: "s1".into(),
+            connection_id: "c1".into(),
+            created_at: "2024-01-01T00:00:00Z".into(),
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        let d: SftpSessionInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(d.session_id, "s1");
+    }
 }

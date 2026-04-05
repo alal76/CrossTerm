@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { SidebarMode, BottomPanelMode, ThemeVariant } from "@/types";
-import type { Profile } from "@/types";
+import type { Profile, BellStyle, CursorStyle, ThemeTokens } from "@/types";
 
 function getSystemTheme(): ThemeVariant.Dark | ThemeVariant.Light {
   return globalThis.matchMedia("(prefers-color-scheme: dark)").matches
@@ -24,9 +24,13 @@ interface AppState {
   settingsOpen: boolean;
   firstLaunchComplete: boolean;
 
+  bellStyle: BellStyle;
+  cursorStyle: CursorStyle;
+  cursorBlink: boolean;
+  customThemeName: string | null;
+  customThemeTokens: Partial<ThemeTokens> | null;
   windowWidth: number;
   windowHeight: number;
-
   setSidebarMode: (mode: SidebarMode) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   toggleSidebar: () => void;
@@ -46,6 +50,11 @@ interface AppState {
   addProfile: (profile: Profile) => void;
 
   setWindowDimensions: (width: number, height: number) => void;
+
+  setBellStyle: (style: BellStyle) => void;
+  setCursorStyle: (style: CursorStyle) => void;
+  setCursorBlink: (blink: boolean) => void;
+  setCustomTheme: (name: string | null, tokens: Partial<ThemeTokens> | null) => void;
 }
 
 const initialTheme = ThemeVariant.Dark;
@@ -73,8 +82,20 @@ export const useAppStore = create<AppState>((set) => ({
   settingsOpen: false,
   firstLaunchComplete: false,
 
+  bellStyle: "none" as BellStyle,
+  cursorStyle: "block" as CursorStyle,
+  cursorBlink: true,
+  customThemeName: null,
+  customThemeTokens: null,
+
   windowWidth: window.innerWidth,
   windowHeight: window.innerHeight,
+
+  setBellStyle: (style) => set({ bellStyle: style }),
+  setCursorStyle: (style) => set({ cursorStyle: style }),
+  setCursorBlink: (blink) => set({ cursorBlink: blink }),
+  setCustomTheme: (name, tokens) =>
+    set({ customThemeName: name, customThemeTokens: tokens }),
 
   setSidebarMode: (mode) => set({ sidebarMode: mode }),
   setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),

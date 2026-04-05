@@ -223,6 +223,37 @@ pub(crate) fn session_file_path(profile_id: &str, session_id: &str) -> PathBuf {
     session_file(profile_id, session_id)
 }
 
+/// Public accessor so vault can scan sessions for orphan checks.
+pub(crate) fn do_session_list_for_profile(profile_id: &str) -> Vec<SessionDefinition> {
+    do_session_list(profile_id).unwrap_or_default()
+}
+
+// ── BE-CFG-06: Portable mode ───────────────────────────────────────────
+
+/// Check for `.crossterm-portable` sentinel file next to the binary.
+pub fn is_portable_mode() -> bool {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            return dir.join(".crossterm-portable").exists();
+        }
+    }
+    false
+}
+
+/// Return the data directory, respecting portable mode.
+pub(crate) fn effective_data_dir() -> PathBuf {
+    if is_portable_mode() {
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                let portable_dir = dir.join("data");
+                std::fs::create_dir_all(&portable_dir).ok();
+                return portable_dir;
+            }
+        }
+    }
+    data_base_dir()
+}
+
 // ── Config state ────────────────────────────────────────────────────────
 
 pub struct ConfigState {
@@ -770,6 +801,175 @@ pub fn session_import_ssh_config(
     Ok(created_ids)
 }
 
+// ── BE-CFG-02: Bulk connect all in folder ───────────────────────────────
+
+#[tauri::command]
+pub fn session_bulk_connect(
+    state: tauri::State<'_, ConfigState>,
+    folder_path: String,
+) -> Result<Vec<String>, ConfigError> {
+    let pid = state.active_profile()?;
+    let sessions = do_session_list(&pid)?;
+    let ids: Vec<String> = sessions
+        .into_iter()
+        .filter(|s| s.group.as_deref() == Some(&folder_path))
+        .map(|s| s.id)
+        .collect();
+    Ok(ids)
+}
+
+// ── BE-CFG-04: Profile export/import ────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ProfileExportData {
+    profile: Profile,
+    sessions: Vec<SessionDefinition>,
+    settings: Settings,
+}
+
+#[tauri::command]
+pub fn profile_export(
+    state: tauri::State<'_, ConfigState>,
+    path: String,
+) -> Result<(), ConfigError> {
+    let pid = state.active_profile()?;
+    let profile = do_profile_get(&pid)?;
+    let sessions = do_session_list(&pid)?;
+    let settings = profile.settings.clone();
+
+    let export = ProfileExportData {
+        profile,
+        sessions,
+        settings,
+    };
+
+    let json = serde_json::to_string_pretty(&export)?;
+    std::fs::write(&path, json)?;
+
+    crate::audit::append_event(
+        &pid,
+        crate::audit::AuditEventType::ProfileExport,
+        &format!("Exported profile to {}", path),
+    );
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn profile_import(
+    state: tauri::State<'_, ConfigState>,
+    path: String,
+) -> Result<Profile, ConfigError> {
+    let data = std::fs::read_to_string(&path)?;
+    let export: ProfileExportData = serde_json::from_str(&data)?;
+
+    // Create a new profile with imported data
+    let new_profile = do_profile_create(ProfileCreateRequest {
+        name: format!("{} (Imported)", export.profile.name),
+        avatar: export.profile.avatar,
+        settings: Some(export.settings),
+    })?;
+
+    // Import sessions
+    for session in export.sessions {
+        let req = SessionCreateRequest {
+            name: session.name,
+            session_type: session.session_type,
+            group: session.group,
+            tags: Some(session.tags),
+            icon: session.icon,
+            color_label: session.color_label,
+            credential_ref: session.credential_ref,
+            connection: session.connection,
+            startup_script: session.startup_script,
+            environment_variables: Some(session.environment_variables),
+            notes: session.notes,
+            auto_reconnect: Some(session.auto_reconnect),
+            keep_alive_interval_seconds: Some(session.keep_alive_interval_seconds),
+            favorite: Some(session.favorite),
+        };
+        do_session_create(&new_profile.id, req)?;
+    }
+
+    let pid = state
+        .active_profile_id
+        .read()
+        .unwrap()
+        .clone()
+        .unwrap_or_default();
+    crate::audit::append_event(
+        &pid,
+        crate::audit::AuditEventType::ProfileImport,
+        &format!("Imported profile '{}' from {}", new_profile.name, path),
+    );
+
+    Ok(new_profile)
+}
+
+// ── BE-CFG-05: Settings hierarchy ───────────────────────────────────────
+
+/// Resolve effective settings with session → folder → profile → app defaults cascade.
+fn do_settings_get_effective(
+    profile_id: &str,
+    session_id: Option<&str>,
+) -> Result<Settings, ConfigError> {
+    // Override with profile settings
+    let profile = do_profile_get(profile_id)?;
+    let mut effective = profile.settings.clone();
+    if let Some(sid) = session_id {
+        let session = do_session_get(profile_id, sid)?;
+
+        // Check folder-level settings: look for a .settings.json in group folder
+        if let Some(ref folder) = session.group {
+            let folder_settings_path = sessions_dir(profile_id).join(format!("{}.settings.json", folder));
+            if folder_settings_path.exists() {
+                if let Ok(data) = std::fs::read_to_string(&folder_settings_path) {
+                    if let Ok(folder_settings) = serde_json::from_str::<Settings>(&data) {
+                        effective = folder_settings;
+                    }
+                }
+            }
+        }
+
+        // Session-level overrides from protocol_options
+        if let Some(ref opts) = session.connection.protocol_options {
+            if let Some(font_size) = opts.get("font_size").and_then(|v| v.as_u64()) {
+                effective.font_size = font_size as u32;
+            }
+            if let Some(theme) = opts.get("theme").and_then(|v| v.as_str()) {
+                effective.theme = theme.to_string();
+            }
+            if let Some(font_family) = opts.get("font_family").and_then(|v| v.as_str()) {
+                effective.font_family = font_family.to_string();
+            }
+            if let Some(scrollback) = opts.get("scrollback_lines").and_then(|v| v.as_u64()) {
+                effective.scrollback_lines = scrollback as u32;
+            }
+            if let Some(bell) = opts.get("bell_style").and_then(|v| v.as_str()) {
+                effective.bell_style = bell.to_string();
+            }
+        }
+    }
+
+    Ok(effective)
+}
+
+#[tauri::command]
+pub fn settings_get_effective(
+    state: tauri::State<'_, ConfigState>,
+    session_id: Option<String>,
+) -> Result<Settings, ConfigError> {
+    let pid = state.active_profile()?;
+    do_settings_get_effective(&pid, session_id.as_deref())
+}
+
+// ── BE-CFG-06: Portable mode command ────────────────────────────────────
+
+#[tauri::command]
+pub fn config_is_portable_mode() -> bool {
+    is_portable_mode()
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -942,6 +1142,145 @@ mod tests {
         let env = TestEnv::new();
 
         do_session_create(env.id(), make_session_request("Alpha Web", "10.0.0.1")).unwrap();
+
+    // ── UT-C-07: Bulk connect ───────────────────────────────────────
+
+    #[test]
+    fn test_session_bulk_connect_by_folder() {
+        let env = TestEnv::new();
+
+        // Create sessions in different folders
+        let mut req1 = make_session_request("Web1", "10.0.0.1");
+        req1.group = Some("production".to_string());
+        do_session_create(env.id(), req1).unwrap();
+
+        let mut req2 = make_session_request("Web2", "10.0.0.2");
+        req2.group = Some("production".to_string());
+        do_session_create(env.id(), req2).unwrap();
+
+        let mut req3 = make_session_request("Dev1", "10.0.0.3");
+        req3.group = Some("staging".to_string());
+        do_session_create(env.id(), req3).unwrap();
+
+        // Get all sessions in production folder
+        let all = do_session_list(env.id()).unwrap();
+        let prod_ids: Vec<String> = all
+            .into_iter()
+            .filter(|s| s.group.as_deref() == Some("production"))
+            .map(|s| s.id)
+            .collect();
+
+        assert_eq!(prod_ids.len(), 2);
+    }
+
+    #[test]
+    fn test_session_bulk_connect_empty_folder() {
+        let env = TestEnv::new();
+
+        let all = do_session_list(env.id()).unwrap();
+        let ids: Vec<String> = all
+            .into_iter()
+            .filter(|s| s.group.as_deref() == Some("nonexistent"))
+            .map(|s| s.id)
+            .collect();
+
+        assert!(ids.is_empty());
+    }
+
+    // ── UT-C-08: Profile export/import ──────────────────────────────
+
+    #[test]
+    fn test_profile_export_import_roundtrip() {
+        let env = TestEnv::new();
+
+        // Create sessions
+        do_session_create(env.id(), make_session_request("Server1", "10.0.0.1")).unwrap();
+        do_session_create(env.id(), make_session_request("Server2", "10.0.0.2")).unwrap();
+
+        // Export
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let export_path = tmp.path().to_string_lossy().to_string();
+
+        let profile = do_profile_get(env.id()).unwrap();
+        let sessions = do_session_list(env.id()).unwrap();
+        let export = ProfileExportData {
+            profile: profile.clone(),
+            sessions,
+            settings: profile.settings,
+        };
+        let json = serde_json::to_string_pretty(&export).unwrap();
+        std::fs::write(&export_path, &json).unwrap();
+
+        // Import
+        let data = std::fs::read_to_string(&export_path).unwrap();
+        let imported: ProfileExportData = serde_json::from_str(&data).unwrap();
+
+        assert_eq!(imported.profile.name, "Test Profile");
+        assert_eq!(imported.sessions.len(), 2);
+    }
+
+    #[test]
+    fn test_profile_export_data_serialization() {
+        let export = ProfileExportData {
+            profile: Profile {
+                id: "test-id".into(),
+                name: "Test".into(),
+                avatar: None,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                settings: Settings::default(),
+            },
+            sessions: vec![],
+            settings: Settings::default(),
+        };
+        let json = serde_json::to_string(&export).unwrap();
+        assert!(json.contains("Test"));
+        let deserialized: ProfileExportData = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.profile.name, "Test");
+    }
+
+    // ── UT-C-09: Settings hierarchy ─────────────────────────────────
+
+    #[test]
+    fn test_settings_effective_defaults_to_profile() {
+        let env = TestEnv::new();
+
+        let settings = do_settings_get_effective(env.id(), None).unwrap();
+        let profile = do_profile_get(env.id()).unwrap();
+
+        assert_eq!(settings.theme, profile.settings.theme);
+        assert_eq!(settings.font_size, profile.settings.font_size);
+    }
+
+    #[test]
+    fn test_settings_effective_with_session_overrides() {
+        let env = TestEnv::new();
+
+        let mut req = make_session_request("TestSession", "10.0.0.1");
+        let mut opts = HashMap::new();
+        opts.insert("font_size".into(), serde_json::json!(20));
+        opts.insert("theme".into(), serde_json::json!("solarized"));
+        req.connection.protocol_options = Some(opts);
+        let session = do_session_create(env.id(), req).unwrap();
+
+        let settings = do_settings_get_effective(env.id(), Some(&session.id)).unwrap();
+        assert_eq!(settings.font_size, 20);
+        assert_eq!(settings.theme, "solarized");
+    }
+
+    // ── UT-C-10: Portable mode ──────────────────────────────────────
+
+    #[test]
+    fn test_portable_mode_detection() {
+        // In test environment, sentinel file doesn't exist next to binary
+        assert!(!is_portable_mode());
+    }
+
+    #[test]
+    fn test_effective_data_dir_non_portable() {
+        let dir = effective_data_dir();
+        assert!(dir.to_string_lossy().contains("CrossTerm"));
+    }
         do_session_create(env.id(), make_session_request("Beta Web", "10.0.0.2")).unwrap();
         do_session_create(env.id(), make_session_request("Gamma DB", "10.0.0.3")).unwrap();
 

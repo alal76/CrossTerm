@@ -248,6 +248,11 @@ body,
   to { opacity: 1; }
 }
 
+@keyframes bell-flash {
+  0% { opacity: 0.3; }
+  100% { opacity: 0; }
+}
+
 @keyframes paletteIn {
   from {
     opacity: 0;
@@ -282,6 +287,10 @@ body,
 
 .animate-fade-in {
   animation: fade-in var(--duration-short) var(--ease-decelerate);
+}
+
+.animate-bell-flash {
+  animation: bell-flash 200ms var(--ease-default) forwards;
 }
 
 .animate-slide-left {

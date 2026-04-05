@@ -30,10 +30,12 @@ pub enum AuditEventType {
     VaultUnlock,
     VaultLock,
     VaultCreate,
+    VaultAutoLock,
     CredentialAccess,
     CredentialCreate,
     CredentialUpdate,
     CredentialDelete,
+    ClipboardCopy,
     SessionConnect,
     SessionDisconnect,
     SessionCreate,
@@ -45,6 +47,9 @@ pub enum AuditEventType {
     SettingsUpdate,
     TerminalCreate,
     TerminalClose,
+    KeygenGenerate,
+    KeygenImport,
+    KeygenDeploy,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

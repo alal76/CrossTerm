@@ -4,6 +4,8 @@ import type { TerminalInstance } from "@/types";
 
 interface TerminalState {
   terminals: Map<string, TerminalInstance>;
+  activePaneId: string | null;
+  broadcastMode: boolean;
 
   createTerminal: (sessionId: string, id: string) => void;
   removeTerminal: (id: string) => void;
@@ -11,10 +13,15 @@ interface TerminalState {
   updateTerminalDimensions: (id: string, cols: number, rows: number) => void;
   updateTerminalTitle: (id: string, title: string) => void;
   getTerminalBySession: (sessionId: string) => TerminalInstance | undefined;
+  setActivePaneId: (id: string | null) => void;
+  setBroadcastMode: (mode: boolean) => void;
+  toggleBroadcastMode: () => void;
 }
 
 export const useTerminalStore = create<TerminalState>((set, get) => ({
   terminals: new Map(),
+  activePaneId: null,
+  broadcastMode: false,
 
   createTerminal: (sessionId, id) =>
     set((state) => {
@@ -68,4 +75,8 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     }
     return undefined;
   },
+
+  setActivePaneId: (id) => set({ activePaneId: id }),
+  setBroadcastMode: (mode) => set({ broadcastMode: mode }),
+  toggleBroadcastMode: () => set((state) => ({ broadcastMode: !state.broadcastMode })),
 }));

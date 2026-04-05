@@ -44,6 +44,17 @@ struct TerminalOutputEvent {
 }
 
 #[derive(Clone, Serialize)]
+struct TerminalBinaryOutputEvent {
+    terminal_id: String,
+    data: String, // base64-encoded
+}
+
+#[derive(Clone, Serialize)]
+struct TerminalBellEvent {
+    terminal_id: String,
+}
+
+#[derive(Clone, Serialize)]
 struct TerminalExitEvent {
     terminal_id: String,
     code: Option<i32>,
@@ -60,6 +71,8 @@ struct PtySession {
     reader_handle: Option<std::thread::JoinHandle<()>>,
     /// Optional log file for session output logging (shared with reader thread).
     log_file: Arc<Mutex<Option<std::fs::File>>>,
+    /// Whether this terminal is in binary (raw base64) output mode.
+    binary_mode: bool,
 }
 
 // ── Manager ─────────────────────────────────────────────────────────────
@@ -78,6 +91,7 @@ impl TerminalManager {
     pub fn create(
         &self,
         app_handle: &AppHandle,
+        binary_mode: Option<bool>,
         shell: Option<String>,
         cols: Option<u16>,
         rows: Option<u16>,
@@ -86,6 +100,8 @@ impl TerminalManager {
     ) -> Result<TerminalInfo, TerminalError> {
         let cols = cols.unwrap_or(80);
         let rows = rows.unwrap_or(24);
+        let is_binary = binary_mode.unwrap_or(false);
+
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(PtySize {
@@ -141,6 +157,7 @@ impl TerminalManager {
         let shutdown_clone = shutdown.clone();
         let log_file: Arc<Mutex<Option<std::fs::File>>> = Arc::new(Mutex::new(None));
         let log_file_for_reader = log_file.clone();
+
         let reader_handle = std::thread::spawn(move || {
             let mut buf = [0u8; 4096];
             loop {
@@ -160,15 +177,39 @@ impl TerminalManager {
                         break;
                     }
                     Ok(n) => {
-                        // Best-effort UTF-8 – replace invalid sequences.
-                        let text = String::from_utf8_lossy(&buf[..n]).to_string();
-                        let _ = handle.emit(
-                            "terminal:output",
-                            TerminalOutputEvent {
-                                terminal_id: event_id.clone(),
-                                data: text,
-                            },
-                        );
+                        // BE-TERM-03: Detect BEL character (0x07)
+                        if buf[..n].contains(&0x07) {
+                            let _ = handle.emit(
+                                "terminal:bell",
+                                TerminalBellEvent {
+                                    terminal_id: event_id.clone(),
+                                },
+                            );
+                        }
+
+                        // BE-TERM-04: Binary mode sends base64, text mode sends UTF-8
+                        if is_binary {
+                            use base64::Engine;
+                            let encoded =
+                                base64::engine::general_purpose::STANDARD.encode(&buf[..n]);
+                            let _ = handle.emit(
+                                "terminal:binary_output",
+                                TerminalBinaryOutputEvent {
+                                    terminal_id: event_id.clone(),
+                                    data: encoded,
+                                },
+                            );
+                        } else {
+                            let text = String::from_utf8_lossy(&buf[..n]).to_string();
+                            let _ = handle.emit(
+                                "terminal:output",
+                                TerminalOutputEvent {
+                                    terminal_id: event_id.clone(),
+                                    data: text,
+                                },
+                            );
+                        }
+
                         // Write raw bytes to log file if attached
                         if let Ok(mut guard) = log_file_for_reader.lock() {
                             if let Some(ref mut f) = *guard {
@@ -200,6 +241,7 @@ impl TerminalManager {
             shutdown,
             reader_handle: Some(reader_handle),
             log_file,
+            binary_mode: is_binary,
         };
 
         self.sessions.lock().unwrap().insert(id, session);
@@ -305,10 +347,20 @@ pub fn terminal_create(
     rows: Option<u16>,
     cwd: Option<String>,
     env: Option<HashMap<String, String>>,
+    binary_mode: Option<bool>,
 ) -> Result<TerminalInfo, TerminalError> {
-    let info = state.create(&app_handle, shell, cols, rows, cwd, env)?;
-    let pid = config_state.active_profile_id.read().unwrap().clone().unwrap_or_default();
-    crate::audit::append_event(&pid, crate::audit::AuditEventType::TerminalCreate, &format!("Created terminal {} ({})", info.id, info.shell));
+    let info = state.create(&app_handle, binary_mode, shell, cols, rows, cwd, env)?;
+    let pid = config_state
+        .active_profile_id
+        .read()
+        .unwrap()
+        .clone()
+        .unwrap_or_default();
+    crate::audit::append_event(
+        &pid,
+        crate::audit::AuditEventType::TerminalCreate,
+        &format!("Created terminal {} ({})", info.id, info.shell),
+    );
     Ok(info)
 }
 
@@ -339,16 +391,23 @@ pub fn terminal_close(
 ) -> Result<(), TerminalError> {
     let result = state.close(&id);
     if result.is_ok() {
-        let pid = config_state.active_profile_id.read().unwrap().clone().unwrap_or_default();
-        crate::audit::append_event(&pid, crate::audit::AuditEventType::TerminalClose, &format!("Closed terminal {}", id));
+        let pid = config_state
+            .active_profile_id
+            .read()
+            .unwrap()
+            .clone()
+            .unwrap_or_default();
+        crate::audit::append_event(
+            &pid,
+            crate::audit::AuditEventType::TerminalClose,
+            &format!("Closed terminal {}", id),
+        );
     }
     result
 }
 
 #[tauri::command]
-pub fn terminal_list(
-    state: tauri::State<'_, TerminalManager>,
-) -> Vec<TerminalInfo> {
+pub fn terminal_list(state: tauri::State<'_, TerminalManager>) -> Vec<TerminalInfo> {
     state.list()
 }
 
@@ -428,9 +487,11 @@ mod tests {
         assert!(!shell.is_empty(), "Default shell should not be empty");
         #[cfg(not(target_os = "windows"))]
         {
-            // On unix-like systems, should be a path or shell name
             assert!(
-                shell.contains("sh") || shell.contains("zsh") || shell.contains("bash") || shell.contains("fish"),
+                shell.contains("sh")
+                    || shell.contains("zsh")
+                    || shell.contains("bash")
+                    || shell.contains("fish"),
                 "Default shell '{}' doesn't look like a known shell",
                 shell
             );
@@ -462,7 +523,54 @@ mod tests {
         assert_eq!(err.to_string(), "PTY error: bad pty");
     }
 
-    // ── Integration tests requiring AppHandle ───────────────────────────
+    // ── BE-TERM-03: Bell detection ──────────────────────────────────
+
+    #[test]
+    fn test_bell_character_detection() {
+        let data: &[u8] = b"hello\x07world";
+        assert!(data.contains(&0x07), "Data should contain BEL character");
+    }
+
+    #[test]
+    fn test_no_bell_in_normal_output() {
+        let data: &[u8] = b"hello world\r\n";
+        assert!(!data.contains(&0x07), "Normal output should not contain BEL");
+    }
+
+    // ── BE-TERM-04: Binary output mode ──────────────────────────────
+
+    #[test]
+    fn test_binary_output_base64_encoding() {
+        use base64::Engine;
+        let raw_bytes: &[u8] = &[0x00, 0x01, 0xFF, 0xFE, 0x07, 0x1B];
+        let encoded = base64::engine::general_purpose::STANDARD.encode(raw_bytes);
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(&encoded)
+            .unwrap();
+        assert_eq!(raw_bytes, decoded.as_slice());
+    }
+
+    #[test]
+    fn test_binary_output_event_serialization() {
+        let event = TerminalBinaryOutputEvent {
+            terminal_id: "term-1".to_string(),
+            data: "AAAB/w==".to_string(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("terminal_id"));
+        assert!(json.contains("AAAB/w=="));
+    }
+
+    #[test]
+    fn test_bell_event_serialization() {
+        let event = TerminalBellEvent {
+            terminal_id: "term-1".to_string(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("term-1"));
+    }
+
+    // ── Integration tests requiring AppHandle ───────────────────────
 
     #[test]
     #[ignore = "Requires Tauri AppHandle for event emission — run as integration test"]

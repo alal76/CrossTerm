@@ -24,6 +24,7 @@ import {
   Wifi,
   X,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useSessionStore } from "@/stores/sessionStore";
 import { SessionType, ConnectionStatus } from "@/types";
 import type { Session } from "@/types";
@@ -280,6 +281,7 @@ function FolderNode({
   const expanded = expandedFolders.has(node.fullPath);
   const totalCount = countAllSessions(node);
   const sortedChildren = [...node.children.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const { t } = useTranslation();
 
   return (
     <div>
@@ -303,7 +305,7 @@ function FolderNode({
           <Folder size={13} className="text-text-secondary shrink-0" />
         )}
         <span className="text-xs font-medium text-text-secondary flex-1 truncate">{node.name}</span>
-        <span className="text-[10px] text-text-disabled">{totalCount}</span>
+        <span className="text-[10px] text-text-disabled">{t("counts.sessions", { count: totalCount })}</span>
       </button>
       {expanded && (
         <div>

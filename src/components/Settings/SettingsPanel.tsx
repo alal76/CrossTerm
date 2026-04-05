@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
+import { readTextFile } from "@tauri-apps/plugin-fs";
 import clsx from "clsx";
 import {
   Settings,
@@ -12,9 +14,33 @@ import {
   Moon,
   Monitor,
   Check,
+  Upload,
 } from "lucide-react";
 import { useAppStore } from "@/stores/appStore";
 import { ThemeVariant } from "@/types";
+import type { ThemeFile } from "@/types";
+
+// ── Built-in theme list ──
+
+import darkTheme from "@/themes/dark.json";
+import lightTheme from "@/themes/light.json";
+import solarizedDarkTheme from "@/themes/solarized-dark.json";
+import solarizedLightTheme from "@/themes/solarized-light.json";
+import draculaTheme from "@/themes/dracula.json";
+import nordTheme from "@/themes/nord.json";
+import monokaiProTheme from "@/themes/monokai-pro.json";
+import highContrastTheme from "@/themes/high-contrast.json";
+
+const BUILT_IN_THEMES: ThemeFile[] = [
+  darkTheme as ThemeFile,
+  lightTheme as ThemeFile,
+  solarizedDarkTheme as ThemeFile,
+  solarizedLightTheme as ThemeFile,
+  draculaTheme as ThemeFile,
+  nordTheme as ThemeFile,
+  monokaiProTheme as ThemeFile,
+  highContrastTheme as ThemeFile,
+];
 
 // ── Types ──
 
@@ -174,6 +200,14 @@ export default function SettingsPanel() {
   const appTheme = useAppStore((s) => s.theme);
   const setAppTheme = useAppStore((s) => s.setTheme);
   const profiles = useAppStore((s) => s.profiles);
+  const customThemeName = useAppStore((s) => s.customThemeName);
+  const setCustomTheme = useAppStore((s) => s.setCustomTheme);
+  const bellStyle = useAppStore((s) => s.bellStyle);
+  const setBellStyle = useAppStore((s) => s.setBellStyle);
+  const storeCursorStyle = useAppStore((s) => s.cursorStyle);
+  const setCursorStyle = useAppStore((s) => s.setCursorStyle);
+  const storeCursorBlink = useAppStore((s) => s.cursorBlink);
+  const setCursorBlink = useAppStore((s) => s.setCursorBlink);
 
   // Load settings from backend
   useEffect(() => {
@@ -190,18 +224,71 @@ export default function SettingsPanel() {
     load();
   }, []);
 
+  // Apply custom theme tokens to CSS custom properties
+  const applyThemeTokens = useCallback((tokens: Record<string, string>) => {
+    const root = document.documentElement;
+    for (const [key, value] of Object.entries(tokens)) {
+      root.style.setProperty(`--${key}`, value);
+    }
+  }, []);
+
+  // Import a theme from a JSON file
+  const handleImportTheme = useCallback(async () => {
+    try {
+      const filePath = await open({
+        filters: [{ name: "Theme", extensions: ["json"] }],
+        multiple: false,
+        directory: false,
+      });
+      if (!filePath) return;
+
+      const content = await readTextFile(filePath as string);
+      const themeData = JSON.parse(content) as ThemeFile;
+
+      if (!themeData.tokens || !themeData.name) {
+        return;
+      }
+
+      setCustomTheme(themeData.name, themeData.tokens);
+      applyThemeTokens(themeData.tokens as unknown as Record<string, string>);
+    } catch {
+      // Failed to import theme
+    }
+  }, [setCustomTheme, applyThemeTokens
+      const content = await readTextFile(filePath);
+      const themeData = JSON.parse(content) as ThemeFile;
+
+      if (!themeData.tokens || !themeData.name) {
+        return;
+      }
+
+      setCustomTheme(themeData.name, themeData.tokens);
+      applyThemeTokens(themeData.tokens);
+    } catch {
+      // Failed to import theme
+    }
+  }, [setCustomTheme, applyThemeTokens]);
+
+  // Apply a built-in theme
+  const handleSelectBuiltInTheme = useCallback((theme: ThemeFile) => {
+    setCustomTheme(theme.name, theme.tokens);
+    applyThemeTokens(theme.tokens);
+
+    if (theme.variant === "light") {
+      setAppTheme(ThemeVariant.Light);
+    } else {
+      setAppTheme(ThemeVariant.Dark);
+    }
+  }, [setCustomTheme, applyThemeTokens, setAppTheme]);
+
   // Persist a setting change
   const updateSetting = useCallback(
-    <K extends keyof SettingsData>(section: K, key: keyof SettingsData[K], value: SettingsData[K][keyof SettingsData[K]]) => {
-      setSettings((prev) => {
-        const next = {
-          ...prev,
-          [section]: { ...prev[section], [key]: value },
-        };
-        // Fire and forget save
-        invoke("settings_update", { settings: next }).catch(() => {});
-        return next;
-      });
+    <C extends keyof SettingsData>(cat: C, key: keyof SettingsData[C], val: SettingsData[C][keyof SettingsData[C]]) => {
+      setSettings((prev) => ({
+        ...prev,
+        [cat]: { ...prev[cat], [key]: val },
+      }));
+      invoke("settings_set", { category: cat, key, value: val }).catch(() => {});
     },
     []
   );
@@ -218,17 +305,11 @@ export default function SettingsPanel() {
                 onChange={(v) => updateSetting("general", "defaultProfile", v)}
               />
             </SettingRow>
-            <SettingRow label={t("settings.language")}>
+            <SettingRow label={t("settings.language")} description={t("settings.languageDescription")}>
               <SelectInput
                 value={settings.general.language}
                 options={[
                   { value: "en", label: "English" },
-                  { value: "zh", label: "中文" },
-                  { value: "ja", label: "日本語" },
-                  { value: "ko", label: "한국어" },
-                  { value: "es", label: "Español" },
-                  { value: "de", label: "Deutsch" },
-                  { value: "fr", label: "Français" },
                 ]}
                 onChange={(v) => updateSetting("general", "language", v)}
               />
@@ -245,26 +326,56 @@ export default function SettingsPanel() {
                   { value: ThemeVariant.Dark, icon: <Moon size={14} />, label: "Dark" },
                   { value: ThemeVariant.Light, icon: <Sun size={14} />, label: "Light" },
                   { value: ThemeVariant.System, icon: <Monitor size={14} />, label: "System" },
-                ].map((t) => (
+                ].map((themeOpt) => (
                   <button
-                    key={t.value}
+                    key={themeOpt.value}
                     onClick={() => {
-                      setAppTheme(t.value);
-                      updateSetting("appearance", "theme", t.value);
+                      setAppTheme(themeOpt.value);
+                      setCustomTheme(null, null);
+                      updateSetting("appearance", "theme", themeOpt.value);
                     }}
                     className={clsx(
                       "flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs",
                       "transition-colors duration-[var(--duration-short)]",
-                      appTheme === t.value
+                      appTheme === themeOpt.value && !customThemeName
                         ? "border-border-focus bg-interactive-default/10 text-text-primary"
                         : "border-border-default hover:bg-surface-secondary text-text-secondary"
                     )}
                   >
-                    {t.icon}
-                    {t.label}
-                    {appTheme === t.value && <Check size={12} className="text-accent-primary" />}
+                    {themeOpt.icon}
+                    {themeOpt.label}
+                    {appTheme === themeOpt.value && !customThemeName && <Check size={12} className="text-accent-primary" />}
                   </button>
                 ))}
+              </div>
+            </SettingRow>
+            <SettingRow label={t("themeImport.customTheme")} description={t("settings.themeDescription")}>
+              <div className="flex flex-col gap-2">
+                <div className="grid grid-cols-2 gap-1.5">
+                  {BUILT_IN_THEMES.map((bt) => (
+                    <button
+                      key={bt.name}
+                      onClick={() => handleSelectBuiltInTheme(bt)}
+                      className={clsx(
+                        "px-2.5 py-1.5 rounded-lg border text-xs text-left",
+                        "transition-colors duration-[var(--duration-short)]",
+                        customThemeName === bt.name
+                          ? "border-border-focus bg-interactive-default/10 text-text-primary"
+                          : "border-border-default hover:bg-surface-secondary text-text-secondary"
+                      )}
+                    >
+                      {bt.name}
+                      {customThemeName === bt.name && <Check size={10} className="inline ml-1 text-accent-primary" />}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={handleImportTheme}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-border-default hover:bg-surface-secondary text-text-secondary transition-colors"
+                >
+                  <Upload size={13} />
+                  {t("themeImport.importTheme")}
+                </button>
               </div>
             </SettingRow>
             <SettingRow label={t("settings.fontSize")} description={t("settings.fontSizeDescription")}>
@@ -303,31 +414,39 @@ export default function SettingsPanel() {
             </SettingRow>
             <SettingRow label={t("settings.cursorStyle")}>
               <SelectInput
-                value={settings.terminal.cursorStyle}
+                value={storeCursorStyle}
                 options={[
-                  { value: "block", label: "Block" },
-                  { value: "underline", label: "Underline" },
-                  { value: "bar", label: "Bar" },
+                  { value: "block", label: t("cursorStyles.block") },
+                  { value: "underline", label: t("cursorStyles.underline") },
+                  { value: "bar", label: t("cursorStyles.bar") },
                 ]}
-                onChange={(v) => updateSetting("terminal", "cursorStyle", v as "block" | "underline" | "bar")}
+                onChange={(v) => {
+                  setCursorStyle(v as "block" | "underline" | "bar");
+                  updateSetting("terminal", "cursorStyle", v as "block" | "underline" | "bar");
+                }}
               />
             </SettingRow>
             <SettingRow label={t("settings.cursorBlink")}>
               <Toggle
-                value={settings.terminal.cursorBlink}
-                onChange={(v) => updateSetting("terminal", "cursorBlink", v)}
+                value={storeCursorBlink}
+                onChange={(v) => {
+                  setCursorBlink(v);
+                  updateSetting("terminal", "cursorBlink", v);
+                }}
               />
             </SettingRow>
             <SettingRow label={t("settings.bellMode")} description={t("settings.bellDescription")}>
               <SelectInput
-                value={settings.terminal.bellMode}
+                value={bellStyle}
                 options={[
-                  { value: "none", label: "None" },
-                  { value: "visual", label: "Visual" },
-                  { value: "sound", label: "Sound" },
-                  { value: "both", label: "Both" },
+                  { value: "none", label: t("bellStyles.none") },
+                  { value: "visual", label: t("bellStyles.visual") },
+                  { value: "audio", label: t("bellStyles.audio") },
                 ]}
-                onChange={(v) => updateSetting("terminal", "bellMode", v as "none" | "visual" | "sound" | "both")}
+                onChange={(v) => {
+                  setBellStyle(v as "none" | "visual" | "audio");
+                  updateSetting("terminal", "bellMode", v as "none" | "visual" | "sound" | "both");
+                }}
               />
             </SettingRow>
           </div>

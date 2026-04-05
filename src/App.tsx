@@ -17,11 +17,13 @@ import {
   Monitor,
   Globe,
   FolderTree,
+  FolderOpen,
   SplitSquareHorizontal,
   SplitSquareVertical,
   Pencil,
   Copy,
   MoreVertical,
+  Radio,
 } from "lucide-react";
 import { useAppStore } from "@/stores/appStore";
 import { useSessionStore } from "@/stores/sessionStore";
@@ -29,6 +31,7 @@ import { useTerminalStore } from "@/stores/terminalStore";
 import { useVaultStore } from "@/stores/vaultStore";
 import { SidebarMode, BottomPanelMode, ThemeVariant, ConnectionStatus, SessionType, SplitDirection } from "@/types";
 import type { Session } from "@/types";
+import { useBreakpoint } from "@/hooks/useBreakpoint";
 import TerminalTab from "@/components/Terminal/TerminalTab";
 import SshTerminalTab from "@/components/Terminal/SshTerminalTab";
 import SplitPaneContainer from "@/components/Terminal/SplitPaneContainer";
@@ -264,6 +267,7 @@ function NewTabDropdown({
   readonly onClose: () => void;
   readonly anchorRef: React.RefObject<HTMLButtonElement | null>;
 }) {
+  const { t } = useTranslation();
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -294,21 +298,21 @@ function NewTabDropdown({
         className="flex items-center gap-2.5 w-full px-3 py-1.5 text-xs text-left text-text-secondary hover:bg-surface-secondary hover:text-text-primary transition-colors"
       >
         <Terminal size={13} className="shrink-0" />
-        New Local Shell
+        {t("newTabMenu.localShell")}
       </button>
       <button
         onClick={() => { onNewSSH(); onClose(); }}
         className="flex items-center gap-2.5 w-full px-3 py-1.5 text-xs text-left text-text-secondary hover:bg-surface-secondary hover:text-text-primary transition-colors"
       >
         <Globe size={13} className="shrink-0" />
-        New SSH Session
+        {t("newTabMenu.ssh")}
       </button>
       <button
         onClick={() => { onNewSFTP(); onClose(); }}
         className="flex items-center gap-2.5 w-full px-3 py-1.5 text-xs text-left text-text-secondary hover:bg-surface-secondary hover:text-text-primary transition-colors"
       >
         <FolderTree size={13} className="shrink-0" />
-        New SFTP Browser
+        {t("newTabMenu.sftp")}
       </button>
     </div>
   );
@@ -328,6 +332,8 @@ function TabBar({
   const activeTabId = useSessionStore((s) => s.activeTabId);
   const setActiveTab = useSessionStore((s) => s.setActiveTab);
   const closeTab = useSessionStore((s) => s.closeTab);
+  const broadcastMode = useTerminalStore((s) => s.broadcastMode);
+  const toggleBroadcastMode = useTerminalStore((s) => s.toggleBroadcastMode);
 
   const [tabContextMenu, setTabContextMenu] = useState<TabContextMenuState | null>(null);
   const [showNewTabDropdown, setShowNewTabDropdown] = useState(false);
@@ -452,6 +458,19 @@ function TabBar({
           />
         )}
       </div>
+      {/* Broadcast toggle */}
+      <button
+        onClick={toggleBroadcastMode}
+        className={clsx(
+          "flex items-center justify-center w-8 h-8 mx-0.5 rounded transition-colors shrink-0",
+          broadcastMode
+            ? "bg-accent-primary/20 text-accent-primary"
+            : "text-text-secondary hover:text-text-primary hover:bg-surface-elevated"
+        )}
+        title={t("broadcast.tooltip")}
+      >
+        <Radio size={14} />
+      </button>
       {tabContextMenu && (
         <TabContextMenu
           state={tabContextMenu}
@@ -462,29 +481,55 @@ function TabBar({
   );
 }
 
-// ─── Region C: Sidebar ─────────────────────────────────────────
+// ── Region C: Sidebar ──────────────────────────────────────────
 
 const SIDEBAR_MODES = [
-  { mode: SidebarMode.Sessions, icon: Terminal, label: "sidebar.sessions" },
-  { mode: SidebarMode.Snippets, icon: Code2, label: "sidebar.snippets" },
-  { mode: SidebarMode.Tunnels, icon: Lock, label: "sidebar.tunnels" },
-] as const;
+  { mode: SidebarMode.Sessions, icon: FolderOpen, label: "sidebar.sessions" as const },
+  { mode: SidebarMode.Snippets, icon: Code2, label: "sidebar.snippets" as const },
+  { mode: SidebarMode.Tunnels, icon: Lock, label: "sidebar.tunnels" as const },
+];
 
 function Sidebar() {
   const { t } = useTranslation();
   const sidebarMode = useAppStore((s) => s.sidebarMode);
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
-  const setSidebarMode = useAppStore((s) => s.setSidebarMode);
+  const setSidebarCollapsed = useAppStore((s) => s.setSidebarCollapsed);
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
   const sessions = useSessionStore((s) => s.sessions);
   const favorites = useSessionStore((s) => s.favorites);
   const openTab = useSessionStore((s) => s.openTab);
+  const breakpoint = useBreakpoint();
+
+  // Auto-collapse on smaller breakpoints
+  useEffect(() => {
+    if (breakpoint === "compact") {
+      setSidebarCollapsed(true);
+    }
+  }, [breakpoint, setSidebarCollapsed]);
+
+  // Hide sidebar entirely on compact
+  if (breakpoint === "compact") return null;
 
   return (
     <nav
       className={clsx(
         "flex shrink-0 h-full border-r border-border-subtle bg-surface-secondary transition-all",
-        sidebarCollapsed ? "w-12" : "w-60"
+        sidebarCollapsed ? "w-12" : breakpoint === "large" ? "w-7
+    if (breakpoint === "compact" || breakpoint === "medium") {
+      setSidebarCollapsed(true);
+    }
+  }, [breakpoint, setSidebarCollapsed]);
+
+  // Hide sidebar entirely on compact
+  if (breakpoint === "compact") {
+    return null;
+  }
+
+  return (
+    <nav
+      className={clsx(
+        "flex shrink-0 h-full border-r border-border-subtle bg-surface-secondary transition-all",
+        sidebarCollapsed ? "w-12" : breakpoint === "large" ? "w-72" : "w-60"
       )}
       style={{ transitionDuration: "var(--duration-medium)", transitionTimingFunction: "var(--ease-default)" }}
     >

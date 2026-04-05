@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import clsx from "clsx";
 import {
   Plus,
@@ -367,6 +368,7 @@ function CredentialForm({
 // ── Main Component ──
 
 export default function CredentialManager() {
+  const { t } = useTranslation();
   const credentials = useVaultStore((s) => s.credentials);
   const deleteCredential = useVaultStore((s) => s.deleteCredential);
   const loading = useVaultStore((s) => s.loading);
@@ -407,8 +409,14 @@ export default function CredentialManager() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border-subtle shrink-0">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-border-subtle shrink-0">
         <h2 className="text-sm font-semibold text-text-primary">Credentials</h2>
+        {credentials.length > 0 && (
+          <span className="text-[10px] text-text-disabled">
+            {t("counts.credentials", { count: credentials.length })}
+          </span>
+        )}
+        <div className="flex-1" />
         <button
           onClick={() => {
             setEditingCredential(null);

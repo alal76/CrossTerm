@@ -245,6 +245,12 @@ export interface ThemeFile {
   tokens: ThemeTokens;
 }
 
+// --- Settings Types ---
+
+export type BellStyle = "visual" | "audio" | "none";
+export type CursorStyle = "block" | "underline" | "bar";
+export type Breakpoint = "compact" | "medium" | "expanded" | "large";
+
 // --- Terminal Instance ---
 
 export interface TerminalInstance {

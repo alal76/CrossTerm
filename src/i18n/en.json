@@ -238,5 +238,50 @@
     "recent": "Recent",
     "ungrouped": "Ungrouped",
     "clearTags": "Clear"
+  },
+  "counts": {
+    "sessions_one": "{{count}} session",
+    "sessions_other": "{{count}} sessions",
+    "credentials_one": "{{count}} credential",
+    "credentials_other": "{{count}} credentials",
+    "items_one": "{{count}} item",
+    "items_other": "{{count}} items",
+    "files_one": "{{count}} file",
+    "files_other": "{{count}} files",
+    "folders_one": "{{count}} folder",
+    "folders_other": "{{count}} folders"
+  },
+  "sftp": {
+    "dropFilesHere": "Drop files here to upload",
+    "dragToMove": "Drag to move",
+    "uploading": "Uploading…"
+  },
+  "broadcast": {
+    "label": "Broadcast",
+    "tooltip": "Send input to all panes",
+    "active": "Broadcasting to all panes"
+  },
+  "themeImport": {
+    "importTheme": "Import Theme",
+    "importSuccess": "Theme imported successfully",
+    "importError": "Failed to import theme",
+    "selectFile": "Select Theme File",
+    "customTheme": "Custom Theme"
+  },
+  "bellStyles": {
+    "none": "None",
+    "visual": "Visual",
+    "audio": "Audio"
+  },
+  "cursorStyles": {
+    "block": "Block",
+    "underline": "Underline",
+    "bar": "Bar"
+  },
+  "panes": {
+    "focusLeft": "Focus Left Pane",
+    "focusRight": "Focus Right Pane",
+    "focusUp": "Focus Up Pane",
+    "focusDown": "Focus Down Pane"
   }
 }

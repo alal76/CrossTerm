@@ -1176,7 +1176,96 @@ On desktop platforms, install a shell integration script (similar to iTerm2 shel
 
 ---
 
-## 20. Delivery Phases
+## 20. Help System
+
+CrossTerm must include a comprehensive, multi-layered help system that allows users of all levels to discover features, learn workflows, and resolve issues without leaving the application.
+
+### 20.1 In-App Help Viewer
+
+| Aspect                   | Specification                                                                                    |
+|--------------------------|--------------------------------------------------------------------------------------------------|
+| Help panel               | A dedicated "Help" panel accessible via `F1` (all platforms) or `Cmd+?` (macOS) / `Ctrl+?` (Windows/Linux). Opens as a sidebar overlay or a separate tab (user preference in Settings). |
+| Content format           | Markdown rendered in-app with full formatting support (headings, code blocks, tables, images, internal links). Stored as `.md` files bundled with the application. |
+| Search                   | Full-text search across all help content with result ranking and snippet previews. Search field is always visible at the top of the help panel. Results highlight matching terms. |
+| Deep linking             | Every help article has a stable URI (e.g., `crossterm://help/ssh/port-forwarding`). Context menus and dialogs can link directly to the relevant help article. |
+| Offline availability     | All help content is bundled with the application and works fully offline. No external fetch required for core documentation. |
+
+### 20.2 Contextual Help
+
+| Aspect                   | Specification                                                                                    |
+|--------------------------|--------------------------------------------------------------------------------------------------|
+| Tooltip help             | Every non-trivial UI element has a tooltip. Tooltips show a brief description and, where applicable, the keyboard shortcut. Delay: 500 ms hover before display. |
+| Field-level help         | Every form field in the session editor, settings panel, and credential vault has an `(?)` help icon. Clicking it opens a popover with: a description of the field, valid values/ranges, and a "Learn more" link to the relevant help article. |
+| Context-sensitive `F1`   | Pressing `F1` with focus on any UI element opens the help panel scrolled to the most relevant article. Mapping is declared per-component. |
+| Error help links         | Every error toast and inline validation message includes a "Learn more" link to a troubleshooting article specific to that error code or condition. |
+
+### 20.3 Onboarding & Feature Discovery
+
+| Aspect                   | Specification                                                                                    |
+|--------------------------|--------------------------------------------------------------------------------------------------|
+| First-run wizard         | As specified in §10.10.1. Each wizard step includes a "Learn more" expandable section. |
+| Feature tours            | Interactive guided tours for major features (SSH connection, SFTP browsing, vault setup, port forwarding, cloud integration). Tours use a spotlight overlay that highlights the relevant UI element with a step-by-step popover. Tours are triggerable from Help menu → "Guided Tours" and suggested contextually on first use of a feature. |
+| "What's New" panel       | After application updates, show a dismissable "What's New" panel listing new features, improvements, and fixes with links to relevant help articles. Accessible later from Help → "What's New". |
+| Tip of the Day           | An optional (opt-out in Settings) startup tip showing a productivity shortcut or lesser-known feature. Each tip links to its help article. Tips cycle without repeating until all are shown. |
+
+### 20.4 Keyboard Shortcut Reference
+
+| Aspect                   | Specification                                                                                    |
+|--------------------------|--------------------------------------------------------------------------------------------------|
+| Shortcut overlay         | `Cmd+/` (macOS) / `Ctrl+/` (Windows/Linux) opens a full-screen shortcut reference overlay, categorised by context: General, Terminal, Tabs, Sidebar, SFTP, Cloud, Navigation. |
+| Shortcut search          | The overlay includes a search field to filter shortcuts by action name or key combination. |
+| Printable reference      | A "Print / Export PDF" button generates a formatted keyboard shortcut cheat sheet. |
+| Shortcut customization   | The overlay links to Settings → Keybindings for remapping. When a shortcut is customised, the overlay reflects the user's bindings, not the defaults. |
+| Platform awareness       | Shortcuts automatically display the correct modifier for the current platform (⌘ on macOS, Ctrl on Windows/Linux). |
+
+### 20.5 Integrated Documentation
+
+| Aspect                   | Specification                                                                                    |
+|--------------------------|--------------------------------------------------------------------------------------------------|
+| Help menu structure      | The Help menu (or equivalent on mobile) provides: Getting Started, User Guide, Keyboard Shortcuts, Guided Tours, Connection Troubleshooting, What's New, Check for Updates, Report Issue, About CrossTerm. |
+| User Guide               | A comprehensive, structured guide covering all features. Organised as: Quick Start → Sessions → Terminal → File Transfer → Remote Desktop → Cloud → Security → Customisation → Automation → Troubleshooting. |
+| Connection troubleshooting | A dedicated troubleshooting section with decision-tree style guidance for common connection issues: SSH authentication failures, host key warnings, timeout errors, firewall issues, jump host chains, certificate problems. Each issue has symptoms, causes, and step-by-step resolution. |
+| Protocol reference       | Per-protocol reference pages (SSH, RDP, VNC, Telnet, Serial) documenting: supported versions, cipher suites, protocol options, known limitations, and performance tuning tips. |
+| API / Plugin docs        | When the plugin system is active (Phase 3), the help system includes a developer guide for the plugin API with: hook reference, manifest schema, permission model, example plugins, and a "Plugin Cookbook". |
+
+### 20.6 Search & Command Integration
+
+| Aspect                   | Specification                                                                                    |
+|--------------------------|--------------------------------------------------------------------------------------------------|
+| Command palette help     | The command palette (`Cmd+Shift+P`) includes help-related actions: "Help: Search Documentation", "Help: Open Keyboard Shortcuts", "Help: Start Tour", "Help: Report Issue". |
+| Global search            | When using the application search, help articles are included in results (lower priority than sessions/commands) with a "Help" badge. |
+| CLI-style help           | For power users, typing `help <topic>` in the command palette directly searches help content and shows inline previews. |
+
+### 20.7 External Resources
+
+| Aspect                   | Specification                                                                                    |
+|--------------------------|--------------------------------------------------------------------------------------------------|
+| Documentation website    | Help content is also published as a static documentation website (can be generated from the same `.md` source files bundled in-app). Linked from the Help menu under "Online Documentation". |
+| Issue reporting          | Help → "Report Issue" opens a pre-filled form with: application version, OS, active session type, and a description field. On submit, opens the issue tracker (GitHub Issues) in the user's browser with the details pre-populated in the URL. No data is sent without the user explicitly submitting. |
+| Community links          | Help menu includes links to: Discussions (GitHub Discussions or forum), Release Notes page, and the source repository. |
+
+### 20.8 Help Content Authoring
+
+| Aspect                   | Specification                                                                                    |
+|--------------------------|--------------------------------------------------------------------------------------------------|
+| Source format            | All help content authored in Markdown with YAML frontmatter (`title`, `category`, `keywords`, `related`, `platform`). |
+| Content directory        | Help files stored in `docs/help/` in the repository, organised by category subdirectory. |
+| Build integration        | Help files are bundled into the application at build time. A build script validates: no broken internal links, all images referenced exist, frontmatter is valid. |
+| Localisation             | Help content follows the same i18n system as the UI. Base locale is `en`. Translated help files go in `docs/help/{locale}/`. Fallback to `en` if a translated article is missing. |
+| Versioning               | Help content is versioned with the application. The `schema_version` in frontmatter ensures forward compatibility when the help system evolves. |
+
+### 20.9 Platform-Specific Help Adaptations
+
+| Platform    | Adaptations                                                                                      |
+|-------------|--------------------------------------------------------------------------------------------------|
+| Windows     | Help viewer respects Windows high-contrast mode. Shortcut overlay uses Ctrl-based bindings. Help menu appears in the menu bar. |
+| macOS       | Help integrates with macOS Help Book system (searchable from the system Help menu). Shortcut overlay uses ⌘-based bindings. |
+| Linux       | Help viewer works identically to Windows. Provides man-page style `--help` output for the CLI launcher. |
+| Android     | Help opens as a full-screen activity. Feature tours use Android-native spotlight overlay. Shortcut reference is hidden unless a hardware keyboard is detected. |
+
+---
+
+## 21. Delivery Phases
 
 ### Phase 1 — Core (MVP)
 
@@ -1212,7 +1301,7 @@ Deliver within the first development cycle:
 
 ---
 
-## 21. Appendix A — File & Directory Structure
+## 22. Appendix A — File & Directory Structure
 
 ```
 crossterm/
@@ -1262,7 +1351,7 @@ crossterm/
 
 ---
 
-## 22. Appendix B — Key Interaction Flows
+## 23. Appendix B — Key Interaction Flows
 
 ### B.1 First Launch
 

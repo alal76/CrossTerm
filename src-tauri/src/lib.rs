@@ -1,5 +1,6 @@
 mod audit;
 mod config;
+mod keygen;
 mod sftp;
 mod ssh;
 mod terminal;
@@ -26,6 +27,7 @@ pub fn run() {
         .manage(terminal::TerminalManager::new())
         .manage(ssh::SshState::new())
         .manage(sftp::SftpState::new())
+        .manage(keygen::KeygenState::new())
         .invoke_handler(tauri::generate_handler![
             // Vault
             vault::vault_create,
@@ -33,6 +35,9 @@ pub fn run() {
             vault::vault_lock,
             vault::vault_is_locked,
             vault::vault_change_password,
+            vault::vault_check_idle,
+            vault::vault_check_orphans,
+            vault::vault_clipboard_copy,
             vault::credential_create,
             vault::credential_list,
             vault::credential_get,
@@ -45,6 +50,8 @@ pub fn run() {
             config::profile_update,
             config::profile_delete,
             config::profile_switch,
+            config::profile_export,
+            config::profile_import,
             config::session_list,
             config::session_create,
             config::session_get,
@@ -53,8 +60,11 @@ pub fn run() {
             config::session_search,
             config::session_duplicate,
             config::session_import_ssh_config,
+            config::session_bulk_connect,
             config::settings_get,
             config::settings_update,
+            config::settings_get_effective,
+            config::config_is_portable_mode,
             // Audit
             audit::audit_log_list,
             audit::audit_log_export_csv,
@@ -89,6 +99,16 @@ pub fn run() {
             sftp::sftp_write_file,
             sftp::sftp_upload,
             sftp::sftp_download,
+            sftp::sftp_scp_upload,
+            sftp::sftp_scp_download,
+            sftp::sftp_upload_throttled,
+            sftp::sftp_download_throttled,
+            // Keygen
+            keygen::keygen_generate,
+            keygen::keygen_list,
+            keygen::keygen_import,
+            keygen::keygen_get_public,
+            keygen::keygen_deploy,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

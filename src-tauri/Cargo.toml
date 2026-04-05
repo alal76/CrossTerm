@@ -38,6 +38,7 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 russh = "0.45"
 russh-keys = "0.45"
 russh-sftp = "2"
+ssh-key = { version = "0.6", features = ["ed25519", "rsa", "p256", "rand_core", "std"] }
 async-trait = "0.1"
 
 # Async runtime
@@ -59,6 +60,9 @@ portable-pty = "0.8"
 anyhow = "1.0"
 thiserror = "1.0"
 dirs = "5"
+
+# Clipboard
+arboard = "3"
 
 [dev-dependencies]
 tempfile = "3"

@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import clsx from "clsx";
+import { formatDate, formatFileSize } from "@/utils/formatters";
 import {
   FolderOpen,
   File,
@@ -58,33 +60,12 @@ interface TransferComplete {
 
 // ── Helpers ──
 
-function formatSize(bytes: number): string {
-  if (bytes === 0) return "—";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1073741824) return `${(bytes / 1048576).toFixed(1)} MB`;
-  return `${(bytes / 1073741824).toFixed(1)} GB`;
+fureturn formatFileSize(bytes);
 }
 
 function formatDate(iso: string | null): string {
   if (!iso) return "—";
-  const d = new Date(iso);
-  return d.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function joinPath(base: string, name: string): string {
-  return base === "/" ? `/${name}` : `${base}/${name}`;
-}
-
-function getFileIcon(entry: SftpFileEntry): React.ReactNode {
-  if (entry.is_dir) return <FolderOpen size={14} className="text-status-connecting" />;
-  const ext = entry.name.split(".").pop()?.toLowerCase();
-  if (ext && ["png", "jpg", "jpeg", "gif", "svg", "webp"].includes(ext))
+  return formatDateUtil(isof (ext && ["png", "jpg", "jpeg", "gif", "svg", "webp"].includes(ext))
     return <FileImage size={14} className="text-accent-primary" />;
   if (ext && ["ts", "tsx", "js", "jsx", "py", "rs", "go", "sh"].includes(ext))
     return <FileCode size={14} className="text-accent-secondary" />;
@@ -293,6 +274,11 @@ function RemotePane({
   onNewFolderChange,
   onNewFolderSubmit,
   onNewFolderCancel,
+  dragOverFolder,
+  onDragStart,
+  onDragOverEntry,
+  onDragLeaveEntry,
+  onDropOnFolder,
 }: {
   readonly files: SftpFileEntry[];
   readonly path: string;
@@ -315,6 +301,11 @@ function RemotePane({
   readonly onNewFolderChange: (val: string) => void;
   readonly onNewFolderSubmit: () => void;
   readonly onNewFolderCancel: () => void;
+  readonly dragOverFolder: string | null;
+  readonly onDragStart: (e: React.DragEvent, entry: SftpFileEntry) => void;
+  readonly onDragOverEntry: (e: React.DragEvent, entry: SftpFileEntry) => void;
+  readonly onDragLeaveEntry: () => void;
+  readonly onDropOnFolder: (e: React.DragEvent, entry: SftpFileEntry) => void;
 }) {
   return (
     <div className="flex-1 flex flex-col border border-border-default rounded-lg overflow-hidden">
@@ -407,11 +398,18 @@ function RemotePane({
               {files.map((entry) => (
                 <tr
                   key={entry.name}
+                  draggable
+                  onDragStart={(e) => onDragStart(e, entry)}
+                  onDragOver={(e) => onDragOverEntry(e, entry)}
+                  onDragLeave={onDragLeaveEntry}
+                  onDrop={(e) => onDropOnFolder(e, entry)}
                   className={clsx(
                     "cursor-pointer transition-colors duration-[var(--duration-micro)]",
-                    selected === entry.name
-                      ? "bg-interactive-default/15"
-                      : "hover:bg-surface-elevated/50"
+                    dragOverFolder === entry.name && entry.is_dir
+                      ? "bg-accent-primary/20 ring-1 ring-accent-primary"
+                      : selected === entry.name
+                        ? "bg-interactive-default/15"
+                        : "hover:bg-surface-elevated/50"
                   )}
                   onClick={() => onSelect(entry.name)}
                   onDoubleClick={() => onDoubleClick(entry)}
@@ -496,6 +494,7 @@ interface SftpBrowserProps {
 }
 
 export default function SftpBrowser({ connectionId }: SftpBrowserProps) {
+  const { t } = useTranslation();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [remotePath, setRemotePath] = useState("/");
   const [remoteFiles, setRemoteFiles] = useState<SftpFileEntry[]>([]);
@@ -514,6 +513,8 @@ export default function SftpBrowser({ connectionId }: SftpBrowserProps) {
   const [renameValue, setRenameValue] = useState("");
   const [newFolderMode, setNewFolderMode] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
+  const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
+  const [isDraggingExternal, setIsDraggingExternal] = useState(false);
 
   const connected = !!sessionId;
 
@@ -721,8 +722,102 @@ export default function SftpBrowser({ connectionId }: SftpBrowserProps) {
     setContextMenu(null);
   }
 
+  // ── Drag-and-Drop: Internal (move files between folders) ──
+
+  function handleDragStart(e: React.DragEvent, entry: SftpFileEntry) {
+    e.dataTransfer.setData("text/x-sftp-entry", entry.name);
+    e.dataTransfer.effectAllowed = "move";
+  }
+
+  function handleDragOverEntry(e: React.DragEvent, entry: SftpFileEntry) {
+    if (!entry.is_dir) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDragOverFolder(entry.name);
+  }
+
+  function handleDragLeaveEntry() {
+    setDragOverFolder(null);
+  }
+
+  async function handleDropOnFolder(e: React.DragEvent, targetFolder: SftpFileEntry) {
+    e.preventDefault();
+    setDragOverFolder(null);
+
+    if (!sessionId || !targetFolder.is_dir) return;
+
+    // Internal file move
+    const entryName = e.dataTransfer.getData("text/x-sftp-entry");
+    if (entryName) {
+      const oldPath = joinPath(remotePath, entryName);
+      const newPath = joinPath(joinPath(remotePath, targetFolder.name), entryName);
+      try {
+        await invoke("sftp_rename", { sessionId, oldPath, newPath });
+        await fetchDirectory();
+      } catch (err) {
+        setError(String(err));
+      }
+    }
+  }
+
+  // ── Drag-and-Drop: External (OS files → upload) ──
+
+  function handleExternalDragOver(e: React.DragEvent) {
+    if (!connected) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    setIsDraggingExternal(true);
+  }
+
+  function handleExternalDragLeave() {
+    setIsDraggingExternal(false);
+  }
+
+  async function handleExternalDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDraggingExternal(false);
+
+    if (!sessionId) return;
+
+    const files = e.dataTransfer.files;
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      // Use invoke to upload — the file path comes from the dataTransfer
+      const localPath = (file as File & { path?: string }).path;
+      if (localPath) {
+        const remoteTarget = joinPath(remotePath, file.name);
+        try {
+          await invoke("sftp_upload", {
+            sessionId,
+            localPath,
+            remotePath: remoteTarget,
+          });
+        } catch (err) {
+          setError(String(err));
+        }
+      }
+    }
+    await fetchDirectory();
+  }
+
   return (
-    <div className="flex flex-col h-full bg-surface-primary">
+    <div
+        className={clsx(
+          "flex flex-col h-full bg-surface-primary transition-colors",
+          isDraggingExternal && "ring-2 ring-accent-primary ring-inset"
+        )}
+        onDragOver={handleExternalDragOver}
+        onDragLeave={handleExternalDragLeave}
+        onDrop={handleExternalDrop}
+      >
+        {isDraggingExternal && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-surface-primary/80 pointer-events-none">
+            <div className="flex flex-col items-center gap-2 text-text-secondary">
+              <Upload size={32} />
+              <span className="text-sm font-medium">{t("sftp.dropFilesHere")}</span>
+            </div>
+          </div>
+        )}
       {/* Toolbar */}
       <div className="flex items-center justify-center gap-2 px-4 py-2 border-b border-border-subtle shrink-0">
         <button
@@ -791,6 +886,11 @@ export default function SftpBrowser({ connectionId }: SftpBrowserProps) {
               setNewFolderMode(false);
               setNewFolderName("");
             }}
+            dragOverFolder={dragOverFolder}
+            onDragStart={handleDragStart}
+            onDragOverEntry={handleDragOverEntry}
+            onDragLeaveEntry={handleDragLeaveEntry}
+            onDropOnFolder={handleDropOnFolder}
           />
         ) : (
           <NotConnectedPane />
