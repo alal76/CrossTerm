@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Instant;
+use tauri::{AppHandle, Emitter, Manager};
+use tokio::sync::watch;
 use thiserror::Error;
 use uuid::Uuid;
 use zeroize::{Zeroize, Zeroizing};
@@ -188,6 +190,8 @@ pub struct Vault {
     inner: Mutex<Option<VaultInner>>,
     /// Rate limiting: (failed_attempts, last_failed_at)
     rate_limit: Mutex<(u32, Option<Instant>)>,
+    /// Sender to cancel the auto-lock background task.
+    auto_lock_cancel: Mutex<Option<watch::Sender<bool>>>,
 }
 
 impl Vault {
@@ -195,6 +199,7 @@ impl Vault {
         Self {
             inner: Mutex::new(None),
             rate_limit: Mutex::new((0, None)),
+            auto_lock_cancel: Mutex::new(None),
         }
     }
 
@@ -417,8 +422,12 @@ impl Vault {
         })
     }
 
-    /// Lock the vault – zeroize the key.
+    /// Lock the vault – zeroize the key and cancel background timer.
     pub fn lock(&self) -> Result<(), VaultError> {
+        // Cancel the auto-lock background task
+        if let Some(tx) = self.auto_lock_cancel.lock().unwrap().take() {
+            let _ = tx.send(true);
+        }
         let mut guard = self.inner.lock().unwrap();
         if let Some(ref mut inner) = *guard {
             inner.encryption_key = None;
@@ -433,6 +442,67 @@ impl Vault {
             None => true,
             Some(inner) => inner.encryption_key.is_none(),
         }
+    }
+
+    /// Start a background tokio task that periodically checks idle timeout
+    /// and auto-locks the vault when it expires. Cancels any previous timer.
+    pub fn start_auto_lock_timer(&self, app_handle: AppHandle) {
+        // Cancel any existing timer
+        if let Some(tx) = self.auto_lock_cancel.lock().unwrap().take() {
+            let _ = tx.send(true);
+        }
+
+        let (cancel_tx, mut cancel_rx) = watch::channel(false);
+        *self.auto_lock_cancel.lock().unwrap() = Some(cancel_tx);
+
+        // Since Vault is managed state (Arc'd by Tauri), we use the AppHandle
+        // to retrieve it inside the spawned task.
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        let vault = app_handle.try_state::<Vault>();
+                        let Some(vault) = vault else { break };
+                        let should_lock = {
+                            let guard = vault.inner.lock().unwrap();
+                            if let Some(ref inner) = *guard {
+                                inner.encryption_key.is_some()
+                                    && inner.last_activity.elapsed().as_secs() > inner.idle_timeout_secs
+                            } else {
+                                false
+                            }
+                        };
+                        if should_lock {
+                            {
+                                let mut guard = vault.inner.lock().unwrap();
+                                if let Some(ref mut inner) = *guard {
+                                    inner.encryption_key = None;
+                                }
+                                *guard = None;
+                            }
+                            if let Some(tx) = vault.auto_lock_cancel.lock().unwrap().take() {
+                                let _ = tx.send(true);
+                            }
+                            let pid = app_handle
+                                .try_state::<crate::config::ConfigState>()
+                                .map(|cs| cs.active_profile_id.read().unwrap().clone().unwrap_or_default())
+                                .unwrap_or_default();
+                            crate::audit::append_event(
+                                &pid,
+                                crate::audit::AuditEventType::VaultAutoLock,
+                                "Vault auto-locked by background timer",
+                            );
+                            let _ = app_handle.emit("vault:auto_locked", ());
+                            break;
+                        }
+                    }
+                    _ = cancel_rx.changed() => {
+                        break;
+                    }
+                }
+            }
+        });
     }
 
     // ── auto-lock check ─────────────────────────────────────────────
@@ -607,12 +677,6 @@ impl Vault {
                     params![name, now.to_rfc3339(), id],
                 )?;
             }
-            if let Some(username) = &req.username {
-                inner.db.execute(
-                    "UPDATE credentials SET username=?1, updated_at=?2 WHERE id=?3",
-                    params![username, now.to_rfc3339(), id],
-                )?;
-            }
             if let Some(tags) = &req.tags {
                 let tags_json = serde_json::to_string(tags)?;
                 inner.db.execute(
@@ -672,6 +736,7 @@ pub fn vault_create(
 
 #[tauri::command]
 pub fn vault_unlock(
+    app_handle: AppHandle,
     state: tauri::State<'_, Vault>,
     config_state: tauri::State<'_, crate::config::ConfigState>,
     profile_id: String,
@@ -681,6 +746,8 @@ pub fn vault_unlock(
     if result.is_ok() {
         let pid = config_state.active_profile_id.read().unwrap().clone().unwrap_or_default();
         crate::audit::append_event(&pid, crate::audit::AuditEventType::VaultUnlock, "Vault unlocked");
+        // Start background auto-lock timer
+        state.start_auto_lock_timer(app_handle);
     }
     result
 }

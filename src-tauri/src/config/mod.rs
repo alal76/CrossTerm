@@ -150,6 +150,9 @@ pub struct SessionDefinition {
     pub auto_reconnect: bool,
     pub keep_alive_interval_seconds: u32,
     pub favorite: bool,
+    /// Optional per-session settings overrides (JSON merge over profile settings).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings_override: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -168,6 +171,7 @@ pub struct SessionCreateRequest {
     pub auto_reconnect: Option<bool>,
     pub keep_alive_interval_seconds: Option<u32>,
     pub favorite: Option<bool>,
+    pub settings_override: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -186,6 +190,7 @@ pub struct SessionUpdateRequest {
     pub auto_reconnect: Option<bool>,
     pub keep_alive_interval_seconds: Option<u32>,
     pub favorite: Option<bool>,
+    pub settings_override: Option<serde_json::Value>,
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────
@@ -399,6 +404,7 @@ fn do_session_create(
         updated_at: now,
         last_connected_at: None,
         auto_reconnect: req.auto_reconnect.unwrap_or(true),
+        settings_override: req.settings_override,
         keep_alive_interval_seconds: req.keep_alive_interval_seconds.unwrap_or(60),
         favorite: req.favorite.unwrap_or(false),
     };
@@ -453,6 +459,7 @@ pub(crate) fn do_session_update(
     if let Some(v) = req.notes { session.notes = Some(v); }
     if let Some(v) = req.auto_reconnect { session.auto_reconnect = v; }
     if let Some(v) = req.keep_alive_interval_seconds { session.keep_alive_interval_seconds = v; }
+    if let Some(v) = req.settings_override { session.settings_override = Some(v); }
     if let Some(v) = req.favorite { session.favorite = v; }
     session.updated_at = Utc::now();
     let json = serde_json::to_string_pretty(&session)?;
@@ -648,6 +655,7 @@ pub fn session_duplicate(
         last_connected_at: None,
         auto_reconnect: source.auto_reconnect,
         keep_alive_interval_seconds: source.keep_alive_interval_seconds,
+        settings_override: source.settings_override,
         favorite: false,
     };
     let json = serde_json::to_string_pretty(&new_session)?;
@@ -804,6 +812,7 @@ pub fn session_import_ssh_config(
                 Some(notes_parts.join("\n"))
             },
             auto_reconnect: None,
+            settings_override: None,
             keep_alive_interval_seconds: None,
             favorite: None,
         };
@@ -966,6 +975,7 @@ pub fn profile_import(
             environment_variables: Some(session.environment_variables),
             notes: session.notes,
             auto_reconnect: Some(session.auto_reconnect),
+            settings_override: session.settings_override,
             keep_alive_interval_seconds: Some(session.keep_alive_interval_seconds),
             favorite: Some(session.favorite),
         };
@@ -1005,14 +1015,27 @@ fn do_settings_get_effective(
             let folder_settings_path = sessions_dir(profile_id).join(format!("{}.settings.json", folder));
             if folder_settings_path.exists() {
                 if let Ok(data) = std::fs::read_to_string(&folder_settings_path) {
-                    if let Ok(folder_settings) = serde_json::from_str::<Settings>(&data) {
-                        effective = folder_settings;
+                    if let Ok(folder_overrides) = serde_json::from_str::<serde_json::Value>(&data) {
+                        let mut base = serde_json::to_value(&effective).unwrap_or_default();
+                        json_merge(&mut base, &folder_overrides);
+                        if let Ok(merged) = serde_json::from_value::<Settings>(base) {
+                            effective = merged;
+                        }
                     }
                 }
             }
         }
 
-        // Session-level overrides from protocol_options
+        // Session-level overrides from settings_override (JSON merge)
+        if let Some(ref overrides) = session.settings_override {
+            let mut base = serde_json::to_value(&effective).unwrap_or_default();
+            json_merge(&mut base, overrides);
+            if let Ok(merged) = serde_json::from_value::<Settings>(base) {
+                effective = merged;
+            }
+        }
+
+        // Legacy: also apply protocol_options overrides for backward compat
         if let Some(ref opts) = session.connection.protocol_options {
             if let Some(font_size) = opts.get("font_size").and_then(|v| v.as_u64()) {
                 effective.font_size = font_size as u32;
@@ -1033,6 +1056,21 @@ fn do_settings_get_effective(
     }
 
     Ok(effective)
+}
+
+/// Recursively merge `overlay` into `base`. For objects, overlay keys replace
+/// base keys; non-object values are overwritten entirely.
+fn json_merge(base: &mut serde_json::Value, overlay: &serde_json::Value) {
+    match (base, overlay) {
+        (serde_json::Value::Object(base_map), serde_json::Value::Object(overlay_map)) => {
+            for (key, value) in overlay_map {
+                json_merge(base_map.entry(key.clone()).or_insert(serde_json::Value::Null), value);
+            }
+        }
+        (base, overlay) => {
+            *base = overlay.clone();
+        }
+    }
 }
 
 #[tauri::command]

@@ -2,10 +2,10 @@
 
 | Field            | Value                     |
 |------------------|---------------------------|
-| Spec Reference   | SPEC-CROSSTERM-001 v1.0   |
+| Spec Reference   | SPEC-CROSSTERM-001 v1.1   |
 | Analysis Date    | 2026-04-05                |
-| Scope            | Phase 1 MVP (§20)         |
-| Overall Coverage | **>72% (recount pending)** |
+| Scope            | Phase 1 MVP (§21)         |
+| Overall Coverage | **~65% (includes §20 Help System gaps)** |
 
 ---
 
@@ -16,11 +16,12 @@
 3. [Gap Register — Rust Backend](#3-gap-register--rust-backend)
 4. [Gap Register — React Frontend](#4-gap-register--react-frontend)
 5. [Gap Register — Integration & Wiring](#5-gap-register--integration--wiring)
-6. [Gap Register — Security](#6-gap-register--security)
-7. [Gap Register — Build, CI/CD & Packaging](#7-gap-register--build-cicd--packaging)
-8. [Remediation Plan — Sprints](#8-remediation-plan--sprints)
-9. [Detailed Testing Requirements](#9-detailed-testing-requirements)
-10. [Appendix A — Full Gap Checklist](#appendix-a--full-gap-checklist)
+6. [Gap Register — Help System](#6-gap-register--help-system)
+7. [Gap Register — Security](#7-gap-register--security)
+8. [Gap Register — Build, CI/CD & Packaging](#8-gap-register--build-cicd--packaging)
+9. [Remediation Plan — Sprints](#9-remediation-plan--sprints)
+10. [Detailed Testing Requirements](#10-detailed-testing-requirements)
+11. [Appendix A — Full Gap Checklist](#appendix-a--full-gap-checklist)
 
 ---
 
@@ -44,14 +45,15 @@ The implementation has progressed significantly from a compilable skeleton to a 
 | Audit Log | ✅ triggered across modules | — | — |
 | First-Launch Wizard | ✅ | — | — |
 | Testing | ✅ 131 tests (82 Rust + 49 Frontend) | Integration, E2E, fuzz | — |
+| Help System | — | — | **Entire §20 (36 gaps)** |
 
-**Bottom line**: the original P1 blocker set is cleared. The remaining gaps are mostly tag filtering, session-status synchronization, advanced accessibility, CI/CD hardening, packaging, and Phase 2 scope.
+**Bottom line**: the original P1 blocker set is cleared. The remaining gaps are mostly tag filtering, session-status synchronization, advanced accessibility, CI/CD hardening, packaging, the new **Help System (§20)** which is entirely unimplemented, and Phase 2 scope.
 
 ---
 
 ## 2. Phase 1 MVP Scope Reminder
 
-Per SPEC-CROSSTERM-001 §20.1, Phase 1 must deliver:
+Per SPEC-CROSSTERM-001 §21.1, Phase 1 must deliver:
 
 1. Local shell terminal
 2. SSH terminal (shell, exec, port forwarding, agent forwarding, jump hosts)
@@ -64,7 +66,7 @@ Per SPEC-CROSSTERM-001 §20.1, Phase 1 must deliver:
 9. Windows + macOS + Linux desktop builds
 10. xterm.js GPU-rendered terminal
 
-Cross-cutting concerns that apply to Phase 1: Security (§12), Audit (§12.4), Accessibility (§10.12), i18n foundation (§10.13), Performance targets (§16), Testing (§17).
+Cross-cutting concerns that apply to Phase 1: Security (§12), Audit (§12.4), Accessibility (§10.12), i18n foundation (§10.13), Performance targets (§16), Testing (§17), Help System foundation (§20).
 
 ---
 
@@ -276,7 +278,94 @@ These gaps represent disconnects between existing frontend components and backen
 
 ---
 
-## 6. Gap Register — Security
+## 6. Gap Register — Help System
+
+Per §20, CrossTerm requires a comprehensive, multi-layered help system. **None of this exists yet.**
+
+### 6.1 In-App Help Viewer (§20.1)
+
+| ID | Gap | Spec § | Severity | Status |
+|----|-----|--------|----------|--------|
+| HELP-01 | No Help panel component — no `F1` / `Cmd+?` trigger, no sidebar overlay or tab mode | §20.1 | P1-HIGH | Missing |
+| HELP-02 | No Markdown renderer for bundled help content (headings, code blocks, tables, images, internal links) | §20.1 | P1-HIGH | Missing |
+| HELP-03 | No full-text search across help content with result ranking and snippet previews | §20.1 | P1-HIGH | Missing |
+| HELP-04 | No deep-linking URI scheme (`crossterm://help/...`) for help articles | §20.1 | P1-MEDIUM | Missing |
+| HELP-05 | No bundled help content files (`docs/help/` directory does not exist) | §20.1 | P1-HIGH | Missing |
+
+### 6.2 Contextual Help (§20.2)
+
+| ID | Gap | Spec § | Severity | Status |
+|----|-----|--------|----------|--------|
+| HELP-06 | Tooltips missing or incomplete on non-trivial UI elements; no 500ms delay standardisation | §20.2 | P1-MEDIUM | Missing |
+| HELP-07 | No `(?)` field-level help icons on form fields in SessionEditor, SettingsPanel, CredentialManager | §20.2 | P1-MEDIUM | Missing |
+| HELP-08 | No context-sensitive F1 — pressing F1 with focus on a UI element does not open relevant article | §20.2 | P1-MEDIUM | Missing |
+| HELP-09 | Error toasts and inline validation messages lack "Learn more" links to troubleshooting articles | §20.2 | P1-MEDIUM | Missing |
+
+### 6.3 Onboarding & Feature Discovery (§20.3)
+
+| ID | Gap | Spec § | Severity | Status |
+|----|-----|--------|----------|--------|
+| HELP-10 | First-run wizard steps lack "Learn more" expandable sections | §20.3 | P1-LOW | Missing |
+| HELP-11 | No interactive feature tours (spotlight overlay + step-by-step popovers) for SSH, SFTP, vault, port forwarding | §20.3 | P1-MEDIUM | Missing |
+| HELP-12 | No "What's New" panel triggered after application updates | §20.3 | P1-MEDIUM | Missing |
+| HELP-13 | No "Tip of the Day" startup tip system (opt-out, cycle without repeating) | §20.3 | P1-LOW | Missing |
+
+### 6.4 Keyboard Shortcut Reference (§20.4)
+
+| ID | Gap | Spec § | Severity | Status |
+|----|-----|--------|----------|--------|
+| HELP-14 | No keyboard shortcut overlay (`Cmd+/` / `Ctrl+/`) with categorised shortcuts | §20.4 | P1-HIGH | Missing |
+| HELP-15 | No shortcut search within the overlay | §20.4 | P1-MEDIUM | Missing |
+| HELP-16 | No "Print / Export PDF" for shortcut cheat sheet | §20.4 | P1-LOW | Missing |
+| HELP-17 | Shortcut overlay does not reflect user-customised bindings | §20.4 | P1-MEDIUM | Missing |
+| HELP-18 | No platform-aware modifier display (⌘ vs Ctrl) | §20.4 | P1-MEDIUM | Missing |
+
+### 6.5 Integrated Documentation (§20.5)
+
+| ID | Gap | Spec § | Severity | Status |
+|----|-----|--------|----------|--------|
+| HELP-19 | No Help menu in the application (Getting Started, User Guide, Keyboard Shortcuts, Guided Tours, Troubleshooting, What's New, Check for Updates, Report Issue, About) | §20.5 | P1-HIGH | Missing |
+| HELP-20 | No comprehensive User Guide authored (Quick Start → Sessions → Terminal → File Transfer → Remote Desktop → Cloud → Security → Customisation → Automation → Troubleshooting) | §20.5 | P1-HIGH | Missing |
+| HELP-21 | No connection troubleshooting decision-tree content (SSH auth failures, host key warnings, timeouts, firewall, jump hosts, certificates) | §20.5 | P1-MEDIUM | Missing |
+| HELP-22 | No per-protocol reference pages (SSH, RDP, VNC, Telnet, Serial) | §20.5 | P2 | Missing |
+| HELP-23 | No plugin API developer guide (Phase 3 prerequisite, but authoring framework needed now) | §20.5 | P2 | Missing |
+
+### 6.6 Search & Command Integration (§20.6)
+
+| ID | Gap | Spec § | Severity | Status |
+|----|-----|--------|----------|--------|
+| HELP-24 | Command palette does not include help-related actions ("Help: Search Documentation", "Help: Open Keyboard Shortcuts", "Help: Start Tour", "Help: Report Issue") | §20.6 | P1-MEDIUM | Missing |
+| HELP-25 | Global application search does not include help articles in results | §20.6 | P1-LOW | Missing |
+| HELP-26 | No CLI-style `help <topic>` in command palette | §20.6 | P1-LOW | Missing |
+
+### 6.7 External Resources (§20.7)
+
+| ID | Gap | Spec § | Severity | Status |
+|----|-----|--------|----------|--------|
+| HELP-27 | No "Report Issue" flow with pre-filled form (version, OS, session type, description → GitHub Issues URL) | §20.7 | P1-MEDIUM | Missing |
+| HELP-28 | No community links in Help menu (Discussions, Release Notes, source repository) | §20.7 | P1-LOW | Missing |
+| HELP-29 | No static documentation website generation from bundled `.md` source | §20.7 | P2 | Missing |
+
+### 6.8 Help Content Authoring & Build (§20.8)
+
+| ID | Gap | Spec § | Severity | Status |
+|----|-----|--------|----------|--------|
+| HELP-30 | No `docs/help/` content directory with Markdown + YAML frontmatter articles | §20.8 | P1-HIGH | Missing |
+| HELP-31 | No build script to bundle help files, validate internal links, verify image references, check frontmatter | §20.8 | P1-MEDIUM | Missing |
+| HELP-32 | No localisation path for help content (`docs/help/{locale}/`) with en fallback | §20.8 | P1-LOW | Missing |
+| HELP-33 | No `schema_version` in help content frontmatter for forward compatibility | §20.8 | P1-LOW | Missing |
+
+### 6.9 Platform-Specific Help Adaptations (§20.9)
+
+| ID | Gap | Spec § | Severity | Status |
+|----|-----|--------|----------|--------|
+| HELP-34 | No macOS Help Book integration (system Help menu search) | §20.9 | P1-LOW | Missing |
+| HELP-35 | No Linux man-page style `--help` output for CLI launcher | §20.9 | P1-LOW | Missing |
+| HELP-36 | Help viewer does not respect Windows high-contrast mode | §20.9 | P1-LOW | Missing |
+
+---
+
+## 7. Gap Register — Security
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
@@ -292,7 +381,7 @@ These gaps represent disconnects between existing frontend components and backen
 
 ---
 
-## 7. Gap Register — Build, CI/CD & Packaging
+## 8. Gap Register — Build, CI/CD & Packaging
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
@@ -306,7 +395,7 @@ These gaps represent disconnects between existing frontend components and backen
 
 ---
 
-## 8. Remediation Plan — Sprints
+## 9. Remediation Plan — Sprints
 
 ### Sprint 1: Foundation Wiring (Critical Blockers)
 
@@ -430,9 +519,34 @@ These gaps represent disconnects between existing frontend components and backen
 | Fix terminal reader thread cleanup | BE-TERM-02 | S |
 | Portable mode detection | BE-CFG-06 | S |
 
-### Sprint 7: Testing
+### Sprint 7: Help System Foundation
 
-**Goal**: Achieve spec-mandated test coverage. See §9 below for full details.
+**Goal**: Deliver the help system infrastructure and initial content for Phase 1 MVP.
+
+| Task | Gaps Addressed | Effort |
+|------|---------------|--------|
+| Create `docs/help/` directory structure with YAML frontmatter schema | HELP-05, HELP-30 | S |
+| Build `<HelpPanel>` component — Markdown renderer, sidebar overlay/tab mode, F1/Cmd+? trigger | HELP-01, HELP-02 | L |
+| Implement full-text search across help content with snippet previews | HELP-03 | M |
+| Deep-linking URI scheme (`crossterm://help/...`) | HELP-04 | S |
+| Add `(?)` field-level help icons to SessionEditor, SettingsPanel, CredentialManager | HELP-07 | M |
+| Context-sensitive F1 — per-component article mapping | HELP-08 | M |
+| Add "Learn more" links to error toasts and validation messages | HELP-09 | S |
+| Keyboard shortcut overlay (`Cmd+/` / `Ctrl+/`) with categories and search | HELP-14, HELP-15, HELP-18 | L |
+| Help menu integration (Getting Started, User Guide, Shortcuts, Tours, Troubleshooting, Report Issue, About) | HELP-19 | M |
+| Add help-related actions to Command Palette | HELP-24 | S |
+| "Report Issue" flow — pre-filled form → GitHub Issues URL | HELP-27 | S |
+| Build script: bundle help files, validate links/images/frontmatter | HELP-31 | M |
+| Author initial help content: Quick Start, SSH guide, SFTP guide, Vault guide, Connection Troubleshooting | HELP-05, HELP-20, HELP-21 | L |
+| Tooltip standardisation (500ms delay, shortcut display) on all non-trivial UI elements | HELP-06 | M |
+| "What's New" panel with dismissable overlay, persisted version tracking | HELP-12 | M |
+| Interactive feature tours (spotlight overlay + step-by-step popovers) for SSH, SFTP, Vault | HELP-11 | L |
+| First-run wizard "Learn more" expandable sections | HELP-10 | S |
+| Community links in Help menu | HELP-28 | S |
+
+### Sprint 8: Testing
+
+**Goal**: Achieve spec-mandated test coverage. See §10 below for full details.
 
 | Task | Gaps Addressed | Effort |
 |------|---------------|--------|
@@ -447,18 +561,19 @@ These gaps represent disconnects between existing frontend components and backen
 | E2E tests (Playwright / WebdriverIO) | §17.3 | XL |
 | Credential vault fuzz testing (`cargo fuzz`) | §17.4 | M |
 | Performance benchmarks (§16 targets) | §16 | M |
+| Help system component tests (HelpPanel, shortcut overlay, tours) | §17, §20 | M |
 
 ---
 
-## 9. Detailed Testing Requirements
+## 10. Detailed Testing Requirements
 
-### 9.1 Rust Unit Tests
+### 10.1 Rust Unit Tests
 
 **Coverage target**: ≥ 80% line coverage on all backend modules.
 
 **Framework**: `#[cfg(test)]` + `cargo test`, with `cargo-tarpaulin` for coverage reporting.
 
-#### 9.1.1 Vault Module Tests (`src-tauri/src/vault/`)
+#### 10.1.1 Vault Module Tests (`src-tauri/src/vault/`)
 
 | Test ID | Test Name | Description | Priority |
 |---------|-----------|-------------|----------|
@@ -483,7 +598,7 @@ These gaps represent disconnects between existing frontend components and backen
 | UT-V-19 | `test_concurrent_access` | Spawn 10 tokio tasks accessing credentials simultaneously. Assert no panics or data corruption. | P1 |
 | UT-V-20 | `test_empty_vault_operations` | Perform list/get/update/delete on an empty vault. Assert correct empty results and errors. | P0 |
 
-#### 9.1.2 Config Module Tests (`src-tauri/src/config/`)
+#### 10.1.2 Config Module Tests (`src-tauri/src/config/`)
 
 | Test ID | Test Name | Description | Priority |
 |---------|-----------|-------------|----------|
@@ -503,7 +618,7 @@ These gaps represent disconnects between existing frontend components and backen
 | UT-C-14 | `test_profile_data_isolation` | Create sessions under profile A. Switch to profile B. List sessions. Assert empty (profile isolation). | P0 |
 | UT-C-15 | `test_session_import_ssh_config` | Provide a sample `~/.ssh/config` file. Import sessions. Verify correct host/port/user/key mapping. | P1 |
 
-#### 9.1.3 Audit Module Tests (`src-tauri/src/audit/`)
+#### 10.1.3 Audit Module Tests (`src-tauri/src/audit/`)
 
 | Test ID | Test Name | Description | Priority |
 |---------|-----------|-------------|----------|
@@ -514,7 +629,7 @@ These gaps represent disconnects between existing frontend components and backen
 | UT-A-05 | `test_empty_audit_log` | List events with no log file. Assert empty result (no error). | P0 |
 | UT-A-06 | `test_concurrent_append` | Spawn 10 tasks appending events simultaneously. List all. Verify count = 10, no corruption. | P1 |
 
-#### 9.1.4 Terminal Module Tests (`src-tauri/src/terminal/`)
+#### 10.1.4 Terminal Module Tests (`src-tauri/src/terminal/`)
 
 | Test ID | Test Name | Description | Priority |
 |---------|-----------|-------------|----------|
@@ -528,7 +643,7 @@ These gaps represent disconnects between existing frontend components and backen
 | UT-T-08 | `test_custom_cwd` | Create terminal with `cwd=/tmp`. Write `pwd\n`. Assert "/tmp" in output. | P1 |
 | UT-T-09 | `test_terminal_exit_event` | Create terminal, write `exit\n`. Assert `terminal:exit` event is emitted. | P0 |
 
-#### 9.1.5 SSH Module Tests (`src-tauri/src/ssh/`)
+#### 10.1.5 SSH Module Tests (`src-tauri/src/ssh/`)
 
 **Note**: SSH tests require either a mock SSH server or Docker-based test fixtures (see §9.3).
 
@@ -553,7 +668,7 @@ These gaps represent disconnects between existing frontend components and backen
 | UT-S-17 | `test_ssh_concurrent_connections` | Open 5 SSH connections simultaneously. Write to each. Verify independent outputs. | P1 |
 | UT-S-18 | `test_ssh_exec_command` | Execute single command (`ls /`) without interactive shell. Verify output and exit code. | P1 |
 
-#### 9.1.6 SFTP Module Tests (`src-tauri/src/sftp/`)
+#### 10.1.6 SFTP Module Tests (`src-tauri/src/sftp/`)
 
 | Test ID | Test Name | Description | Priority |
 |---------|-----------|-------------|----------|
@@ -573,13 +688,13 @@ These gaps represent disconnects between existing frontend components and backen
 | UT-SF-14 | `test_sftp_symlink_follow` | Create a symlink on remote. Stat with follow=true. Verify resolves to target. | P2 |
 | UT-SF-15 | `test_sftp_concurrent_transfers` | Upload 5 files simultaneously. Verify all complete correctly. | P1 |
 
-### 9.2 Frontend Unit Tests
+### 10.2 Frontend Unit Tests
 
 **Framework**: Vitest + React Testing Library + `@testing-library/user-event`.
 
 **Coverage target**: ≥ 70% line coverage on all React components and stores.
 
-#### 9.2.1 Store Tests
+#### 10.2.1 Store Tests
 
 | Test ID | Test Name | Description | Priority |
 |---------|-----------|-------------|----------|
@@ -599,7 +714,7 @@ These gaps represent disconnects between existing frontend components and backen
 | FT-ST-14 | `terminalStore.createTerminal` | Create terminal instance. Verify in store. | P0 |
 | FT-ST-15 | `terminalStore.removeTerminal` | Create then remove. Verify removed from store. | P0 |
 
-#### 9.2.2 Component Tests
+#### 10.2.2 Component Tests
 
 | Test ID | Component | Test Description | Priority |
 |---------|-----------|------------------|----------|
@@ -642,7 +757,7 @@ These gaps represent disconnects between existing frontend components and backen
 | FT-C-37 | `<App>` | Sidebar collapses at window width < 900px. | P0 |
 | FT-C-38 | `<App>` | Theme toggle switches dark/light and applies CSS class. | P0 |
 
-### 9.3 Integration Tests (Docker-Based)
+### 10.3 Integration Tests (Docker-Based)
 
 **Framework**: `cargo test` with `testcontainers-rs` or `docker-compose` fixtures.
 
@@ -651,7 +766,7 @@ These gaps represent disconnects between existing frontend components and backen
 - `atmoz/sftp:latest` — SFTP-only target (alternate)
 - Container with known files for SFTP testing
 
-#### 9.3.1 SSH Integration Tests
+#### 10.3.1 SSH Integration Tests
 
 | Test ID | Test Name | Description | Priority |
 |---------|-----------|-------------|----------|
@@ -666,7 +781,7 @@ These gaps represent disconnects between existing frontend components and backen
 | IT-SSH-09 | `test_ssh_reconnect_on_drop` | Connect. Kill SSH container. Detect disconnect. Restart container. Reconnect. Verify. | P2 |
 | IT-SSH-10 | `test_ssh_concurrent_sessions` | Open 10 SSH connections to same container. Run commands in parallel. Verify independent outputs. | P1 |
 
-#### 9.3.2 SFTP Integration Tests
+#### 10.3.2 SFTP Integration Tests
 
 | Test ID | Test Name | Description | Priority |
 |---------|-----------|-------------|----------|
@@ -679,7 +794,7 @@ These gaps represent disconnects between existing frontend components and backen
 | IT-SFTP-07 | `test_sftp_nested_directory_tree` | Create /a/b/c/d hierarchy. List at each level. Remove recursively. | P1 |
 | IT-SFTP-08 | `test_sftp_special_characters` | Upload file with Unicode name. Download. Verify name preserved. | P1 |
 
-#### 9.3.3 Vault Integration Tests
+#### 10.3.3 Vault Integration Tests
 
 | Test ID | Test Name | Description | Priority |
 |---------|-----------|-------------|----------|
@@ -687,7 +802,7 @@ These gaps represent disconnects between existing frontend components and backen
 | IT-V-02 | `test_vault_corrupted_db` | Corrupt SQLite file. Attempt unlock. Verify graceful error (not panic). | P1 |
 | IT-V-03 | `test_vault_concurrent_credential_access` | 20 concurrent tasks reading/writing credentials. Verify no data corruption. | P1 |
 
-### 9.4 End-to-End Tests
+### 10.4 End-to-End Tests
 
 **Framework**: Playwright (via `@playwright/test` against Tauri WebView) or WebdriverIO with `tauri-driver`.
 
@@ -714,7 +829,7 @@ These gaps represent disconnects between existing frontend components and backen
 | E2E-19 | `test_session_import_ssh_config` | Place sample ~/.ssh/config → import → verify sessions created with correct hosts/ports/keys. | P1 |
 | E2E-20 | `test_accessibility_keyboard_only` | Navigate entire app using only Tab, Shift+Tab, Enter, Escape, Arrow keys. Verify all features accessible. | P1 |
 
-### 9.5 Security Tests
+### 10.5 Security Tests
 
 **Framework**: `cargo fuzz` (libFuzzer via `cargo-fuzz`), `cargo audit`, `cargo clippy`, `npm audit`, ESLint.
 
@@ -731,7 +846,7 @@ These gaps represent disconnects between existing frontend components and backen
 | SEC-T-09 | `dependency_sbom` | Generate CycloneDX SBOM for both Rust and npm dependencies. Verify artifact produced. | P1 |
 | SEC-T-10 | `vault_plaintext_leak_check` | After vault operations, scan `/tmp` and profile data directory for plaintext credential fragments. | P1 |
 
-### 9.6 Performance Tests
+### 10.6 Performance Tests
 
 **Framework**: Rust benchmarks (`criterion`), custom timing harness.
 
@@ -745,7 +860,7 @@ These gaps represent disconnects between existing frontend components and backen
 | PERF-06 | Memory baseline (1 tab) | < 120 MB | Launch app with 1 local shell tab. Measure RSS. | P1 |
 | PERF-07 | SFTP throughput | ≥ 90% of raw SCP | Transfer 100 MB file via SFTP and via SCP. Compare throughput. | P2 |
 
-### 9.7 CI Test Infrastructure
+### 10.7 CI Test Infrastructure
 
 ```yaml
 # Required Docker Compose for integration tests

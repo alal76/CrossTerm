@@ -122,6 +122,9 @@ pub struct SshConnectionInfo {
     pub username: String,
     pub connected_at: String,
     pub port_forwards: Vec<PortForward>,
+    pub cipher_algorithm: Option<String>,
+    pub kex_algorithm: Option<String>,
+    pub latency_ms: Option<u64>,
 }
 
 // ── Tauri Event Payloads ────────────────────────────────────────────────
@@ -141,6 +144,9 @@ struct SshDisconnectedEvent {
 #[derive(Clone, Serialize)]
 struct SshConnectedEvent {
     connection_id: String,
+    cipher_algorithm: Option<String>,
+    kex_algorithm: Option<String>,
+    latency_ms: Option<u64>,
 }
 
 #[derive(Clone, Serialize)]
@@ -587,6 +593,9 @@ pub async fn ssh_connect(
     let rows = rows.unwrap_or(24);
     let agent_fwd = agent_forwarding.unwrap_or(false);
 
+    // Start timing for latency measurement
+    let connect_start = std::time::Instant::now();
+
     // Look up session config for keep-alive interval and startup script
     let (keep_alive_secs, startup_script) = {
         let pid = config_state.active_profile_id.read().unwrap().clone().unwrap_or_default();
@@ -644,6 +653,14 @@ pub async fn ssh_connect(
             }
         }
     };
+
+    // Measure connection latency (connect start to auth success)
+    let latency_ms = connect_start.elapsed().as_millis() as u64;
+
+    // Derive cipher/kex from the preferred config used for this connection
+    let config = build_config(keep_alive_secs);
+    let cipher_algorithm = config.preferred.cipher.first().map(|c| format!("{:?}", c));
+    let kex_algorithm = config.preferred.kex.first().map(|k| format!("{:?}", k));
 
     let channel = handle
         .channel_open_session()
@@ -762,6 +779,9 @@ pub async fn ssh_connect(
             username,
             connected_at: chrono::Utc::now().to_rfc3339(),
             port_forwards: Vec::new(),
+            cipher_algorithm: cipher_algorithm.clone(),
+            kex_algorithm: kex_algorithm.clone(),
+            latency_ms: Some(latency_ms),
         },
         handle,
         jump_host_handle,
@@ -793,6 +813,9 @@ pub async fn ssh_connect(
         "ssh:connected",
         SshConnectedEvent {
             connection_id: connection_id.clone(),
+            cipher_algorithm,
+            kex_algorithm,
+            latency_ms: Some(latency_ms),
         },
     );
 
