@@ -29,6 +29,7 @@ interface AppState {
   cursorBlink: boolean;
   customThemeName: string | null;
   customThemeTokens: Partial<ThemeTokens> | null;
+  customShortcuts: Record<string, { keys?: string; macKeys?: string }>;
   windowWidth: number;
   windowHeight: number;
   setSidebarMode: (mode: SidebarMode) => void;
@@ -87,6 +88,7 @@ export const useAppStore = create<AppState>((set) => ({
   cursorBlink: true,
   customThemeName: null,
   customThemeTokens: null,
+  customShortcuts: {},
 
   windowWidth: window.innerWidth,
   windowHeight: window.innerHeight,

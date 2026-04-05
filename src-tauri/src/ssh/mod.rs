@@ -659,8 +659,8 @@ pub async fn ssh_connect(
 
     // Derive cipher/kex from the preferred config used for this connection
     let config = build_config(keep_alive_secs);
-    let cipher_algorithm = config.preferred.cipher.first().map(|c| format!("{:?}", c));
-    let kex_algorithm = config.preferred.kex.first().map(|k| format!("{:?}", k));
+    let cipher_algorithm = config.preferred.cipher.first().map(|c| c.as_ref().to_string());
+    let kex_algorithm = config.preferred.kex.first().map(|k| k.as_ref().to_string());
 
     let channel = handle
         .channel_open_session()
@@ -1204,6 +1204,19 @@ pub async fn ssh_port_forward_remove(
         task.abort();
     }
 
+    // For remote forwards, cancel the server-side forwarding and clean up mapping
+    let removed_forward = conn.info.port_forwards.iter().find(|f| f.id() == forward_id).cloned();
+    if let Some(PortForward::Remote { bind_host, bind_port, .. }) = removed_forward {
+        let _ = conn
+            .handle
+            .cancel_tcpip_forward(&bind_host, bind_port as u32)
+            .await;
+        conn.remote_forwards
+            .lock()
+            .await
+            .remove(&(bind_host, bind_port as u32));
+    }
+
     conn.info.port_forwards.retain(|f| f.id() != forward_id);
 
     Ok(())
@@ -1522,6 +1535,9 @@ mod tests {
             username: "admin".to_string(),
             connected_at: "2024-01-01T00:00:00Z".to_string(),
             port_forwards: vec![],
+            cipher_algorithm: Some("aes256-gcm@openssh.com".to_string()),
+            kex_algorithm: Some("curve25519-sha256".to_string()),
+            latency_ms: Some(42),
         };
         let json = serde_json::to_string(&info).unwrap();
         let deserialized: SshConnectionInfo = serde_json::from_str(&json).unwrap();

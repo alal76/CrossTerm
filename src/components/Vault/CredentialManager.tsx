@@ -18,14 +18,15 @@ import {
 } from "lucide-react";
 import { useVaultStore } from "@/stores/vaultStore";
 import { CredentialType } from "@/types";
+import FieldHelp from "@/components/Help/FieldHelp";
 
 // ── Constants ──
 
 const CREDENTIAL_TYPE_OPTIONS = [
-  { value: CredentialType.Password, label: "Password", icon: <Lock size={14} /> },
-  { value: CredentialType.SSHKey, label: "SSH Key", icon: <FileKey2 size={14} /> },
-  { value: CredentialType.APIToken, label: "API Token", icon: <Key size={14} /> },
-  { value: CredentialType.CloudCredential, label: "Cloud Credential", icon: <Cloud size={14} /> },
+  { value: CredentialType.Password, labelKey: "credentialTypes.password", icon: <Lock size={14} /> },
+  { value: CredentialType.SSHKey, labelKey: "credentialTypes.ssh_key", icon: <FileKey2 size={14} /> },
+  { value: CredentialType.APIToken, labelKey: "credentialTypes.api_token", icon: <Key size={14} /> },
+  { value: CredentialType.CloudCredential, labelKey: "credentialTypes.cloud_credential", icon: <Cloud size={14} /> },
 ];
 
 const TYPE_ICONS: Record<CredentialType, React.ReactNode> = {
@@ -46,6 +47,7 @@ function CredentialForm({
   readonly credential?: { id: string; name: string; credential_type: string; username: string | null } | null;
   readonly onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const addCredential = useVaultStore((s) => s.addCredential);
   const updateCredential = useVaultStore((s) => s.updateCredential);
   const loading = useVaultStore((s) => s.loading);
@@ -75,7 +77,7 @@ function CredentialForm({
 
   async function handleSave() {
     if (!name.trim()) {
-      setError("Name is required");
+      setError(t("credentialForm.nameRequired"));
       return;
     }
     setError(null);
@@ -139,7 +141,7 @@ function CredentialForm({
       >
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-border-subtle shrink-0">
           <h2 className="text-sm font-semibold text-text-primary">
-            {isEdit ? "Edit Credential" : "New Credential"}
+            {isEdit ? t("credentialForm.editTitle") : t("credentialForm.newTitle")}
           </h2>
           <button
             onClick={onClose}
@@ -153,7 +155,10 @@ function CredentialForm({
           {/* Type */}
           {!isEdit && (
             <div>
-              <label className="block text-[11px] text-text-secondary mb-1.5">Type</label>
+              <label className="flex items-center text-[11px] text-text-secondary mb-1.5">
+                {t("credentialForm.typeLabel")}
+                <FieldHelp description={t("fieldHelp.credentialType")} articleSlug="credential-vault" />
+              </label>
               <div className="grid grid-cols-2 gap-1.5">
                 {CREDENTIAL_TYPE_OPTIONS.map((opt) => (
                   <button
@@ -168,7 +173,7 @@ function CredentialForm({
                     )}
                   >
                     {opt.icon}
-                    {opt.label}
+                    {t(opt.labelKey)}
                   </button>
                 ))}
               </div>
@@ -177,12 +182,12 @@ function CredentialForm({
 
           {/* Name */}
           <div>
-            <label className="block text-[11px] text-text-secondary mb-1">Name</label>
+            <label className="block text-[11px] text-text-secondary mb-1">{t("credentialForm.nameLabel")}</label>
             <input
               ref={nameRef}
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="My credential"
+              placeholder={t("credentialForm.namePlaceholder")}
               className={fieldClass}
             />
           </div>
@@ -191,16 +196,16 @@ function CredentialForm({
           {type === CredentialType.Password && (
             <>
               <div>
-                <label className="block text-[11px] text-text-secondary mb-1">Username</label>
+                <label className="block text-[11px] text-text-secondary mb-1">{t("credentialForm.usernameLabel")}</label>
                 <input
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="admin"
+                  placeholder={t("credentialForm.usernamePlaceholder")}
                   className={fieldClass}
                 />
               </div>
               <div>
-                <label className="block text-[11px] text-text-secondary mb-1">Password</label>
+                <label className="block text-[11px] text-text-secondary mb-1">{t("vault.password")}</label>
                 <div className="relative">
                   <input
                     type={showSecret ? "text" : "password"}
@@ -224,18 +229,18 @@ function CredentialForm({
           {type === CredentialType.SSHKey && (
             <>
               <div>
-                <label className="block text-[11px] text-text-secondary mb-1">Private Key</label>
+                <label className="block text-[11px] text-text-secondary mb-1">{t("credentialForm.privateKeyLabel")}</label>
                 <textarea
                   value={privateKey}
                   onChange={(e) => setPrivateKey(e.target.value)}
-                  placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                  placeholder={t("credentialForm.privateKeyPlaceholder")}
                   rows={4}
                   className={clsx(fieldClass, "resize-none font-mono text-[10px]")}
                 />
               </div>
               <div>
                 <label className="block text-[11px] text-text-secondary mb-1">
-                  Passphrase <span className="text-text-disabled">(optional)</span>
+                  {t("credentialForm.passphraseLabel")} <span className="text-text-disabled">({t("credentialForm.optional")})</span>
                 </label>
                 <input
                   type={showSecret ? "text" : "password"}
@@ -250,16 +255,16 @@ function CredentialForm({
           {type === CredentialType.APIToken && (
             <>
               <div>
-                <label className="block text-[11px] text-text-secondary mb-1">Provider</label>
+                <label className="block text-[11px] text-text-secondary mb-1">{t("credentialForm.providerLabel")}</label>
                 <input
                   value={provider}
                   onChange={(e) => setProvider(e.target.value)}
-                  placeholder="GitHub, AWS, etc."
+                  placeholder={t("credentialForm.providerPlaceholder")}
                   className={fieldClass}
                 />
               </div>
               <div>
-                <label className="block text-[11px] text-text-secondary mb-1">Token</label>
+                <label className="block text-[11px] text-text-secondary mb-1">{t("credentialForm.tokenLabel")}</label>
                 <div className="relative">
                   <input
                     type={showSecret ? "text" : "password"}
@@ -283,20 +288,20 @@ function CredentialForm({
           {type === CredentialType.CloudCredential && (
             <>
               <div>
-                <label className="block text-[11px] text-text-secondary mb-1">Cloud Provider</label>
+                <label className="block text-[11px] text-text-secondary mb-1">{t("credentialForm.cloudProviderLabel")}</label>
                 <select
                   value={provider}
                   onChange={(e) => setProvider(e.target.value)}
                   className={fieldClass}
                 >
-                  <option value="">Select…</option>
+                  <option value="">{t("credentialForm.selectProvider")}</option>
                   <option value="aws">AWS</option>
                   <option value="azure">Azure</option>
                   <option value="gcp">GCP</option>
                 </select>
               </div>
               <div>
-                <label className="block text-[11px] text-text-secondary mb-1">Access Key</label>
+                <label className="block text-[11px] text-text-secondary mb-1">{t("credentialForm.accessKeyLabel")}</label>
                 <input
                   value={accessKey}
                   onChange={(e) => setAccessKey(e.target.value)}
@@ -304,7 +309,7 @@ function CredentialForm({
                 />
               </div>
               <div>
-                <label className="block text-[11px] text-text-secondary mb-1">Secret Key</label>
+                <label className="block text-[11px] text-text-secondary mb-1">{t("credentialForm.secretKeyLabel")}</label>
                 <div className="relative">
                   <input
                     type={showSecret ? "text" : "password"}
@@ -324,12 +329,12 @@ function CredentialForm({
               </div>
               <div>
                 <label className="block text-[11px] text-text-secondary mb-1">
-                  Region <span className="text-text-disabled">(optional)</span>
+                  {t("credentialForm.regionLabel")} <span className="text-text-disabled">({t("credentialForm.optional")})</span>
                 </label>
                 <input
                   value={region}
                   onChange={(e) => setRegion(e.target.value)}
-                  placeholder="us-east-1"
+                  placeholder={t("credentialForm.regionPlaceholder")}
                   className={fieldClass}
                 />
               </div>
@@ -344,7 +349,7 @@ function CredentialForm({
             onClick={onClose}
             className="px-3 py-1.5 text-xs rounded-lg border border-border-default hover:bg-surface-secondary text-text-secondary hover:text-text-primary transition-colors duration-[var(--duration-short)]"
           >
-            Cancel
+            {t("actions.cancel")}
           </button>
           <button
             onClick={handleSave}
@@ -357,7 +362,7 @@ function CredentialForm({
             )}
           >
             {loading ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-            {isEdit ? "Save" : "Create"}
+            {isEdit ? t("actions.save") : t("actions.create")}
           </button>
         </div>
       </div>
@@ -390,27 +395,27 @@ export default function CredentialManager() {
     if (cred.username) return cred.username;
     switch (cred.credential_type) {
       case CredentialType.Password:
-        return "Password";
+        return t("credentialTypes.password");
       case CredentialType.SSHKey:
-        return "SSH Key";
+        return t("credentialTypes.ssh_key");
       case CredentialType.APIToken:
-        return "API Token";
+        return t("credentialTypes.api_token");
       case CredentialType.CloudCredential:
-        return "Cloud Credential";
+        return t("credentialTypes.cloud_credential");
       case CredentialType.Certificate:
-        return "Certificate";
+        return t("credentialTypes.certificate");
       case CredentialType.TOTPSeed:
-        return "TOTP";
+        return t("credentialTypes.totp_seed");
       default:
         return cred.credential_type;
     }
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full" data-help-article="credential-vault">
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border-subtle shrink-0">
-        <h2 className="text-sm font-semibold text-text-primary">Credentials</h2>
+        <h2 className="text-sm font-semibold text-text-primary">{t("vault.credentials")}</h2>
         {credentials.length > 0 && (
           <span className="text-[10px] text-text-disabled">
             {t("counts.credentials", { count: credentials.length })}
@@ -425,7 +430,7 @@ export default function CredentialManager() {
           className="flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg bg-interactive-default hover:bg-interactive-hover text-text-primary transition-colors duration-[var(--duration-short)]"
         >
           <Plus size={13} />
-          Add
+          {t("vault.add")}
         </button>
       </div>
 
@@ -440,16 +445,16 @@ export default function CredentialManager() {
             <div className="w-14 h-14 rounded-2xl bg-surface-elevated flex items-center justify-center mb-3">
               <Key size={24} className="text-text-disabled" />
             </div>
-            <p className="text-sm text-text-primary mb-1">No credentials</p>
+            <p className="text-sm text-text-primary mb-1">{t("vault.noCredentials")}</p>
             <p className="text-xs text-text-secondary mb-4">
-              Add passwords, SSH keys, or API tokens to your vault.
+              {t("vault.noCredentialsHint")}
             </p>
             <button
               onClick={() => setFormOpen(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-interactive-default hover:bg-interactive-hover text-text-primary transition-colors duration-[var(--duration-short)]"
             >
               <Plus size={13} />
-              Add Credential
+              {t("vault.addCredential")}
             </button>
           </div>
         ) : (
@@ -473,14 +478,14 @@ export default function CredentialManager() {
                       setFormOpen(true);
                     }}
                     className="p-1 rounded hover:bg-surface-secondary text-text-secondary hover:text-text-primary transition-colors duration-[var(--duration-micro)]"
-                    title="Edit"
+                    title={t("sessions.edit")}
                   >
                     <Pencil size={13} />
                   </button>
                   <button
                     onClick={() => deleteCredential(cred.id)}
                     className="p-1 rounded hover:bg-status-disconnected/10 text-text-secondary hover:text-status-disconnected transition-colors duration-[var(--duration-micro)]"
-                    title="Delete"
+                    title={t("sessions.delete")}
                   >
                     <Trash2 size={13} />
                   </button>

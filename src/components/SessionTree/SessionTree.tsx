@@ -356,6 +356,7 @@ export default function SessionTree({
   onNewSession,
   onImport,
 }: SessionTreeProps) {
+  const { t } = useTranslation();
   const sessions = useSessionStore((s) => s.sessions);
   const favorites = useSessionStore((s) => s.favorites);
   const recentSessions = useSessionStore((s) => s.recentSessions);
@@ -432,7 +433,7 @@ export default function SessionTree({
 
   const handleMoveToFolder = useCallback(
     (session: Session) => {
-      const folder = globalThis.prompt("Enter folder path (e.g. Production/AWS):", session.group);
+      const folder = globalThis.prompt(t("sessionTree.promptFolderPath"), session.group);
       if (folder !== null) {
         updateSession(session.id, { group: folder });
         if (folder) addFolder(folder);
@@ -443,7 +444,7 @@ export default function SessionTree({
 
   const handleNewSubfolder = useCallback(
     (parentPath: string) => {
-      const name = globalThis.prompt("New subfolder name:");
+      const name = globalThis.prompt(t("sessionTree.promptSubfolderName"));
       if (name) {
         const newPath = parentPath ? `${parentPath}/${name}` : name;
         addFolder(newPath);
@@ -456,7 +457,7 @@ export default function SessionTree({
     (folderPath: string) => {
       const parts = folderPath.split("/");
       const oldName = parts[parts.length - 1];
-      const newName = globalThis.prompt("Rename folder:", oldName);
+      const newName = globalThis.prompt(t("sessionTree.promptRenameFolder"), oldName);
       if (newName && newName !== oldName) {
         const parentPath = parts.slice(0, -1).join("/");
         const newPath = parentPath ? `${parentPath}/${newName}` : newName;
@@ -480,7 +481,7 @@ export default function SessionTree({
       const count = sessions.filter(
         (s) => s.group === folderPath || s.group.startsWith(folderPath + "/")
       ).length;
-      if (globalThis.confirm(`Delete folder "${folderPath}" and ungroup ${count} session(s)?`)) {
+      if (globalThis.confirm(t("sessionTree.confirmDeleteFolder", { folder: folderPath, count }))) {
         for (const s of sessions) {
           if (s.group === folderPath || s.group.startsWith(folderPath + "/")) {
             updateSession(s.id, { group: "" });
@@ -558,22 +559,22 @@ export default function SessionTree({
     if (contextMenu.kind === "session") {
       const s = contextMenu.session;
       return [
-        { key: "connect", icon: <Plug size={13} />, label: "Connect", action: () => handleSessionClick(s) },
-        { key: "edit", icon: <Pencil size={13} />, label: "Edit", action: () => onSessionEdit?.(s) },
-        { key: "duplicate", icon: <Copy size={13} />, label: "Duplicate", action: () => handleDuplicate(s) },
-        { key: "move", icon: <FolderInput size={13} />, label: "Move to Folder", action: () => handleMoveToFolder(s) },
+        { key: "connect", icon: <Plug size={13} />, label: t("sessions.connect"), action: () => handleSessionClick(s) },
+        { key: "edit", icon: <Pencil size={13} />, label: t("sessions.edit"), action: () => onSessionEdit?.(s) },
+        { key: "duplicate", icon: <Copy size={13} />, label: t("sessions.duplicate"), action: () => handleDuplicate(s) },
+        { key: "move", icon: <FolderInput size={13} />, label: t("sessions.moveToFolder"), action: () => handleMoveToFolder(s) },
         { key: "sep1", divider: true as const },
-        { key: "delete", icon: <Trash2 size={13} />, label: "Delete", action: () => removeSession(s.id), danger: true },
+        { key: "delete", icon: <Trash2 size={13} />, label: t("sessions.delete"), action: () => removeSession(s.id), danger: true },
       ];
     }
     // folder context menu
     const fp = contextMenu.folderPath;
     return [
-      { key: "new-session", icon: <Plus size={13} />, label: "New Session", action: () => onNewSession?.() },
-      { key: "new-subfolder", icon: <FolderPlus size={13} />, label: "New Subfolder", action: () => handleNewSubfolder(fp) },
+      { key: "new-session", icon: <Plus size={13} />, label: t("sessions.newSession"), action: () => onNewSession?.() },
+      { key: "new-subfolder", icon: <FolderPlus size={13} />, label: t("sessionTree.newSubfolder"), action: () => handleNewSubfolder(fp) },
       { key: "sep1", divider: true as const },
-      { key: "rename", icon: <Pencil size={13} />, label: "Rename Folder", action: () => handleRenameFolder(fp) },
-      { key: "delete-folder", icon: <Trash2 size={13} />, label: "Delete Folder", action: () => handleDeleteFolder(fp), danger: true },
+      { key: "rename", icon: <Pencil size={13} />, label: t("sessionTree.renameFolder"), action: () => handleRenameFolder(fp) },
+      { key: "delete-folder", icon: <Trash2 size={13} />, label: t("sessionTree.deleteFolder"), action: () => handleDeleteFolder(fp), danger: true },
     ];
   }, [contextMenu, handleSessionClick, onSessionEdit, handleDuplicate, handleMoveToFolder, removeSession, onNewSession, handleNewSubfolder, handleRenameFolder, handleDeleteFolder]);
 
@@ -584,9 +585,9 @@ export default function SessionTree({
         <div className="w-16 h-16 rounded-2xl bg-surface-elevated flex items-center justify-center mb-4">
           <FolderTree size={28} className="text-text-disabled" />
         </div>
-        <p className="text-sm text-text-primary mb-1">No sessions yet</p>
+        <p className="text-sm text-text-primary mb-1">{t("sessionTree.noSessionsTitle")}</p>
         <p className="text-xs text-text-secondary mb-5 max-w-[200px]">
-          Create a new session or import from a file to get started.
+          {t("sessionTree.noSessionsHint")}
         </p>
         <div className="flex gap-2">
           <button
@@ -594,14 +595,14 @@ export default function SessionTree({
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-interactive-default hover:bg-interactive-hover text-text-primary transition-colors duration-[var(--duration-short)]"
           >
             <Plus size={13} />
-            New Session
+            {t("sessions.newSession")}
           </button>
           <button
             onClick={onImport}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-border-default hover:bg-surface-elevated text-text-secondary hover:text-text-primary transition-colors duration-[var(--duration-short)]"
           >
             <Download size={13} />
-            Import
+            {t("sessions.import")}
           </button>
         </div>
       </div>
@@ -617,7 +618,7 @@ export default function SessionTree({
           <input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search sessions…"
+            placeholder={t("sessionTree.searchPlaceholder")}
             className="flex-1 bg-transparent text-xs text-text-primary placeholder:text-text-disabled outline-none"
             spellCheck={false}
           />
@@ -651,7 +652,7 @@ export default function SessionTree({
               onClick={() => setActiveTags(new Set())}
               className="px-2 py-0.5 rounded-full text-[10px] text-text-disabled hover:text-text-secondary transition-colors"
             >
-              <X size={10} className="inline" /> Clear
+              <X size={10} className="inline" /> {t("sessionTree.clearTags")}
             </button>
           )}
         </div>
@@ -663,7 +664,7 @@ export default function SessionTree({
           <div className="mb-3">
             <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-text-disabled flex items-center gap-1">
               <Star size={10} />
-              Favorites
+              {t("sessionTree.favorites")}
             </div>
             <div className="flex gap-1.5 px-2 overflow-x-auto scrollbar-none pb-1">
               {favoriteSessions.map((s) => (
@@ -685,7 +686,7 @@ export default function SessionTree({
           <div className="mb-3">
             <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-text-disabled flex items-center gap-1">
               <Clock size={10} />
-              Recent
+              {t("sessionTree.recent")}
             </div>
             {recentItems.map((s) => (
               <SessionItem
@@ -724,7 +725,7 @@ export default function SessionTree({
           <div>
             {folderTree.children.size > 0 && (
               <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-text-disabled">
-                Ungrouped
+                {t("sessionTree.ungrouped")}
               </div>
             )}
             {folderTree.sessions.map((s) => (
@@ -749,7 +750,7 @@ export default function SessionTree({
           className="flex items-center gap-1.5 w-full px-2 py-1.5 text-xs rounded-md text-text-secondary hover:bg-surface-elevated hover:text-text-primary transition-colors duration-[var(--duration-micro)]"
         >
           <Plus size={13} />
-          New Session
+          {t("sessions.newSession")}
         </button>
       </div>
 

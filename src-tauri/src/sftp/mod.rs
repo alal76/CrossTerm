@@ -934,4 +934,137 @@ mod tests {
         let d: SftpSessionInfo = serde_json::from_str(&json).unwrap();
         assert_eq!(d.session_id, "s1");
     }
+
+    #[test]
+    fn test_file_stat_serde() {
+        let stat = FileStat {
+            size: 2048,
+            is_dir: false,
+            permissions: Some("755".into()),
+            modified: Some("2024-06-15T12:00:00Z".into()),
+            accessed: Some("2024-06-15T13:00:00Z".into()),
+            owner: Some(1000),
+            group: Some(1000),
+        };
+        let json = serde_json::to_string(&stat).unwrap();
+        let d: FileStat = serde_json::from_str(&json).unwrap();
+        assert_eq!(d.size, 2048);
+        assert!(!d.is_dir);
+        assert_eq!(d.permissions.as_deref(), Some("755"));
+        assert_eq!(d.owner, Some(1000));
+    }
+
+    #[test]
+    fn test_file_entry_directory() {
+        let entry = FileEntry {
+            name: "subdir".into(),
+            is_dir: true,
+            size: 0,
+            modified: None,
+            permissions: Some("drwxr-xr-x".into()),
+            owner: None,
+            group: None,
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        let d: FileEntry = serde_json::from_str(&json).unwrap();
+        assert!(d.is_dir);
+        assert_eq!(d.name, "subdir");
+    }
+
+    // ── Integration tests requiring SSH server ──────────────────────
+
+    #[test]
+    #[ignore = "Requires Docker SSH server — run with: docker run -d -p 2222:22 linuxserver/openssh-server"]
+    fn test_sftp_open_session() {
+        // UT-SF-01: Open SFTP session over existing SSH connection.
+        // Assert session ID returned.
+    }
+
+    #[test]
+    #[ignore = "Requires Docker SSH server"]
+    fn test_sftp_list_directory() {
+        // UT-SF-02: List /tmp on remote. Assert at least 1 entry with
+        // name, size, permissions, type.
+    }
+
+    #[test]
+    #[ignore = "Requires Docker SSH server"]
+    fn test_sftp_read_file() {
+        // UT-SF-03: Read a known file from remote. Verify contents match.
+    }
+
+    #[test]
+    #[ignore = "Requires Docker SSH server"]
+    fn test_sftp_write_file() {
+        // UT-SF-04: Upload a file to remote. Verify file exists and contents match.
+    }
+
+    #[test]
+    #[ignore = "Requires Docker SSH server"]
+    fn test_sftp_delete_file() {
+        // UT-SF-05: Upload then delete a file. Verify file no longer exists.
+    }
+
+    #[test]
+    #[ignore = "Requires Docker SSH server"]
+    fn test_sftp_mkdir_rmdir() {
+        // UT-SF-06: Create a directory, verify it exists, remove it, verify gone.
+    }
+
+    #[test]
+    #[ignore = "Requires Docker SSH server"]
+    fn test_sftp_rename() {
+        // UT-SF-07: Create a file, rename it, verify old path gone and new path exists.
+    }
+
+    #[test]
+    #[ignore = "Requires Docker SSH server"]
+    fn test_sftp_chmod() {
+        // UT-SF-08: Change file permissions. Stat file. Verify permissions changed.
+    }
+
+    #[test]
+    #[ignore = "Requires Docker SSH server"]
+    fn test_sftp_stat() {
+        // UT-SF-09: Stat a file. Verify size, permissions, modification time.
+    }
+
+    #[test]
+    #[ignore = "Requires Docker SSH server"]
+    fn test_sftp_large_file_transfer() {
+        // UT-SF-10: Upload a 10 MB file. Download it. Verify SHA-256 matches.
+    }
+
+    #[test]
+    #[ignore = "Requires Docker SSH server — needs AppHandle for event emission"]
+    fn test_sftp_transfer_progress() {
+        // UT-SF-11: Upload a file and subscribe to progress events.
+        // Verify at least 2 progress callbacks with bytes_transferred.
+    }
+
+    #[test]
+    #[ignore = "Requires Docker SSH server — needs AppHandle for event emission"]
+    fn test_sftp_transfer_cancel() {
+        // UT-SF-12: Start a large upload. Cancel mid-transfer.
+        // Verify partial file cleaned up.
+    }
+
+    #[test]
+    #[ignore = "Requires Docker SSH server"]
+    fn test_sftp_resume() {
+        // UT-SF-13: Upload 50% of a file. Cancel. Resume upload. Verify complete file.
+    }
+
+    #[test]
+    #[ignore = "Requires Docker SSH server"]
+    fn test_sftp_symlink_follow() {
+        // UT-SF-14: Create a symlink on remote. Stat with follow=true.
+        // Verify resolves to target.
+    }
+
+    #[test]
+    #[ignore = "Requires Docker SSH server"]
+    fn test_sftp_concurrent_transfers() {
+        // UT-SF-15: Upload 5 files simultaneously. Verify all complete correctly.
+    }
 }

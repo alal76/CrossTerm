@@ -331,3 +331,31 @@ body,
 [data-tauri-drag-region] :focus-visible {
   outline: none;
 }
+
+/* ===== Tooltip (data-tooltip) ===== */
+[data-tooltip] {
+  position: relative;
+}
+
+[data-tooltip]:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+  padding: 4px 8px;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+  z-index: 9000;
+  pointer-events: none;
+  animation: tooltip-appear 0.15s ease-out 0.5s both;
+}
+
+@keyframes tooltip-appear {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

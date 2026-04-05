@@ -261,3 +261,36 @@ export interface TerminalInstance {
   rows: number;
   title: string;
 }
+
+// --- Help System ---
+
+export interface HelpArticle {
+  slug: string;
+  title: string;
+  category: string;
+  order: number;
+  keywords: string[];
+  body: string;
+}
+
+export interface KeyboardShortcut {
+  id: string;
+  keys: string;
+  macKeys: string;
+  label: string;
+  category: string;
+}
+
+// --- Feature Tour ---
+
+export interface TourStep {
+  targetSelector: string;
+  title: string;
+  description: string;
+  position: "top" | "bottom" | "left" | "right";
+}
+
+export interface TourDefinition {
+  id: string;
+  steps: TourStep[];
+}

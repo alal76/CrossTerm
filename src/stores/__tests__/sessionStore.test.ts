@@ -227,4 +227,19 @@ describe("sessionStore", () => {
       vi.useRealTimers();
     });
   });
+
+  // ── Recent Sessions ──
+
+  describe("addRecentSession", () => {
+    it("caps the recent list at 25 entries", () => {
+      for (let i = 0; i < 30; i++) {
+        useSessionStore.getState().addRecentSession(`session-${i}`);
+      }
+
+      const { recentSessions } = useSessionStore.getState();
+      expect(recentSessions).toHaveLength(25);
+      // Most recent entry should be the last one added
+      expect(recentSessions[0].sessionId).toBe("session-29");
+    });
+  });
 });

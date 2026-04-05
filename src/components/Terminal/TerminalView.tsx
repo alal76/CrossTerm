@@ -193,7 +193,8 @@ export default function TerminalView({ terminalId, isActive }: TerminalViewProps
 
     const exitUnlisten = listen<{ terminal_id: string; code?: number | null }>("terminal:exit", (event) => {
       if (event.payload.terminal_id === terminalId) {
-        term.write(`\r\n\x1b[90m[Process exited with code ${event.payload.code ?? 0}]\x1b[0m\r\n`);
+        const exitMsg = t("terminal.processExited", { code: event.payload.code ?? 0 });
+        term.write(`\r\n\x1b[90m[${exitMsg}]\x1b[0m\r\n`);
         updateTerminalStatus(terminalId, ConnectionStatus.Disconnected);
       }
     });

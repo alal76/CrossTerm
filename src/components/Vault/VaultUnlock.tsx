@@ -1,10 +1,12 @@
 import { useState, useRef, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import clsx from "clsx";
 import { Lock, Eye, EyeOff, ShieldCheck, Loader2 } from "lucide-react";
 import { useVaultStore } from "@/stores/vaultStore";
 
 export default function VaultUnlock() {
+  const { t } = useTranslation();
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -44,17 +46,17 @@ export default function VaultUnlock() {
     setError(null);
 
     if (!password) {
-      setError("Password is required");
+      setError(t("vault.passwordRequired"));
       return;
     }
 
     if (isNewVault) {
       if (password.length < 8) {
-        setError("Password must be at least 8 characters");
+        setError(t("vault.passwordTooShort"));
         return;
       }
       if (password !== confirmPassword) {
-        setError("Passwords do not match");
+        setError(t("vault.passwordMismatch"));
         return;
       }
       setLoading(true);
@@ -98,12 +100,12 @@ export default function VaultUnlock() {
             )}
           </div>
           <h1 className="text-lg font-semibold text-text-primary">
-            {isNewVault ? "Create Vault" : "Unlock Vault"}
+            {isNewVault ? t("vault.createVault") : t("vault.unlock")}
           </h1>
           <p className="text-xs text-text-secondary mt-1 text-center max-w-[260px]">
             {isNewVault
-              ? "Set a master password to encrypt your credentials."
-              : "Enter your master password to access saved credentials."}
+              ? t("vault.createDescription")
+              : t("vault.unlockDescription")}
           </p>
         </div>
 
@@ -114,7 +116,7 @@ export default function VaultUnlock() {
               type={showPassword ? "text" : "password"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder={isNewVault ? "Master password" : "Password"}
+              placeholder={isNewVault ? t("vault.masterPasswordPlaceholder") : t("vault.passwordPlaceholder")}
               className={clsx(
                 "w-full px-3 py-2.5 pr-10 rounded-lg text-sm bg-surface-secondary border outline-none",
                 "text-text-primary placeholder:text-text-disabled",
@@ -139,7 +141,7 @@ export default function VaultUnlock() {
               type={showPassword ? "text" : "password"}
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              placeholder="Confirm password"
+              placeholder={t("vault.confirmPasswordPlaceholder")}
               className={clsx(
                 "w-full px-3 py-2.5 rounded-lg text-sm bg-surface-secondary border outline-none",
                 "text-text-primary placeholder:text-text-disabled",
@@ -169,8 +171,8 @@ export default function VaultUnlock() {
             )}
           >
             {loading && <Loader2 size={16} className="animate-spin mx-auto" />}
-            {!loading && isNewVault && "Create Vault"}
-            {!loading && !isNewVault && "Unlock"}
+            {!loading && isNewVault && t("vault.createVault")}
+            {!loading && !isNewVault && t("vault.unlock")}
           </button>
         </form>
       </div>

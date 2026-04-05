@@ -101,7 +101,20 @@
     "cloudCredential": "Cloud Credential",
     "totpSeed": "TOTP Seed",
     "emptyState": "No credentials stored. Add credentials to connect securely.",
-    "deleteConfirm": "Are you sure you want to delete this credential?"
+    "deleteConfirm": "Are you sure you want to delete this credential?",
+    "createVault": "Create Vault",
+    "createDescription": "Set a master password to encrypt your credentials.",
+    "unlockDescription": "Enter your master password to access saved credentials.",
+    "passwordRequired": "Password is required.",
+    "passwordTooShort": "Password must be at least 8 characters.",
+    "passwordMismatch": "Passwords do not match.",
+    "masterPasswordPlaceholder": "Master password",
+    "passwordPlaceholder": "Password",
+    "confirmPasswordPlaceholder": "Confirm password",
+    "noCredentials": "No credentials",
+    "noCredentialsHint": "Add passwords, SSH keys, or API tokens to your vault.",
+    "credentials": "Credentials",
+    "add": "Add"
   },
   "snippets": {
     "title": "Snippets",
@@ -134,7 +147,8 @@
     "paste": "Paste",
     "selectAll": "Select All",
     "undo": "Undo",
-    "redo": "Redo"
+    "redo": "Redo",
+    "refresh": "Refresh"
   },
   "emptyCanvas": {
     "title": "Welcome to CrossTerm",
@@ -164,7 +178,13 @@
     "chooseTheme": "Choose a Theme",
     "themeDescription": "Pick your preferred appearance. You can always change this later.",
     "finish": "Finish",
-    "back": "Back"
+    "back": "Back",
+    "learnMoreProfile": "Learn more about profiles and multi-environment management",
+    "learnMoreProfileContent": "Profiles let you keep separate sets of sessions, credentials, and settings for different environments (e.g. Development, Staging, Production). Switch profiles quickly from the title bar.",
+    "learnMoreVault": "Learn more about credential security (AES-256-GCM, Argon2id)",
+    "learnMoreVaultContent": "Your credentials are encrypted with AES-256-GCM using a key derived from your master password via Argon2id. Key material is held in memory with zeroize-on-drop protection. There is no backdoor — if you forget your master password, the vault cannot be recovered.",
+    "learnMoreTheme": "Learn more about theming and customization",
+    "learnMoreThemeContent": "CrossTerm supports built-in themes (Dark, Light, Solarized, Nord, Dracula, Monokai Pro, High Contrast) and custom themes via JSON import. Themes use a design-token system for consistent styling across the entire interface."
   },
   "reconnect": {
     "connectionLost": "Connection Lost",
@@ -176,9 +196,11 @@
     "retry": "Retry"
   },
   "pasteConfirm": {
-    "title": "Paste {{count}} lines?",
+    "title_one": "Paste {{count}} line?",
+    "title_other": "Paste {{count}} lines?",
     "warning": "This may execute commands in the terminal.",
-    "moreLines": "… and {{count}} more lines",
+    "moreLines_one": "… and {{count}} more line",
+    "moreLines_other": "… and {{count}} more lines",
     "dontAskAgain": "Don't ask again this session"
   },
   "terminal": {
@@ -186,7 +208,8 @@
     "failedCreate": "Failed to create terminal",
     "retry": "Retry",
     "clearTerminal": "Clear Terminal",
-    "search": "Search"
+    "search": "Search",
+    "processExited": "Process exited with code {{code}}"
   },
   "settings": {
     "title": "Settings",
@@ -224,7 +247,18 @@
     "terminalDescription": "Terminal emulator behavior",
     "sshDescription": "SSH connection defaults",
     "securityDescription": "Vault and security settings",
-    "loading": "Loading settings…"
+    "loading": "Loading settings…",
+    "opacity": "Opacity",
+    "opacityDescription": "Terminal background transparency",
+    "tabTitleFormat": "Tab Title Format",
+    "tabTitleFormatDescription": "Template for terminal tab titles",
+    "copyOnSelect": "Copy on Select",
+    "copyOnSelectDescription": "Automatically copy selected text",
+    "autoUpdate": "Auto Update",
+    "autoUpdateDescription": "Automatically check for and install updates",
+    "gpuAcceleration": "GPU Acceleration",
+    "gpuAccelerationDescription": "Use hardware-accelerated rendering",
+    "defaultShell": "Default Shell"
   },
   "newTabMenu": {
     "localShell": "New Local Shell",
@@ -237,7 +271,16 @@
     "favorites": "Favorites",
     "recent": "Recent",
     "ungrouped": "Ungrouped",
-    "clearTags": "Clear"
+    "clearTags": "Clear",
+    "newSubfolder": "New Subfolder",
+    "renameFolder": "Rename Folder",
+    "deleteFolder": "Delete Folder",
+    "searchPlaceholder": "Search sessions…",
+    "promptFolderPath": "Enter folder path (e.g. Production/AWS):",
+    "promptSubfolderName": "New subfolder name:",
+    "promptRenameFolder": "Rename folder:",
+    "confirmDeleteFolder_one": "Delete folder \"{{folder}}\" and ungroup {{count}} session?",
+    "confirmDeleteFolder_other": "Delete folder \"{{folder}}\" and ungroup {{count}} sessions?"
   },
   "counts": {
     "sessions_one": "{{count}} session",
@@ -254,7 +297,24 @@
   "sftp": {
     "dropFilesHere": "Drop files here to upload",
     "dragToMove": "Drag to move",
-    "uploading": "Uploading…"
+    "uploading": "Uploading…",
+    "remote": "Remote",
+    "local": "Local",
+    "notConnected": "No connection",
+    "connectToBrowse": "Connect to an SSH session to browse remote files.",
+    "uploadFiles": "Upload Files",
+    "chooseFilesDescription": "Select files from your computer to upload.",
+    "chooseFiles": "Choose Files",
+    "download": "Download",
+    "name": "Name",
+    "size": "Size",
+    "modified": "Modified",
+    "permissions": "Permissions",
+    "emptyDirectory": "This directory is empty.",
+    "filesSelected_one": "{{count}} file selected",
+    "filesSelected_other": "{{count}} files selected",
+    "transfersActive_one": "{{count}} transfer active",
+    "transfersActive_other": "{{count}} transfers active"
   },
   "broadcast": {
     "label": "Broadcast",
@@ -283,5 +343,137 @@
     "focusRight": "Focus Right Pane",
     "focusUp": "Focus Up Pane",
     "focusDown": "Focus Down Pane"
+  },
+  "credentialForm": {
+    "editTitle": "Edit Credential",
+    "newTitle": "New Credential",
+    "typeLabel": "Type",
+    "nameLabel": "Name",
+    "namePlaceholder": "My credential",
+    "nameRequired": "Name is required.",
+    "usernameLabel": "Username",
+    "usernamePlaceholder": "admin",
+    "privateKeyLabel": "Private Key",
+    "privateKeyPlaceholder": "-----BEGIN OPENSSH PRIVATE KEY-----",
+    "passphraseLabel": "Passphrase",
+    "optional": "optional",
+    "providerLabel": "Provider",
+    "providerPlaceholder": "GitHub, AWS, etc.",
+    "tokenLabel": "Token",
+    "cloudProviderLabel": "Cloud Provider",
+    "selectProvider": "Select…",
+    "accessKeyLabel": "Access Key",
+    "secretKeyLabel": "Secret Key",
+    "regionLabel": "Region",
+    "regionPlaceholder": "us-east-1"
+  },
+  "announcements": {
+    "sessionDisconnected": "Session {{name}} disconnected.",
+    "sshDisconnected": "SSH session {{name}} disconnected."
+  },
+  "credentialTypes": {
+    "password": "Password",
+    "ssh_key": "SSH Key",
+    "api_token": "API Token",
+    "cloud_credential": "Cloud Credential",
+    "certificate": "Certificate",
+    "totp_seed": "TOTP"
+  },
+  "help": {
+    "title": "Help",
+    "search": "Search help articles…",
+    "noResults": "No articles match your search.",
+    "gettingStarted": "Getting Started",
+    "userGuide": "User Guide",
+    "keyboardShortcuts": "Keyboard Shortcuts",
+    "troubleshooting": "Troubleshooting",
+    "reportIssue": "Report Issue",
+    "about": "About CrossTerm",
+    "closeHelp": "Close Help",
+    "categories": {
+      "basics": "Basics",
+      "connections": "Connections",
+      "security": "Security",
+      "reference": "Reference",
+      "support": "Support"
+    },
+    "shortcutOverlay": {
+      "title": "Keyboard Shortcuts",
+      "search": "Search shortcuts…",
+      "noResults": "No shortcuts match your search.",
+      "print": "Print / Export",
+      "customLabel": "(custom)",
+      "categories": {
+        "general": "General",
+        "terminal": "Terminal",
+        "tabs": "Tabs",
+        "splitPanes": "Split Panes",
+        "navigation": "Navigation"
+      }
+    },
+    "menu": {
+      "gettingStarted": "Getting Started",
+      "userGuide": "User Guide",
+      "keyboardShortcuts": "Keyboard Shortcuts",
+      "troubleshooting": "Troubleshooting",
+      "reportIssue": "Report Issue",
+      "about": "About"
+    }
+  },
+  "fieldHelp": {
+    "toggle": "Toggle help",
+    "learnMore": "Learn more →",
+    "hostname": "The IP address or domain name of the remote host you want to connect to.",
+    "port": "The port number for the connection. Common defaults: SSH (22), RDP (3389), VNC (5900).",
+    "sessionType": "The protocol to use for this session. Choose SSH for shell access, SFTP for file transfers, etc.",
+    "theme": "Choose a color scheme for the application. Dark and Light are built-in; you can also import custom themes.",
+    "scrollback": "The maximum number of lines kept in the terminal buffer. Higher values use more memory.",
+    "credentialType": "The type of credential to store. Password for basic auth, SSH Key for key-based auth, API Token for service tokens."
+  },
+  "whatsNew": {
+    "title": "What's New",
+    "dismiss": "Got it",
+    "dontShowAgain": "Don't show again for this version"
+  },
+  "tour": {
+    "next": "Next",
+    "previous": "Previous",
+    "skip": "Skip Tour",
+    "finish": "Finish",
+    "stepOf": "Step {{current}} of {{total}}",
+    "startTour": "Start Tour",
+    "ssh": {
+      "step1Title": "Create a Session",
+      "step1Desc": "Click here to create a new SSH session with your server details.",
+      "step2Title": "Quick Connect",
+      "step2Desc": "Use Quick Connect (Ctrl+Shift+N) for a fast one-time connection.",
+      "step3Title": "Session Canvas",
+      "step3Desc": "Your active terminal sessions appear here. You can split panes and manage multiple sessions."
+    },
+    "sftp": {
+      "step1Title": "Open SFTP Browser",
+      "step1Desc": "The bottom panel contains the SFTP browser for file transfers.",
+      "step2Title": "Upload Files",
+      "step2Desc": "Drag files between local and remote panes, or use the upload button.",
+      "step3Title": "Download Files",
+      "step3Desc": "Select a remote file and click download, or drag it to the local pane."
+    },
+    "vault": {
+      "step1Title": "Credential Vault",
+      "step1Desc": "Access your encrypted credential vault from the sidebar.",
+      "step2Title": "Add Credentials",
+      "step2Desc": "Store passwords, SSH keys, API tokens, and cloud credentials securely.",
+      "step3Title": "Use Credentials",
+      "step3Desc": "Reference stored credentials when creating sessions for automatic authentication."
+    }
+  },
+  "tipOfDay": {
+    "title": "Tip of the Day",
+    "nextTip": "Next Tip",
+    "dontShowAgain": "Don't show again"
+  },
+  "commandPalette": {
+    "helpCategory": "Help",
+    "noMatching": "No matching commands"
   }
 }

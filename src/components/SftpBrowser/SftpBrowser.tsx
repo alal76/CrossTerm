@@ -17,6 +17,7 @@ import {
   Upload,
   WifiOff,
 } from "lucide-react";
+import { formatFileSize, formatDate } from "@/utils/formatters";
 
 interface SftpFileEntry {
   name: string;
@@ -48,31 +49,6 @@ function joinPath(base: string, name: string): string {
     return `/${name}`;
   }
   return `${base.replace(/\/$/, "")}/${name}`;
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-  const units = ["KB", "MB", "GB", "TB"];
-  let value = bytes / 1024;
-  let unitIndex = 0;
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
-  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unitIndex]}`;
-}
-
-function formatModified(value: string | null): string {
-  if (!value) {
-    return "-";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return date.toLocaleString();
 }
 
 function Breadcrumb({
@@ -117,6 +93,8 @@ export default function SftpBrowser({ connectionId }: SftpBrowserProps) {
   const [error, setError] = useState<string | null>(null);
   const [transfers, setTransfers] = useState<Map<string, TransferProgress>>(new Map());
   const [dragActive, setDragActive] = useState(false);
+  const [localDropActive, setLocalDropActive] = useState(false);
+  const [remoteDropActive, setRemoteDropActive] = useState(false);
 
   useEffect(() => {
     if (!connectionId) {
@@ -286,6 +264,76 @@ export default function SftpBrowser({ connectionId }: SftpBrowserProps) {
     [remotePath, sessionId],
   );
 
+  // ── Pane-to-pane drag handlers ──
+
+  const handlePaneDragStart = useCallback(
+    (e: React.DragEvent<HTMLTableRowElement>, fileName: string, source: "local" | "remote") => {
+      e.dataTransfer.setData("application/x-sftp-file", JSON.stringify({ fileName, source, remotePath }));
+      e.dataTransfer.effectAllowed = "copyMove";
+    },
+    [remotePath],
+  );
+
+  const handleLocalPaneDrop = useCallback(
+    async (e: React.DragEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      setLocalDropActive(false);
+      const raw = e.dataTransfer.getData("application/x-sftp-file");
+      if (!raw || !sessionId) return;
+      try {
+        const { fileName, source, remotePath: srcPath } = JSON.parse(raw) as {
+          fileName: string;
+          source: string;
+          remotePath: string;
+        };
+        if (source === "remote") {
+          // Download remote file to a local temp path via save dialog
+          const { save: saveDialog } = await import("@tauri-apps/plugin-dialog");
+          const destination = await saveDialog({ defaultPath: fileName });
+          if (!destination) return;
+          await invoke("sftp_download", {
+            sessionId,
+            remotePath: joinPath(srcPath, fileName),
+            localPath: destination,
+          });
+        }
+      } catch (nextError) {
+        setError(String(nextError));
+      }
+    },
+    [sessionId],
+  );
+
+  const handleRemotePaneDrop = useCallback(
+    async (e: React.DragEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      setRemoteDropActive(false);
+      const raw = e.dataTransfer.getData("application/x-sftp-file");
+      if (!raw || !sessionId) return;
+      try {
+        const { fileName, source } = JSON.parse(raw) as {
+          fileName: string;
+          source: string;
+        };
+        if (source === "local") {
+          // Upload local file: prompt user for the local path via dialog
+          const { open: openDialog } = await import("@tauri-apps/plugin-dialog");
+          const selected = await openDialog({ directory: false, multiple: false, defaultPath: fileName });
+          if (!selected || Array.isArray(selected)) return;
+          const uploadName = selected.split("/").pop() ?? selected.split("\\").pop() ?? selected;
+          await invoke("sftp_upload", {
+            sessionId,
+            localPath: selected,
+            remotePath: joinPath(remotePath, uploadName),
+          });
+        }
+      } catch (nextError) {
+        setError(String(nextError));
+      }
+    },
+    [remotePath, sessionId],
+  );
+
   if (!connectionId) {
     return (
       <div
@@ -315,7 +363,7 @@ export default function SftpBrowser({ connectionId }: SftpBrowserProps) {
         ) : null}
         <div className="flex items-center gap-2 px-3 py-2 bg-surface-secondary border-b border-border-subtle shrink-0">
           <Server size={13} className="text-text-secondary" />
-          <span className="text-xs font-medium text-text-secondary">Remote</span>
+          <span className="text-xs font-medium text-text-secondary">{t("sftp.remote")}</span>
         </div>
         <div className="flex-1 flex flex-col items-center justify-center text-center px-6">
           <WifiOff size={28} className="text-text-disabled mb-3" />
@@ -327,11 +375,26 @@ export default function SftpBrowser({ connectionId }: SftpBrowserProps) {
   }
 
   return (
-    <div className="flex h-full gap-4 bg-surface-primary">
-      <div className="w-56 shrink-0 flex flex-col border border-border-default rounded-lg overflow-hidden">
+    <div className="flex h-full gap-4 bg-surface-primary" data-help-article="sftp-file-transfer">
+      <div
+        className={clsx(
+          "w-56 shrink-0 flex flex-col border rounded-lg overflow-hidden transition-colors",
+          localDropActive
+            ? "border-dashed border-2 border-accent-primary bg-accent-primary/5"
+            : "border-border-default",
+        )}
+        onDragOver={(e) => {
+          if (e.dataTransfer.types.includes("application/x-sftp-file")) {
+            e.preventDefault();
+            setLocalDropActive(true);
+          }
+        }}
+        onDragLeave={() => setLocalDropActive(false)}
+        onDrop={(e) => { void handleLocalPaneDrop(e); }}
+      >
         <div className="flex items-center gap-2 px-3 py-2 bg-surface-secondary border-b border-border-subtle shrink-0">
           <HardDrive size={13} className="text-text-secondary" />
-          <span className="text-xs font-medium text-text-secondary">Local</span>
+          <span className="text-xs font-medium text-text-secondary">{t("sftp.local")}</span>
         </div>
         <div className="flex-1 flex flex-col items-center justify-center text-center px-6">
           <Upload size={28} className="text-text-disabled mb-3" />
@@ -355,10 +418,25 @@ export default function SftpBrowser({ connectionId }: SftpBrowserProps) {
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col border border-border-default rounded-lg overflow-hidden">
+      <div
+        className={clsx(
+          "flex-1 flex flex-col border rounded-lg overflow-hidden transition-colors",
+          remoteDropActive
+            ? "border-dashed border-2 border-accent-primary bg-accent-primary/5"
+            : "border-border-default",
+        )}
+        onDragOver={(e) => {
+          if (e.dataTransfer.types.includes("application/x-sftp-file")) {
+            e.preventDefault();
+            setRemoteDropActive(true);
+          }
+        }}
+        onDragLeave={() => setRemoteDropActive(false)}
+        onDrop={(e) => { void handleRemotePaneDrop(e); }}
+      >
         <div className="flex items-center gap-2 px-3 py-2 bg-surface-secondary border-b border-border-subtle shrink-0">
           <Server size={13} className="text-text-secondary" />
-          <span className="text-xs font-medium text-text-secondary">Remote</span>
+          <span className="text-xs font-medium text-text-secondary">{t("sftp.remote")}</span>
           <div className="flex-1" />
           <button
             onClick={() => {
@@ -417,6 +495,8 @@ export default function SftpBrowser({ connectionId }: SftpBrowserProps) {
                       "cursor-pointer transition-colors duration-[var(--duration-micro)]",
                       selectedName === entry.name ? "bg-interactive-default/15" : "hover:bg-surface-elevated/50",
                     )}
+                    draggable
+                    onDragStart={(e) => handlePaneDragStart(e, entry.name, "remote")}
                     onClick={() => setSelectedName(entry.name)}
                     onDoubleClick={() => {
                       if (entry.is_dir) {
@@ -430,8 +510,8 @@ export default function SftpBrowser({ connectionId }: SftpBrowserProps) {
                         <span className="text-text-primary truncate">{entry.name}</span>
                       </div>
                     </td>
-                    <td className="px-2 py-1.5 text-right text-text-secondary">{entry.is_dir ? "-" : formatSize(entry.size)}</td>
-                    <td className="px-2 py-1.5 text-right text-text-secondary">{formatModified(entry.modified)}</td>
+                    <td className="px-2 py-1.5 text-right text-text-secondary">{entry.is_dir ? "-" : formatFileSize(entry.size)}</td>
+                    <td className="px-2 py-1.5 text-right text-text-secondary">{formatDate(entry.modified)}</td>
                     <td className="px-2 py-1.5 text-right text-text-disabled font-mono text-[10px]">{entry.permissions ?? "-"}</td>
                   </tr>
                 ))}

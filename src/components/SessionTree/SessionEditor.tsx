@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import clsx from "clsx";
 import { X, Save } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import { useSessionStore } from "@/stores/sessionStore";
 import { SessionType } from "@/types";
 import type { Session } from "@/types";
+import FieldHelp from "@/components/Help/FieldHelp";
 
 const SESSION_TYPE_OPTIONS = [
   { value: SessionType.SSH, label: "SSH" },
@@ -43,6 +45,7 @@ interface FormErrors {
 }
 
 export default function SessionEditor({ session, onClose }: SessionEditorProps) {
+  const { t } = useTranslation();
   const addSession = useSessionStore((s) => s.addSession);
   const updateSession = useSessionStore((s) => s.updateSession);
   const sessionFolders = useSessionStore((s) => s.sessionFolders);
@@ -152,6 +155,7 @@ export default function SessionEditor({ session, onClose }: SessionEditorProps) 
       <div
         className="relative w-full max-w-md max-h-[90vh] bg-surface-elevated border border-border-default rounded-xl shadow-[var(--shadow-3)] flex flex-col overflow-hidden"
         style={{ animation: "paletteIn var(--duration-medium) var(--ease-decelerate)" }}
+        data-help-article="ssh-connections"
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-border-subtle shrink-0">
@@ -180,7 +184,7 @@ export default function SessionEditor({ session, onClose }: SessionEditorProps) 
           </Field>
 
           {/* Type */}
-          <Field label="Type">
+          <Field label="Type" help={<FieldHelp description={t("fieldHelp.sessionType")} articleSlug="getting-started" />}>
             <select
               value={type}
               onChange={(e) => setType(e.target.value as SessionType)}
@@ -197,7 +201,7 @@ export default function SessionEditor({ session, onClose }: SessionEditorProps) 
           {/* Host + Port */}
           {needsHost && (
             <div className="grid grid-cols-[1fr_80px] gap-2">
-              <Field label="Host" error={errors.host}>
+              <Field label="Host" error={errors.host} help={<FieldHelp description={t("fieldHelp.hostname")} articleSlug="ssh-connections" />}>
                 <input
                   value={host}
                   onChange={(e) => setHost(e.target.value)}
@@ -205,7 +209,7 @@ export default function SessionEditor({ session, onClose }: SessionEditorProps) 
                   className={inputClass(!!errors.host)}
                 />
               </Field>
-              <Field label="Port" error={errors.port}>
+              <Field label="Port" error={errors.port} help={<FieldHelp description={t("fieldHelp.port")} articleSlug="ssh-connections" />}>
                 <input
                   value={port}
                   onChange={(e) => setPort(e.target.value)}
@@ -301,15 +305,20 @@ export default function SessionEditor({ session, onClose }: SessionEditorProps) 
 function Field({
   label,
   error,
+  help,
   children,
 }: {
   readonly label: string;
   readonly error?: string;
+  readonly help?: React.ReactNode;
   readonly children: React.ReactNode;
 }) {
   return (
     <div>
-      <label className="block text-[11px] text-text-secondary mb-1">{label}</label>
+      <label className="flex items-center text-[11px] text-text-secondary mb-1">
+        {label}
+        {help}
+      </label>
       {children}
       {error && <p className="text-[10px] text-status-disconnected mt-0.5">{error}</p>}
     </div>

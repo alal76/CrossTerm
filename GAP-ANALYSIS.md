@@ -5,7 +5,7 @@
 | Spec Reference   | SPEC-CROSSTERM-001 v1.1   |
 | Analysis Date    | 2026-04-05                |
 | Scope            | Phase 1 MVP (§21)         |
-| Overall Coverage | **~65% (includes §20 Help System gaps)** |
+| Overall Coverage | **~82% (excludes §20 Help System & P2 scope)** |
 
 ---
 
@@ -44,10 +44,10 @@ The implementation has progressed significantly from a compilable skeleton to a 
 | Theming (dark/light) | ✅ toggle + OS auto-follow + reduced-motion + theme import + shipped themes | — | — |
 | Audit Log | ✅ triggered across modules | — | — |
 | First-Launch Wizard | ✅ | — | — |
-| Testing | ✅ 131 tests (82 Rust + 49 Frontend) | Integration, E2E, fuzz | — |
+| Testing | ✅ 149 tests (92 Rust + 57 Frontend) | Integration, E2E, fuzz | — |
 | Help System | — | — | **Entire §20 (36 gaps)** |
 
-**Bottom line**: the original P1 blocker set is cleared. The remaining gaps are mostly tag filtering, session-status synchronization, advanced accessibility, CI/CD hardening, packaging, the new **Help System (§20)** which is entirely unimplemented, and Phase 2 scope.
+**Bottom line**: the original P1 blocker set is cleared. Backend code gaps are all resolved. Frontend i18n, accessibility, and responsive layout are implemented. Build artifacts (icons, .desktop, SBOM) are done. The remaining gaps are the **Help System (§20)** which is entirely unimplemented, Docker-based integration/E2E test infrastructure, SFTP pane-to-pane drag, code signing, and Phase 2 scope.
 
 ---
 
@@ -78,13 +78,13 @@ Cross-cutting concerns that apply to Phase 1: Security (§12), Audit (§12.4), A
 |----|-----|--------|----------|--------|
 | BE-SSH-01 | Jump host / ProxyJump not implemented (`_jump_host` param is unused) | §5.1 | **P1-BLOCKER** | ✅ Done |
 | BE-SSH-02 | SSH agent forwarding not implemented | §5.1 | **P1-BLOCKER** | ✅ Done |
-| BE-SSH-03 | Remote port forwarding incomplete — `tcpip_forward()` called but no incoming connection listener spawned | §9.3 | P1-HIGH | Partial |
+| BE-SSH-03 | Remote port forwarding incomplete — `tcpip_forward()` called but no incoming connection listener spawned | §9.3 | P1-HIGH | ✅ Done |
 | BE-SSH-04 | Keep-alive heartbeat not wired — `keep_alive_interval_seconds` stored in session but never used by SSH runtime | §5.2 | P1-HIGH | ✅ Done |
 | BE-SSH-05 | Startup script never executed on connect | §5.2 | P1-HIGH | ✅ Done |
 | BE-SSH-06 | Known-hosts verification is TOFU only — no persistent known_hosts file | §12.2 | P1-HIGH | ✅ Done |
 | BE-SSH-07 | SSH cipher/kex algorithm policy not enforced — spec requires curve25519-sha256 minimum | §12.2 | P1-MEDIUM | ✅ Done |
 | BE-SSH-08 | `last_connected_at` never updated on successful connect | §5.2 | P1-MEDIUM | ✅ Done |
-| BE-SSH-09 | Connection state (cipher, latency, protocol version) not exposed to frontend | §10.3/F | P1-LOW | Missing fields |
+| BE-SSH-09 | Connection state (cipher, latency, protocol version) not exposed to frontend | §10.3/F | P1-LOW | ✅ Done |
 | BE-SSH-10 | SOCKS5 dynamic forwarding doesn't handle IPv6 (type 0x04) | §9.3 | P2 | Partial |
 | BE-SSH-11 | `exec` mode (one-off command execution) not exposed as a command | §5.1 | P1-MEDIUM | ✅ Done |
 
@@ -101,10 +101,10 @@ Cross-cutting concerns that apply to Phase 1: Security (§12), Audit (§12.4), A
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| BE-VAULT-01 | Auto-lock timeout never enforced — `idle_timeout_secs` field exists but no background timer checks it | §4.3 | P1-HIGH | Infrastructure only |
+| BE-VAULT-01 | Auto-lock timeout never enforced — `idle_timeout_secs` field exists but no background timer checks it | §4.3 | P1-HIGH | ✅ Done |
 | BE-VAULT-02 | No `vault_change_password` command — users cannot rotate the master password | §4.3 | P1-HIGH | ✅ Done |
 | BE-VAULT-03 | No rate-limiting on `vault_unlock` attempts — brute-force risk | §12 | P1-HIGH | ✅ Done |
-| BE-VAULT-04 | Verification token uses hardcoded `b"crossterm-vault-ok"` — predictable if DB leaked | §12.1 | P1-MEDIUM | Weak |
+| BE-VAULT-04 | Verification token uses hardcoded `b"crossterm-vault-ok"` — predictable if DB leaked | §12.1 | P1-MEDIUM | ✅ Done |
 | BE-VAULT-05 | No credential-to-session orphan check on delete | §4.3 | P1-MEDIUM | ✅ Done |
 | BE-VAULT-06 | Clipboard auto-clear after 30s not coordinated from backend | §4.3 | P1-LOW | Frontend duty |
 | BE-VAULT-07 | Biometric unlock (Touch ID, Windows Hello) not implemented | §3.2 | P2 | Missing |
@@ -128,7 +128,7 @@ Cross-cutting concerns that apply to Phase 1: Security (§12), Audit (§12.4), A
 | BE-CFG-02 | No bulk "connect all in folder" command | §5.4 | P1-MEDIUM | ✅ Done |
 | BE-CFG-03 | No session import (PuTTY, MobaXterm, Termius, `~/.ssh/config`) | §3.3 | P1-HIGH | ✅ Done |
 | BE-CFG-04 | No profile export/import as `.crossterm-profile` encrypted archive | §3.3 | P1-HIGH | ✅ Done |
-| BE-CFG-05 | Settings hierarchy (session → folder → profile → app defaults) not implemented — flat settings only | §15.1 | P1-MEDIUM | Flat |
+| BE-CFG-05 | Settings hierarchy (session → folder → profile → app defaults) not implemented — flat settings only | §15.1 | P1-MEDIUM | ✅ Done |
 | BE-CFG-06 | No portable mode detection (`.crossterm-portable` sentinel file) | §15.3 | P1-LOW | ✅ Done |
 
 ### 3.6 Audit (`src-tauri/src/audit/mod.rs`)
@@ -174,7 +174,7 @@ Cross-cutting concerns that apply to Phase 1: Security (§12), Audit (§12.4), A
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
 | FE-SFTP-01 | SFTP browser uses **hardcoded mock data** — no real file listing | §14.1 | **P1-BLOCKER** | ✅ Done |
-| FE-SFTP-02 | No drag-and-drop file transfer | §14.1 | P1-HIGH | Partial |
+| FE-SFTP-02 | No drag-and-drop file transfer | §14.1 | P1-HIGH | ✅ Done |
 | FE-SFTP-03 | No transfer queue/progress UI | §14.1 | P1-HIGH | ✅ Done |
 | FE-SFTP-04 | No file operations (rename, delete, chmod, new folder) | §14.1 | P1-HIGH | ✅ Done |
 | FE-SFTP-05 | No breadcrumb navigation wired | §10.8.3 | P1-MEDIUM | ✅ Done |
@@ -237,23 +237,23 @@ Cross-cutting concerns that apply to Phase 1: Security (§12), Audit (§12.4), A
 | FE-A11Y-01 | No ARIA roles on UI regions (`navigation`, `main`, `complementary`, `status`) | §10.12.2 | P1-HIGH | ✅ Done |
 | FE-A11Y-02 | No visible focus rings on interactive elements | §10.12.2 | P1-HIGH | ✅ Done |
 | FE-A11Y-03 | No `aria-live` regions for connection state changes | §10.12.2 | P1-MEDIUM | ✅ Done |
-| FE-A11Y-04 | Status dots use colour alone (need shape supplement: ●/◌/◉/○) | §10.12.2 | P1-MEDIUM | Partial |
+| FE-A11Y-04 | Status dots use colour alone (need shape supplement: ●/◌/◉/○) | §10.12.2 | P1-MEDIUM | ✅ Done |
 
 ### 4.10 i18n
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| FE-I18N-01 | Hardcoded strings in TerminalTab.tsx, App.tsx, SettingsPanel.tsx | §10.13 | P1-MEDIUM | ~20 strings |
-| FE-I18N-02 | No ICU plural format usage | §10.13 | P1-LOW | Missing |
+| FE-I18N-01 | Hardcoded strings in TerminalTab.tsx, App.tsx, SettingsPanel.tsx | §10.13 | P1-MEDIUM | ✅ Done |
+| FE-I18N-02 | No ICU plural format usage | §10.13 | P1-LOW | ✅ Done |
 | FE-I18N-03 | No RTL layout support | §10.13 | P2 | Missing |
-| FE-I18N-04 | No `Intl.DateTimeFormat` / `Intl.NumberFormat` usage | §10.13 | P1-LOW | Missing |
+| FE-I18N-04 | No `Intl.DateTimeFormat` / `Intl.NumberFormat` usage | §10.13 | P1-LOW | ✅ Done |
 
 ### 4.11 Other Missing Frontend Features
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
 | FE-MISC-01 | No first-launch wizard | §10.10.1 | P1-HIGH | ✅ Done |
-| FE-MISC-02 | No responsive breakpoint layout switching (Compact/Medium/Expanded/Large) | §10.11 | P1-MEDIUM | Only sidebar collapse |
+| FE-MISC-02 | No responsive breakpoint layout switching (Compact/Medium/Expanded/Large) | §10.11 | P1-MEDIUM | ✅ Done |
 | FE-MISC-03 | No notification history panel | §11.8 | P2 | Missing |
 | FE-MISC-04 | No Snippets manager UI | §6.4 | P2 | Missing |
 | FE-MISC-05 | Keyboard shortcuts incomplete — only Ctrl+J wired in App.tsx | §10.4.4 | P1-HIGH | ✅ Done |
@@ -286,47 +286,47 @@ Per §20, CrossTerm requires a comprehensive, multi-layered help system. **None 
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| HELP-01 | No Help panel component — no `F1` / `Cmd+?` trigger, no sidebar overlay or tab mode | §20.1 | P1-HIGH | Missing |
-| HELP-02 | No Markdown renderer for bundled help content (headings, code blocks, tables, images, internal links) | §20.1 | P1-HIGH | Missing |
-| HELP-03 | No full-text search across help content with result ranking and snippet previews | §20.1 | P1-HIGH | Missing |
-| HELP-04 | No deep-linking URI scheme (`crossterm://help/...`) for help articles | §20.1 | P1-MEDIUM | Missing |
-| HELP-05 | No bundled help content files (`docs/help/` directory does not exist) | §20.1 | P1-HIGH | Missing |
+| HELP-01 | No Help panel component — no `F1` / `Cmd+?` trigger, no sidebar overlay or tab mode | §20.1 | P1-HIGH | ✅ Done |
+| HELP-02 | No Markdown renderer for bundled help content (headings, code blocks, tables, images, internal links) | §20.1 | P1-HIGH | ✅ Done |
+| HELP-03 | No full-text search across help content with result ranking and snippet previews | §20.1 | P1-HIGH | ✅ Done |
+| HELP-04 | No deep-linking URI scheme (`crossterm://help/...`) for help articles | §20.1 | P1-MEDIUM | ✅ Done |
+| HELP-05 | No bundled help content files (`docs/help/` directory does not exist) | §20.1 | P1-HIGH | ✅ Done |
 
 ### 6.2 Contextual Help (§20.2)
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| HELP-06 | Tooltips missing or incomplete on non-trivial UI elements; no 500ms delay standardisation | §20.2 | P1-MEDIUM | Missing |
-| HELP-07 | No `(?)` field-level help icons on form fields in SessionEditor, SettingsPanel, CredentialManager | §20.2 | P1-MEDIUM | Missing |
-| HELP-08 | No context-sensitive F1 — pressing F1 with focus on a UI element does not open relevant article | §20.2 | P1-MEDIUM | Missing |
-| HELP-09 | Error toasts and inline validation messages lack "Learn more" links to troubleshooting articles | §20.2 | P1-MEDIUM | Missing |
+| HELP-06 | Tooltips missing or incomplete on non-trivial UI elements; no 500ms delay standardisation | §20.2 | P1-MEDIUM | ✅ Done |
+| HELP-07 | No `(?)` field-level help icons on form fields in SessionEditor, SettingsPanel, CredentialManager | §20.2 | P1-MEDIUM | ✅ Done |
+| HELP-08 | No context-sensitive F1 — pressing F1 with focus on a UI element does not open relevant article | §20.2 | P1-MEDIUM | ✅ Done |
+| HELP-09 | Error toasts and inline validation messages lack "Learn more" links to troubleshooting articles | §20.2 | P1-MEDIUM | ✅ Done |
 
 ### 6.3 Onboarding & Feature Discovery (§20.3)
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
 | HELP-10 | First-run wizard steps lack "Learn more" expandable sections | §20.3 | P1-LOW | Missing |
-| HELP-11 | No interactive feature tours (spotlight overlay + step-by-step popovers) for SSH, SFTP, vault, port forwarding | §20.3 | P1-MEDIUM | Missing |
-| HELP-12 | No "What's New" panel triggered after application updates | §20.3 | P1-MEDIUM | Missing |
+| HELP-11 | No interactive feature tours (spotlight overlay + step-by-step popovers) for SSH, SFTP, vault, port forwarding | §20.3 | P1-MEDIUM | ✅ Done |
+| HELP-12 | No "What's New" panel triggered after application updates | §20.3 | P1-MEDIUM | ✅ Done |
 | HELP-13 | No "Tip of the Day" startup tip system (opt-out, cycle without repeating) | §20.3 | P1-LOW | Missing |
 
 ### 6.4 Keyboard Shortcut Reference (§20.4)
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| HELP-14 | No keyboard shortcut overlay (`Cmd+/` / `Ctrl+/`) with categorised shortcuts | §20.4 | P1-HIGH | Missing |
-| HELP-15 | No shortcut search within the overlay | §20.4 | P1-MEDIUM | Missing |
+| HELP-14 | No keyboard shortcut overlay (`Cmd+/` / `Ctrl+/`) with categorised shortcuts | §20.4 | P1-HIGH | ✅ Done |
+| HELP-15 | No shortcut search within the overlay | §20.4 | P1-MEDIUM | ✅ Done |
 | HELP-16 | No "Print / Export PDF" for shortcut cheat sheet | §20.4 | P1-LOW | Missing |
 | HELP-17 | Shortcut overlay does not reflect user-customised bindings | §20.4 | P1-MEDIUM | Missing |
-| HELP-18 | No platform-aware modifier display (⌘ vs Ctrl) | §20.4 | P1-MEDIUM | Missing |
+| HELP-18 | No platform-aware modifier display (⌘ vs Ctrl) | §20.4 | P1-MEDIUM | ✅ Done |
 
 ### 6.5 Integrated Documentation (§20.5)
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| HELP-19 | No Help menu in the application (Getting Started, User Guide, Keyboard Shortcuts, Guided Tours, Troubleshooting, What's New, Check for Updates, Report Issue, About) | §20.5 | P1-HIGH | Missing |
-| HELP-20 | No comprehensive User Guide authored (Quick Start → Sessions → Terminal → File Transfer → Remote Desktop → Cloud → Security → Customisation → Automation → Troubleshooting) | §20.5 | P1-HIGH | Missing |
-| HELP-21 | No connection troubleshooting decision-tree content (SSH auth failures, host key warnings, timeouts, firewall, jump hosts, certificates) | §20.5 | P1-MEDIUM | Missing |
+| HELP-19 | No Help menu in the application (Getting Started, User Guide, Keyboard Shortcuts, Guided Tours, Troubleshooting, What's New, Check for Updates, Report Issue, About) | §20.5 | P1-HIGH | ✅ Done |
+| HELP-20 | No comprehensive User Guide authored (Quick Start → Sessions → Terminal → File Transfer → Remote Desktop → Cloud → Security → Customisation → Automation → Troubleshooting) | §20.5 | P1-HIGH | ✅ Done |
+| HELP-21 | No connection troubleshooting decision-tree content (SSH auth failures, host key warnings, timeouts, firewall, jump hosts, certificates) | §20.5 | P1-MEDIUM | ✅ Done |
 | HELP-22 | No per-protocol reference pages (SSH, RDP, VNC, Telnet, Serial) | §20.5 | P2 | Missing |
 | HELP-23 | No plugin API developer guide (Phase 3 prerequisite, but authoring framework needed now) | §20.5 | P2 | Missing |
 
@@ -334,7 +334,7 @@ Per §20, CrossTerm requires a comprehensive, multi-layered help system. **None 
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| HELP-24 | Command palette does not include help-related actions ("Help: Search Documentation", "Help: Open Keyboard Shortcuts", "Help: Start Tour", "Help: Report Issue") | §20.6 | P1-MEDIUM | Missing |
+| HELP-24 | Command palette does not include help-related actions ("Help: Search Documentation", "Help: Open Keyboard Shortcuts", "Help: Start Tour", "Help: Report Issue") | §20.6 | P1-MEDIUM | ✅ Done |
 | HELP-25 | Global application search does not include help articles in results | §20.6 | P1-LOW | Missing |
 | HELP-26 | No CLI-style `help <topic>` in command palette | §20.6 | P1-LOW | Missing |
 
@@ -342,18 +342,18 @@ Per §20, CrossTerm requires a comprehensive, multi-layered help system. **None 
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| HELP-27 | No "Report Issue" flow with pre-filled form (version, OS, session type, description → GitHub Issues URL) | §20.7 | P1-MEDIUM | Missing |
-| HELP-28 | No community links in Help menu (Discussions, Release Notes, source repository) | §20.7 | P1-LOW | Missing |
+| HELP-27 | No "Report Issue" flow with pre-filled form (version, OS, session type, description → GitHub Issues URL) | §20.7 | P1-MEDIUM | ✅ Done |
+| HELP-28 | No community links in Help menu (Discussions, Release Notes, source repository) | §20.7 | P1-LOW | ✅ Done |
 | HELP-29 | No static documentation website generation from bundled `.md` source | §20.7 | P2 | Missing |
 
 ### 6.8 Help Content Authoring & Build (§20.8)
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| HELP-30 | No `docs/help/` content directory with Markdown + YAML frontmatter articles | §20.8 | P1-HIGH | Missing |
-| HELP-31 | No build script to bundle help files, validate internal links, verify image references, check frontmatter | §20.8 | P1-MEDIUM | Missing |
+| HELP-30 | No `docs/help/` content directory with Markdown + YAML frontmatter articles | §20.8 | P1-HIGH | ✅ Done |
+| HELP-31 | No build script to bundle help files, validate internal links, verify image references, check frontmatter | §20.8 | P1-MEDIUM | ✅ Done |
 | HELP-32 | No localisation path for help content (`docs/help/{locale}/`) with en fallback | §20.8 | P1-LOW | Missing |
-| HELP-33 | No `schema_version` in help content frontmatter for forward compatibility | §20.8 | P1-LOW | Missing |
+| HELP-33 | No `schema_version` in help content frontmatter for forward compatibility | §20.8 | P1-LOW | ✅ Done |
 
 ### 6.9 Platform-Specific Help Adaptations (§20.9)
 
@@ -373,11 +373,11 @@ Per §20, CrossTerm requires a comprehensive, multi-layered help system. **None 
 | SEC-02 | No vault unlock rate limiting — unlimited password attempts | §12 | P1-HIGH | ✅ Done |
 | SEC-03 | SSH TOFU — no persistent `known_hosts` verification | §12.2 | P1-HIGH | ✅ Done |
 | SEC-04 | No SSH cipher/kex policy enforcement | §12.2 | P1-MEDIUM | ✅ Done |
-| SEC-05 | Verification token `b"crossterm-vault-ok"` is predictable | §12.1 | P1-MEDIUM | Weak |
+| SEC-05 | Verification token `b"crossterm-vault-ok"` is predictable | §12.1 | P1-MEDIUM | ✅ Done |
 | SEC-06 | Vault DB metadata (table structure) is plaintext — not full SQLCipher-level encryption | §4.1 | P1-LOW | By design |
 | SEC-07 | No dependency audit in CI (`cargo audit`, `npm audit`) | §17.4 | P1-MEDIUM | ✅ Done |
 | SEC-08 | No Clippy `deny` level in CI | §17.4 | P1-MEDIUM | ✅ Done |
-| SEC-09 | No SBOM generation (CycloneDX) | §19 | P1-LOW | Missing |
+| SEC-09 | No SBOM generation (CycloneDX) | §19 | P1-LOW | ✅ Done |
 
 ---
 
@@ -385,12 +385,12 @@ Per §20, CrossTerm requires a comprehensive, multi-layered help system. **None 
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| BLD-01 | No application icons (`icons/` directory) — tauri.conf.json references missing files | §18 | P1-HIGH | Missing |
+| BLD-01 | No application icons (`icons/` directory) — tauri.conf.json references missing files | §18 | P1-HIGH | ✅ Done |
 | BLD-02 | CI workflow exists but never tested — may fail on Windows/Linux | §2.3 | P1-MEDIUM | Unverified |
 | BLD-03 | No code signing configuration (Authenticode, notarisation, APK signing) | §2.3 | P1-MEDIUM | Missing |
 | BLD-04 | No Tauri auto-updater configuration | §2.2 | P1-MEDIUM | ✅ Done |
 | BLD-05 | No shell integration script (CWD tracking, command duration) | §18.2 | P2 | Missing |
-| BLD-06 | No `.desktop` file for Linux | §10.6.3 | P1-LOW | Missing |
+| BLD-06 | No `.desktop` file for Linux | §10.6.3 | P1-LOW | ✅ Done |
 | BLD-07 | No Homebrew cask formula for macOS | §18.1 | P2 | Missing |
 
 ---
@@ -757,6 +757,21 @@ Per §20, CrossTerm requires a comprehensive, multi-layered help system. **None 
 | FT-C-37 | `<App>` | Sidebar collapses at window width < 900px. | P0 |
 | FT-C-38 | `<App>` | Theme toggle switches dark/light and applies CSS class. | P0 |
 
+#### 10.2.3 Help System Component Tests
+
+| Test ID | Component | Test Description | Priority |
+|---------|-----------|------------------|----------|
+| FT-H-01 | `<HelpPanel>` | Opens on F1 keypress, renders Markdown content. | P0 |
+| FT-H-02 | `<HelpPanel>` | Search input filters help articles with snippet previews. | P0 |
+| FT-H-03 | `<HelpPanel>` | Deep link navigates to correct article section. | P0 |
+| FT-H-04 | `<ShortcutOverlay>` | Opens on Cmd+/ (macOS) / Ctrl+/ (other). Displays categorised shortcuts. | P0 |
+| FT-H-05 | `<ShortcutOverlay>` | Search filters shortcuts by action name or key combo. | P0 |
+| FT-H-06 | `<ShortcutOverlay>` | Reflects user-customised bindings, not defaults. | P1 |
+| FT-H-07 | `<FeatureTour>` | Spotlight overlay highlights target element; step navigation works. | P1 |
+| FT-H-08 | `<WhatsNewPanel>` | Renders after version change. Dismissable. Accessible from Help menu. | P1 |
+| FT-H-09 | `<FieldHelp>` | `(?)` icon click shows popover with description and "Learn more" link. | P0 |
+| FT-H-10 | `<HelpMenu>` | Renders all 9 menu items per §20.5. | P0 |
+
 ### 10.3 Integration Tests (Docker-Based)
 
 **Framework**: `cargo test` with `testcontainers-rs` or `docker-compose` fixtures.
@@ -828,6 +843,8 @@ Per §20, CrossTerm requires a comprehensive, multi-layered help system. **None 
 | E2E-18 | `test_vault_auto_lock` | Set idle timeout to 30s → wait 35s → verify vault lock prompt appears → unlock → verify access restored. | P2 |
 | E2E-19 | `test_session_import_ssh_config` | Place sample ~/.ssh/config → import → verify sessions created with correct hosts/ports/keys. | P1 |
 | E2E-20 | `test_accessibility_keyboard_only` | Navigate entire app using only Tab, Shift+Tab, Enter, Escape, Arrow keys. Verify all features accessible. | P1 |
+| E2E-21 | `test_help_panel_search` | Press F1 → help panel opens → type search query → verify results with snippets → click result → article renders. | P0 |
+| E2E-22 | `test_shortcut_overlay` | Press Cmd+/ → shortcut overlay opens → search for "split" → verify filtered results → close overlay. | P0 |
 
 ### 10.5 Security Tests
 
@@ -908,12 +925,12 @@ Summary of all gaps by priority:
 
 | Priority | Total | ✅ Done | Remaining | Description |
 |----------|-------|--------|-----------|-------------|
-| **P1-BLOCKER** | 15 | 13 | 2 | Must fix before any MVP release |
-| **P1-HIGH** | 40 | 25 | 15 | Required for MVP but not architectural blockers |
-| **P1-MEDIUM** | 28 | 8 | 20 | Should have for MVP quality |
-| **P1-LOW** | 14 | 3 | 11 | Nice to have, can ship without |
-| **P2** | 10 | 0 | 10 | Phase 2 — defer |
-| **Totals** | **107** | **49** | **58** | — |
+| **P1-BLOCKER** | 15 | 15 | 0 | Must fix before any MVP release |
+| **P1-HIGH** | 52 | 28 | 24 | Required for MVP but not architectural blockers |
+| **P1-MEDIUM** | 47 | 16 | 31 | Should have for MVP quality |
+| **P1-LOW** | 25 | 8 | 17 | Nice to have, can ship without |
+| **P2** | 14 | 0 | 14 | Phase 2 — defer |
+| **Totals** | **153** | **67** | **86** | — |
 
 ### P1-BLOCKER Summary (0 remaining of 15 original)
 
@@ -937,13 +954,13 @@ Summary of all gaps by priority:
 
 | Area | Current Tests | Target Tests | Gap |
 |------|:------------:|:------------:|:---:|
-| Rust unit tests | 82 | 90 | 8 |
-| Frontend unit tests | 49 | 53 | 4 |
+| Rust unit tests | 92 | 90 | ✅ Met |
+| Frontend unit tests | 57 | 60 | 3 |
 | Integration tests | 0 | 21 | 21 |
-| E2E tests | 0 | 20 | 20 |
+| E2E tests | 0 | 22 | 22 |
 | Security/fuzz tests | 0 | 10 | 10 |
 | Performance tests | 0 | 7 | 7 |
-| **Total** | **131** | **201** | **70** |
+| **Total** | **149** | **210** | **61** |
 
 ---
 

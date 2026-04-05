@@ -1,0 +1,215 @@
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useTranslation } from "react-i18next";
+import clsx from "clsx";
+import { X, Search, ChevronRight, BookOpen } from "lucide-react";
+import type { HelpArticle } from "@/types";
+import { helpArticles, searchArticles } from "@/components/Help/helpContent";
+import MarkdownRenderer from "@/components/Help/MarkdownRenderer";
+
+interface HelpPanelProps {
+  readonly open: boolean;
+  readonly onClose: () => void;
+  readonly articleSlug?: string;
+}
+
+const CATEGORY_ORDER = ["basics", "connections", "security", "reference", "support"];
+
+// TODO: HELP-34 — macOS Help Book integration
+// Register help content with Apple's Help Book framework for Spotlight indexing
+// and native Help Viewer support. Requires Info.plist HPDBookTitle/HPDBookRemoteURL
+// keys and .helpindex files generated from the help articles.
+
+// TODO: HELP-36 — Windows high-contrast mode & Narrator integration
+// Ensure HelpPanel renders correctly under Windows High Contrast themes
+// (forced-colors media query). Verify ARIA landmarks and role attributes
+// for full Narrator/NVDA screen reader compatibility.
+
+export default function HelpPanel({ open, onClose, articleSlug }: HelpPanelProps) {
+  const { t } = useTranslation();
+  const [query, setQuery] = useState("");
+  const [activeSlug, setActiveSlug] = useState("getting-started");
+  const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
+  const searchRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  const filtered = useMemo(() => searchArticles(query), [query]);
+
+  const groupedArticles = useMemo(() => {
+    const groups: Record<string, HelpArticle[]> = {};
+    for (const article of filtered) {
+      if (!groups[article.category]) {
+        groups[article.category] = [];
+      }
+      groups[article.category].push(article);
+    }
+    return groups;
+  }, [filtered]);
+
+  const sortedCategories = useMemo(
+    () =>
+      Object.keys(groupedArticles).sort(
+        (a, b) => CATEGORY_ORDER.indexOf(a) - CATEGORY_ORDER.indexOf(b),
+      ),
+    [groupedArticles],
+  );
+
+  const activeArticle = useMemo(
+    () => helpArticles.find((a) => a.slug === activeSlug),
+    [activeSlug],
+  );
+
+  const toggleCategory = useCallback((category: string) => {
+    setCollapsedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(category)) {
+        next.delete(category);
+      } else {
+        next.add(category);
+      }
+      return next;
+    });
+  }, []);
+
+  // Focus search on open
+  useEffect(() => {
+    if (open) {
+      requestAnimationFrame(() => searchRef.current?.focus());
+    }
+  }, [open]);
+
+  // Deep-link: navigate to specific article when articleSlug is provided
+  useEffect(() => {
+    if (open && articleSlug) {
+      const exists = helpArticles.some((a) => a.slug === articleSlug);
+      if (exists) {
+        setActiveSlug(articleSlug);
+        setQuery("");
+      }
+    }
+  }, [open, articleSlug]);
+
+  // Close on ESC
+  useEffect(() => {
+    if (!open) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      }
+    }
+    globalThis.addEventListener("keydown", handleKeyDown);
+    return () => globalThis.removeEventListener("keydown", handleKeyDown);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[8500] flex">
+      {/* Backdrop */}
+      {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
+      <div
+        className="absolute inset-0 bg-black/40"
+        onClick={onClose}
+      />
+
+      {/* Panel */}
+      <div
+        ref={panelRef}
+        className="relative ml-auto flex h-full w-full max-w-[800px] bg-surface-primary shadow-[var(--shadow-3)]"
+        style={{ animation: "paletteIn var(--duration-short) var(--ease-decelerate)" }}
+      >
+        {/* Sidebar: article list */}
+        <div className="flex flex-col w-[240px] shrink-0 border-r border-border-subtle bg-surface-secondary">
+          {/* Header */}
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-border-subtle">
+            <BookOpen size={16} className="text-accent-primary shrink-0" />
+            <span className="text-sm font-semibold text-text-primary">{t("help.title")}</span>
+          </div>
+
+          {/* Search */}
+          <div className="px-2 py-2 border-b border-border-subtle">
+            <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-surface-sunken border border-border-subtle">
+              <Search size={12} className="text-text-disabled shrink-0" />
+              <input
+                ref={searchRef}
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={t("help.search")}
+                className="flex-1 bg-transparent text-xs text-text-primary placeholder:text-text-disabled outline-none"
+              />
+            </div>
+          </div>
+
+          {/* Article list */}
+          <div className="flex-1 overflow-y-auto py-1">
+            {sortedCategories.length === 0 && (
+              <p className="px-3 py-4 text-xs text-text-disabled text-center">
+                {t("help.noResults")}
+              </p>
+            )}
+            {sortedCategories.map((category) => (
+              <div key={category}>
+                <button
+                  onClick={() => toggleCategory(category)}
+                  className="flex items-center gap-1 w-full px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-text-secondary hover:text-text-primary transition-colors"
+                >
+                  <ChevronRight
+                    size={10}
+                    className={clsx(
+                      "shrink-0 transition-transform",
+                      !collapsedCategories.has(category) && "rotate-90",
+                    )}
+                  />
+                  {t(`help.categories.${category}`, category)}
+                </button>
+
+                {!collapsedCategories.has(category) &&
+                  groupedArticles[category].map((article) => (
+                    <button
+                      key={article.slug}
+                      onClick={() => setActiveSlug(article.slug)}
+                      className={clsx(
+                        "flex items-center w-full px-5 py-1.5 text-xs text-left transition-colors",
+                        article.slug === activeSlug
+                          ? "bg-surface-elevated text-text-primary font-medium"
+                          : "text-text-secondary hover:bg-surface-elevated hover:text-text-primary",
+                      )}
+                    >
+                      {article.title}
+                    </button>
+                  ))}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Content area */}
+        <div className="flex flex-col flex-1 min-w-0">
+          {/* Toolbar */}
+          <div className="flex items-center justify-between px-4 py-2 border-b border-border-subtle">
+            <span className="text-sm font-semibold text-text-primary">
+              {activeArticle?.title ?? t("help.title")}
+            </span>
+            <button
+              onClick={onClose}
+              className="p-1 rounded hover:bg-surface-elevated text-text-secondary hover:text-text-primary transition-colors"
+              title={t("help.closeHelp")}
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          {/* Rendered content */}
+          <div className="flex-1 overflow-y-auto px-6 py-4">
+            {activeArticle ? (
+              <MarkdownRenderer content={activeArticle.body} />
+            ) : (
+              <p className="text-sm text-text-disabled">{t("help.noResults")}</p>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

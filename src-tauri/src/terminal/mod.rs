@@ -573,21 +573,70 @@ mod tests {
 
     #[test]
     #[ignore = "Requires Tauri AppHandle for event emission — run as integration test"]
-    fn test_create_and_list_terminal() {
-        // Would test: create a terminal, verify list() returns it,
-        // verify the returned TerminalInfo has correct shell/cols/rows.
+    fn test_terminal_create() {
+        // UT-T-01: Create a local terminal. Assert terminal ID is returned
+        // and listed in terminal_list.
     }
 
     #[test]
     #[ignore = "Requires Tauri AppHandle for event emission — run as integration test"]
-    fn test_create_write_close_lifecycle() {
-        // Would test: create terminal, write data to it, close it,
-        // verify it's removed from the manager's session map.
+    fn test_terminal_write_read() {
+        // UT-T-02: Create terminal, write `echo hello\n`, capture output.
+        // Assert "hello" appears in output.
     }
 
     #[test]
     #[ignore = "Requires Tauri AppHandle for event emission — run as integration test"]
-    fn test_resize_active_terminal() {
-        // Would test: create terminal, resize to 200x50, verify no error.
+    fn test_terminal_resize() {
+        // UT-T-03: Create terminal, resize to 120×40. Assert no error.
+    }
+
+    #[test]
+    #[ignore = "Requires Tauri AppHandle for event emission — run as integration test"]
+    fn test_terminal_close() {
+        // UT-T-04: Create terminal, close it. Assert removed from terminal_list.
+    }
+
+    #[test]
+    #[ignore = "Requires Tauri AppHandle for event emission — run as integration test"]
+    fn test_multiple_terminals() {
+        // UT-T-05: Create 5 terminals. Verify all listed. Close 2. Verify 3 remain.
+    }
+
+    #[test]
+    #[ignore = "Requires Tauri AppHandle for event emission — run as integration test"]
+    fn test_custom_shell() {
+        // UT-T-06: Create terminal with /bin/sh (or cmd.exe on Windows).
+        // Verify shell spawned.
+    }
+
+    #[test]
+    #[ignore = "Requires Tauri AppHandle for event emission — run as integration test"]
+    fn test_custom_env() {
+        // UT-T-07: Create terminal with FOO=bar in environment.
+        // Write `echo $FOO\n`. Assert "bar" in output.
+    }
+
+    #[test]
+    #[ignore = "Requires Tauri AppHandle for event emission — run as integration test"]
+    fn test_custom_cwd() {
+        // UT-T-08: Create terminal with cwd=/tmp. Write `pwd\n`.
+        // Assert "/tmp" in output.
+    }
+
+    #[test]
+    #[ignore = "Requires Tauri AppHandle for event emission — run as integration test"]
+    fn test_terminal_exit_event() {
+        // UT-T-09: Create terminal, write `exit\n`. Assert
+        // `terminal:exit` event is emitted.
+    }
+
+    // ── BE-TERM-05: Session logging ─────────────────────────────────
+
+    #[test]
+    #[ignore = "Requires Tauri AppHandle for event emission — run as integration test"]
+    fn test_start_stop_logging() {
+        // Create terminal, start logging to a temp file, write data,
+        // stop logging. Verify log file contains output.
     }
 }

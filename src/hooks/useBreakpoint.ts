@@ -2,9 +2,9 @@ import { useState, useEffect } from "react";
 import type { Breakpoint } from "@/types";
 
 function getBreakpoint(width: number): Breakpoint {
-  if (width < 640) return "compact";
-  if (width < 1024) return "medium";
-  if (width < 1440) return "expanded";
+  if (width < 600) return "compact";
+  if (width < 900) return "medium";
+  if (width < 1200) return "expanded";
   return "large";
 }
 

@@ -1144,6 +1144,7 @@ mod tests {
             auto_reconnect: None,
             keep_alive_interval_seconds: None,
             favorite: None,
+            settings_override: None,
         }
     }
 
@@ -1238,6 +1239,7 @@ mod tests {
                 auto_reconnect: Some(false),
                 keep_alive_interval_seconds: None,
                 favorite: Some(true),
+                settings_override: None,
             },
         )
         .unwrap();
@@ -1708,5 +1710,118 @@ Host *
         let nonce = Nonce::from_slice(&encrypted[EXPORT_SALT_LEN..EXPORT_SALT_LEN + EXPORT_NONCE_LEN]);
         let result = wrong_cipher.decrypt(nonce, &encrypted[EXPORT_SALT_LEN + EXPORT_NONCE_LEN..]);
         assert!(result.is_err(), "Decryption with wrong passphrase should fail");
+    }
+
+    // ── UT-C-11: Session all types ──────────────────────────────────
+
+    #[test]
+    fn test_session_all_types() {
+        let env = TestEnv::new();
+
+        let all_types = vec![
+            (SessionType::SshTerminal, "SSH Terminal"),
+            (SessionType::SftpBrowser, "SFTP Browser"),
+            (SessionType::ScpTransfer, "SCP Transfer"),
+            (SessionType::Rdp, "RDP Session"),
+            (SessionType::Vnc, "VNC Session"),
+            (SessionType::Telnet, "Telnet Session"),
+            (SessionType::SerialConsole, "Serial Console"),
+            (SessionType::LocalShell, "Local Shell"),
+            (SessionType::WslShell, "WSL Shell"),
+            (SessionType::CloudShell, "Cloud Shell"),
+            (SessionType::WebConsole, "Web Console"),
+            (SessionType::KubernetesExec, "Kubernetes Exec"),
+            (SessionType::DockerExec, "Docker Exec"),
+        ];
+
+        let mut created_ids = Vec::new();
+        for (stype, name) in &all_types {
+            let req = SessionCreateRequest {
+                name: name.to_string(),
+                session_type: stype.clone(),
+                group: Some("all-types-test".to_string()),
+                tags: None,
+                icon: None,
+                color_label: None,
+                credential_ref: None,
+                connection: ConnectionDetails {
+                    host: Some("10.0.0.1".to_string()),
+                    port: Some(22),
+                    protocol_options: None,
+                },
+                startup_script: None,
+                environment_variables: None,
+                notes: None,
+                auto_reconnect: None,
+                keep_alive_interval_seconds: None,
+                favorite: None,
+                settings_override: None,
+            };
+            let session = do_session_create(env.id(), req).unwrap();
+            assert_eq!(session.session_type, *stype);
+            created_ids.push(session.id);
+        }
+
+        assert_eq!(created_ids.len(), 13, "All 13 session types must be created");
+
+        // Verify all persist and deserialize correctly
+        let list = do_session_list(env.id()).unwrap();
+        assert_eq!(list.len(), 13);
+
+        for (stype, name) in &all_types {
+            let found = list.iter().find(|s| s.name == *name);
+            assert!(found.is_some(), "Session '{}' not found after persist", name);
+            assert_eq!(found.unwrap().session_type, *stype, "SessionType mismatch for '{}'", name);
+        }
+    }
+
+    // ── UT-C-13: last_connected_at update ───────────────────────────
+
+    #[test]
+    fn test_last_connected_at_update() {
+        let env = TestEnv::new();
+
+        let session = do_session_create(env.id(), make_session_request("Test Server", "10.0.0.1"))
+            .unwrap();
+        assert!(session.last_connected_at.is_none(), "New session should have no last_connected_at");
+
+        let now = Utc::now();
+        let updated = do_session_update(
+            env.id(),
+            &session.id,
+            SessionUpdateRequest {
+                name: None,
+                session_type: None,
+                group: None,
+                tags: None,
+                icon: None,
+                color_label: None,
+                credential_ref: None,
+                connection: None,
+                startup_script: None,
+                environment_variables: None,
+                notes: None,
+                auto_reconnect: None,
+                keep_alive_interval_seconds: None,
+                favorite: None,
+                settings_override: None,
+            },
+        )
+        .unwrap();
+
+        // Manually update last_connected_at by writing to file
+        let mut session_data = do_session_get(env.id(), &session.id).unwrap();
+        session_data.last_connected_at = Some(now);
+        let json = serde_json::to_string_pretty(&session_data).unwrap();
+        let path = session_file(env.id(), &session.id);
+        std::fs::write(&path, json).unwrap();
+
+        // Reload and verify timestamp persists
+        let reloaded = do_session_get(env.id(), &session.id).unwrap();
+        assert!(reloaded.last_connected_at.is_some(), "last_connected_at should persist after update");
+        let lc = reloaded.last_connected_at.unwrap();
+        // Should be within 1 second of `now`
+        let diff = (lc - now).num_seconds().abs();
+        assert!(diff <= 1, "last_connected_at timestamp drift too large: {} seconds", diff);
     }
 }

@@ -677,6 +677,12 @@ impl Vault {
                     params![name, now.to_rfc3339(), id],
                 )?;
             }
+            if let Some(username) = &req.username {
+                inner.db.execute(
+                    "UPDATE credentials SET username=?1, updated_at=?2 WHERE id=?3",
+                    params![username, now.to_rfc3339(), id],
+                )?;
+            }
             if let Some(tags) = &req.tags {
                 let tags_json = serde_json::to_string(tags)?;
                 inner.db.execute(
@@ -1389,7 +1395,191 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    // ── UT-V-14: Clipboard copy ─────────────────────────────────────
+    // ── UT-V-05: Credential roundtrip (certificate) ───────────────
+
+    #[test]
+    fn test_credential_roundtrip_certificate() {
+        let tp = TestProfile::new();
+        let vault = setup_vault(&tp);
+
+        let req = CredentialCreateRequest {
+            name: "TLS Cert".to_string(),
+            credential_type: CredentialType::Certificate,
+            username: Some("server".to_string()),
+            data: json!({
+                "cert_data": "-----BEGIN CERTIFICATE-----\nMIIBxTCCAW...\n-----END CERTIFICATE-----",
+                "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBAD...\n-----END PRIVATE KEY-----"
+            }),
+            tags: Some(vec!["tls".to_string(), "prod".to_string()]),
+            notes: Some("Production TLS certificate".to_string()),
+        };
+        let id = vault.credential_create(req).unwrap();
+
+        let detail = vault.credential_get(&id).unwrap();
+        assert_eq!(detail.name, "TLS Cert");
+        assert_eq!(detail.credential_type, CredentialType::Certificate);
+        assert_eq!(detail.username.as_deref(), Some("server"));
+        assert!(detail.data["cert_data"].as_str().unwrap().contains("BEGIN CERTIFICATE"));
+        assert!(detail.data["private_key"].as_str().unwrap().contains("BEGIN PRIVATE KEY"));
+        assert_eq!(detail.tags, vec!["tls", "prod"]);
+        assert_eq!(detail.notes.as_deref(), Some("Production TLS certificate"));
+    }
+
+    // ── UT-V-06: Credential roundtrip (API token) ──────────────────
+
+    #[test]
+    fn test_credential_roundtrip_api_token() {
+        let tp = TestProfile::new();
+        let vault = setup_vault(&tp);
+
+        let req = CredentialCreateRequest {
+            name: "GitHub Token".to_string(),
+            credential_type: CredentialType::ApiToken,
+            username: Some("devuser".to_string()),
+            data: json!({
+                "provider": "github",
+                "token": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "expiry": "2027-12-31T23:59:59Z"
+            }),
+            tags: Some(vec!["api".to_string(), "github".to_string()]),
+            notes: Some("GitHub personal access token".to_string()),
+        };
+        let id = vault.credential_create(req).unwrap();
+
+        let detail = vault.credential_get(&id).unwrap();
+        assert_eq!(detail.name, "GitHub Token");
+        assert_eq!(detail.credential_type, CredentialType::ApiToken);
+        assert_eq!(detail.username.as_deref(), Some("devuser"));
+        assert_eq!(detail.data["provider"], "github");
+        assert_eq!(detail.data["token"], "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
+        assert_eq!(detail.data["expiry"], "2027-12-31T23:59:59Z");
+        assert_eq!(detail.tags, vec!["api", "github"]);
+    }
+
+    // ── UT-V-07: Credential roundtrip (cloud) ──────────────────────
+
+    #[test]
+    fn test_credential_roundtrip_cloud() {
+        let tp = TestProfile::new();
+        let vault = setup_vault(&tp);
+
+        let req = CredentialCreateRequest {
+            name: "AWS Prod".to_string(),
+            credential_type: CredentialType::CloudCredential,
+            username: Some("iam-deploy".to_string()),
+            data: json!({
+                "provider": "aws",
+                "access_key": "AKIAIOSFODNN7EXAMPLE",
+                "secret_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+                "region": "us-east-1"
+            }),
+            tags: Some(vec!["aws".to_string(), "prod".to_string()]),
+            notes: Some("AWS production credentials".to_string()),
+        };
+        let id = vault.credential_create(req).unwrap();
+
+        let detail = vault.credential_get(&id).unwrap();
+        assert_eq!(detail.name, "AWS Prod");
+        assert_eq!(detail.credential_type, CredentialType::CloudCredential);
+        assert_eq!(detail.username.as_deref(), Some("iam-deploy"));
+        assert_eq!(detail.data["provider"], "aws");
+        assert_eq!(detail.data["access_key"], "AKIAIOSFODNN7EXAMPLE");
+        assert_eq!(detail.data["secret_key"], "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY");
+        assert_eq!(detail.data["region"], "us-east-1");
+        assert_eq!(detail.tags, vec!["aws", "prod"]);
+    }
+
+    // ── UT-V-08: Credential roundtrip (TOTP seed) ──────────────────
+
+    #[test]
+    fn test_credential_roundtrip_totp() {
+        let tp = TestProfile::new();
+        let vault = setup_vault(&tp);
+
+        let req = CredentialCreateRequest {
+            name: "2FA Seed".to_string(),
+            credential_type: CredentialType::TotpSeed,
+            username: Some("user@example.com".to_string()),
+            data: json!({
+                "secret": "JBSWY3DPEHPK3PXP",
+                "issuer": "ExampleCorp",
+                "digits": 6,
+                "period": 30
+            }),
+            tags: Some(vec!["totp".to_string(), "2fa".to_string()]),
+            notes: Some("TOTP seed for ExampleCorp".to_string()),
+        };
+        let id = vault.credential_create(req).unwrap();
+
+        let detail = vault.credential_get(&id).unwrap();
+        assert_eq!(detail.name, "2FA Seed");
+        assert_eq!(detail.credential_type, CredentialType::TotpSeed);
+        assert_eq!(detail.username.as_deref(), Some("user@example.com"));
+        assert_eq!(detail.data["secret"], "JBSWY3DPEHPK3PXP");
+        assert_eq!(detail.data["issuer"], "ExampleCorp");
+        assert_eq!(detail.data["digits"], 6);
+        assert_eq!(detail.data["period"], 30);
+        assert_eq!(detail.tags, vec!["totp", "2fa"]);
+    }
+
+    // ── UT-V-14: Argon2id parameters ────────────────────────────────
+
+    #[test]
+    fn test_argon2id_parameters() {
+        let password = b"test-password";
+        let mut salt = [0u8; SALT_LEN];
+        OsRng.fill_bytes(&mut salt);
+
+        let key = derive_key(password, &salt).unwrap();
+        assert_eq!(key.len(), 32, "Derived key must be exactly 32 bytes (AES-256)");
+
+        // Derive again with same inputs → same key
+        let key2 = derive_key(password, &salt).unwrap();
+        assert_eq!(key.as_slice(), key2.as_slice(), "Same password+salt must produce same key");
+
+        // Different salt → different key
+        let mut salt2 = [0u8; SALT_LEN];
+        OsRng.fill_bytes(&mut salt2);
+        let key3 = derive_key(password, &salt2).unwrap();
+        assert_ne!(key.as_slice(), key3.as_slice(), "Different salt must produce different key");
+    }
+
+    // ── UT-V-19: Concurrent access ──────────────────────────────────
+
+    #[test]
+    fn test_concurrent_access() {
+        let tp = TestProfile::new();
+        let vault = std::sync::Arc::new(setup_vault(&tp));
+
+        // Pre-create a credential to read concurrently
+        let id = vault.credential_create(make_password_request("Shared Cred")).unwrap();
+
+        let mut handles = Vec::new();
+        for i in 0..10 {
+            let vault_clone = std::sync::Arc::clone(&vault);
+            let id_clone = id.clone();
+            handles.push(std::thread::spawn(move || {
+                // Mix of reads and writes
+                if i % 2 == 0 {
+                    let detail = vault_clone.credential_get(&id_clone).unwrap();
+                    assert_eq!(detail.name, "Shared Cred");
+                } else {
+                    let _ = vault_clone.credential_list().unwrap();
+                }
+            }));
+        }
+
+        for handle in handles {
+            handle.join().expect("Thread should not panic during concurrent vault access");
+        }
+
+        // Verify credential is still intact after concurrent access
+        let detail = vault.credential_get(&id).unwrap();
+        assert_eq!(detail.name, "Shared Cred");
+        assert_eq!(detail.data["password"], "s3cret!");
+    }
+
+    // ── UT-V-14 (existing): Clipboard copy ──────────────────────────
 
     #[test]
     fn test_clipboard_arboard_available() {

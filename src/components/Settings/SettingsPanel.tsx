@@ -19,6 +19,7 @@ import {
 import { useAppStore } from "@/stores/appStore";
 import { ThemeVariant } from "@/types";
 import type { BellStyle, CursorStyle, ThemeFile, ThemeTokens } from "@/types";
+import FieldHelp from "@/components/Help/FieldHelp";
 
 import darkTheme from "@/themes/dark.json";
 import lightTheme from "@/themes/light.json";
@@ -95,16 +96,21 @@ const CATEGORIES: { id: Category; label: string; icon: React.ReactNode }[] = [
 function SettingRow({
   label,
   description,
+  help,
   children,
 }: {
   readonly label: string;
   readonly description?: string;
+  readonly help?: React.ReactNode;
   readonly children: React.ReactNode;
 }) {
   return (
     <div className="flex items-start justify-between gap-4 py-3 border-b border-border-subtle last:border-0">
       <div className="flex-1 min-w-0">
-        <p className="text-xs text-text-primary">{label}</p>
+        <p className="flex items-center text-xs text-text-primary">
+          {label}
+          {help}
+        </p>
         {description ? <p className="text-[10px] text-text-secondary mt-0.5">{description}</p> : null}
       </div>
       <div className="shrink-0">{children}</div>
@@ -321,12 +327,12 @@ export default function SettingsPanel() {
       case "appearance":
         return (
           <div>
-            <SettingRow label={t("settings.theme")} description={t("settings.themeDescription")}>
+            <SettingRow label={t("settings.theme")} description={t("settings.themeDescription")} help={<FieldHelp description={t("fieldHelp.theme")} />}>
               <div className="flex flex-wrap gap-2 justify-end">
                 {[
-                  { value: ThemeVariant.Dark, label: t("theme.dark"), icon: <Moon size={12} /> },
-                  { value: ThemeVariant.Light, label: t("theme.light"), icon: <Sun size={12} /> },
-                  { value: ThemeVariant.System, label: t("theme.system"), icon: <Monitor size={12} /> },
+                  { value: ThemeVariant.Dark, label: t("themes.dark"), icon: <Moon size={12} /> },
+                  { value: ThemeVariant.Light, label: t("themes.light"), icon: <Sun size={12} /> },
+                  { value: ThemeVariant.System, label: t("themes.system"), icon: <Monitor size={12} /> },
                 ].map((themeOption) => (
                   <button
                     key={themeOption.value}
@@ -403,7 +409,7 @@ export default function SettingsPanel() {
       case "terminal":
         return (
           <div>
-            <SettingRow label={t("settings.scrollbackLines")} description={t("settings.scrollbackDescription")}>
+            <SettingRow label={t("settings.scrollbackLines")} description={t("settings.scrollbackDescription")} help={<FieldHelp description={t("fieldHelp.scrollback")} />}>
               <NumberInput
                 value={settings.scrollback_lines}
                 onChange={(value) => updateSettings("scrollback_lines", value)}
@@ -449,7 +455,7 @@ export default function SettingsPanel() {
                 }}
               />
             </SettingRow>
-            <SettingRow label={t("settings.opacity") || "Opacity"}>
+            <SettingRow label={t("settings.opacity")} description={t("settings.opacityDescription")}>
               <NumberInput value={settings.terminal_opacity} onChange={(value) => updateSettings("terminal_opacity", value)} min={0.2} max={1} step={0.1} />
             </SettingRow>
           </div>
@@ -464,7 +470,7 @@ export default function SettingsPanel() {
                 className="w-56 px-2 py-1 rounded-lg text-xs bg-surface-secondary border border-border-default text-text-primary outline-none focus:border-border-focus transition-colors duration-[var(--duration-short)]"
               />
             </SettingRow>
-            <SettingRow label={t("settings.tabTitleFormat") || "Tab title format"}>
+            <SettingRow label={t("settings.tabTitleFormat")} description={t("settings.tabTitleFormatDescription")}>
               <input
                 value={settings.tab_title_format}
                 onChange={(event) => updateSettings("tab_title_format", event.target.value)}
@@ -484,7 +490,7 @@ export default function SettingsPanel() {
                 max={1440}
               />
             </SettingRow>
-            <SettingRow label={t("settings.copyOnSelect") || "Copy on select"}>
+            <SettingRow label={t("settings.copyOnSelect")} description={t("settings.copyOnSelectDescription")}>
               <Toggle value={settings.copy_on_select} onChange={(value) => updateSettings("copy_on_select", value)} />
             </SettingRow>
             <SettingRow label={t("settings.pasteConfirmation")} description={t("settings.pasteConfirmationDescription")}>
@@ -501,7 +507,7 @@ export default function SettingsPanel() {
   };
 
   return (
-    <div className="flex h-full bg-surface-primary">
+    <div className="flex h-full bg-surface-primary" data-help-article="getting-started">
       <nav className="w-48 border-r border-border-subtle shrink-0 py-3 px-2">
         <div className="text-[10px] uppercase tracking-wider text-text-disabled px-2 mb-2">
           {t("settings.title")}

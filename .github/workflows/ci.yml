@@ -106,3 +106,21 @@ jobs:
       - name: Build Tauri (release)
         working-directory: src-tauri
         run: cargo build --release
+
+      - name: Generate SBOM (CycloneDX)
+        if: runner.os == 'Linux'
+        working-directory: src-tauri
+        run: |
+          cargo install cargo-cyclonedx --locked
+          cargo cyclonedx --format json --output-file ../sbom-rust.cdx.json
+          cd ..
+          npx @cyclonedx/cyclonedx-npm --output-file sbom-npm.cdx.json
+
+      - name: Upload SBOM artifacts
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: |
+            sbom-rust.cdx.json
+            sbom-npm.cdx.json

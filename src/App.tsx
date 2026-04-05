@@ -38,6 +38,12 @@ import SplitPaneContainer from "@/components/Terminal/SplitPaneContainer";
 import CommandPalette from "@/components/Shared/CommandPalette";
 import QuickConnect from "@/components/Shared/QuickConnect";
 import FirstLaunchWizard from "@/components/Shared/FirstLaunchWizard";
+import HelpPanel from "@/components/Help/HelpPanel";
+import ShortcutOverlay from "@/components/Help/ShortcutOverlay";
+import HelpMenu from "@/components/Help/HelpMenu";
+import WhatsNewPanel from "@/components/Help/WhatsNewPanel";
+import FeatureTour from "@/components/Help/FeatureTour";
+import TipOfTheDay from "@/components/Help/TipOfTheDay";
 
 const SESSION_TYPE_ICONS: Record<string, string> = {
   ssh: "⌨",
@@ -120,12 +126,13 @@ function TitleBar() {
         onClick={cycleTheme}
         className="p-1.5 rounded hover:bg-surface-elevated text-text-secondary hover:text-text-primary transition-colors"
         title={themeLabel}
+        data-tooltip={themeLabel}
       >
         {themeIcon}
       </button>
       <div className="flex items-center gap-1.5 ml-2 px-2 py-1 rounded hover:bg-surface-elevated cursor-pointer">
         <User size={14} className="text-text-secondary" />
-        <span className="text-xs text-text-secondary">{activeProfile?.name ?? "Profile"}</span>
+        <span className="text-xs text-text-secondary">{activeProfile?.name ?? t("titleBar.profile")}</span>
       </div>
     </header>
   );
@@ -423,6 +430,7 @@ function TabBar({
                   closeTab(tab.id);
                 }}
                 className="opacity-0 group-hover:opacity-100 hover:bg-surface-elevated rounded p-0.5 transition-opacity"
+                data-tooltip={t("tabs.closeTab")}
               >
                 <X size={12} />
               </button>
@@ -444,6 +452,7 @@ function TabBar({
           onClick={() => setShowNewTabDropdown((v) => !v)}
           className="flex items-center justify-center w-8 h-8 mx-1 rounded hover:bg-surface-elevated text-text-secondary hover:text-text-primary transition-colors"
           title={t("tabs.newTab")}
+          data-tooltip={t("tabs.newTab")}
         >
           <Plus size={16} />
           <MoreVertical size={10} className="ml-px" />
@@ -468,6 +477,7 @@ function TabBar({
             : "text-text-secondary hover:text-text-primary hover:bg-surface-elevated"
         )}
         title={t("broadcast.tooltip")}
+        data-tooltip={t("broadcast.tooltip")}
       >
         <Radio size={14} />
       </button>
@@ -541,6 +551,7 @@ function Sidebar() {
                 : "text-text-secondary hover:text-text-primary hover:bg-surface-elevated"
             )}
             title={t(label)}
+            data-tooltip={t(label)}
           >
             {sidebarMode === mode && !sidebarCollapsed && (
               <span className="absolute left-0 top-1 bottom-1 w-0.5 rounded-r bg-accent-primary" />
@@ -796,7 +807,15 @@ function BottomPanel() {
 
 // ─── Region F: Status Bar ──────────────────────────────────────
 
-function StatusBar() {
+function StatusBar({
+  onOpenHelp,
+  onOpenShortcuts,
+  onStartTour,
+}: {
+  readonly onOpenHelp: () => void;
+  readonly onOpenShortcuts: () => void;
+  readonly onStartTour: (tourId: string) => void;
+}) {
   const { t } = useTranslation();
   const activeProfileId = useAppStore((s) => s.activeProfileId);
   const profiles = useAppStore((s) => s.profiles);
@@ -840,13 +859,55 @@ function StatusBar() {
         <Lock size={11} />
         {t("statusBar.noTunnels")}
       </span>
+      <HelpMenu onOpenHelp={onOpenHelp} onOpenShortcuts={onOpenShortcuts} onStartTour={onStartTour} />
     </footer>
+  );
+}
+
+// ─── Compact Bottom Navigation ─────────────────────────────────
+
+function BottomNav({
+  onNewLocalShell,
+}: {
+  readonly onNewLocalShell: () => void;
+}) {
+  const { t } = useTranslation();
+  const sidebarMode = useAppStore((s) => s.sidebarMode);
+  const setSidebarMode = useAppStore((s) => s.setSidebarMode);
+
+  return (
+    <nav className="flex items-center justify-around h-12 bg-surface-secondary border-t border-border-subtle shrink-0">
+      {SIDEBAR_MODES.map(({ mode, icon: Icon, label }) => (
+        <button
+          key={mode}
+          onClick={() => setSidebarMode(mode)}
+          className={clsx(
+            "flex flex-col items-center justify-center gap-0.5 flex-1 h-full transition-colors",
+            sidebarMode === mode
+              ? "text-accent-primary"
+              : "text-text-secondary hover:text-text-primary"
+          )}
+        >
+          <Icon size={18} />
+          <span className="text-[9px]">{t(label)}</span>
+        </button>
+      ))}
+      <button
+        onClick={onNewLocalShell}
+        className="flex flex-col items-center justify-center gap-0.5 flex-1 h-full text-text-secondary hover:text-text-primary transition-colors"
+      >
+        <Plus size={18} />
+        <span className="text-[9px]">{t("tabs.newTab")}</span>
+      </button>
+    </nav>
   );
 }
 
 // ─── App ───────────────────────────────────────────────────────
 
 export default function App() {
+  const { t } = useTranslation();
+  const breakpoint = useBreakpoint();
   const theme = useAppStore((s) => s.theme);
   const resolvedTheme = useAppStore((s) => s.resolvedTheme);
   const setResolvedTheme = useAppStore((s) => s.setResolvedTheme);
@@ -867,6 +928,11 @@ export default function App() {
   const closeTab = useSessionStore((s) => s.closeTab);
   const updateTabStatus = useSessionStore((s) => s.updateTabStatus);
   const [showQuickConnect, setShowQuickConnect] = useState(false);
+  const [showHelpPanel, setShowHelpPanel] = useState(false);
+  const [showShortcutOverlay, setShowShortcutOverlay] = useState(false);
+  const [helpArticleSlug, setHelpArticleSlug] = useState<string | undefined>(undefined);
+  const [showFeatureTour, setShowFeatureTour] = useState(false);
+  const [activeTourId, setActiveTourId] = useState<string | undefined>(undefined);
   const [liveAnnouncement, setLiveAnnouncement] = useState("");
 
   // ── Task 3: Load settings from backend on startup ──
@@ -900,7 +966,7 @@ export default function App() {
         const tab = tabs.find((t) => t.sessionId === sessionId);
         if (tab) {
           updateTabStatus(tab.id, ConnectionStatus.Disconnected);
-          setLiveAnnouncement(`Session ${tab.title} disconnected.`);
+          setLiveAnnouncement(t("announcements.sessionDisconnected", { name: tab.title }));
         }
       }
     );
@@ -917,7 +983,7 @@ export default function App() {
         const tab = tabs.find((t) => t.sessionId === sessionId);
         if (tab) {
           updateTabStatus(tab.id, ConnectionStatus.Disconnected);
-          setLiveAnnouncement(`SSH session ${tab.title} disconnected.`);
+          setLiveAnnouncement(t("announcements.sshDisconnected", { name: tab.title }));
         }
       }
     );
@@ -966,7 +1032,7 @@ export default function App() {
     const now = new Date().toISOString();
     const session: Session = {
       id: crypto.randomUUID(),
-      name: "Local Shell",
+      name: t("sessionTypes.local_shell"),
       type: SessionType.LocalShell,
       group: "",
       tags: [],
@@ -1003,6 +1069,18 @@ export default function App() {
   // Keyboard shortcuts
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
+      // F1: open help panel (no modifier needed)
+      if (e.key === "F1") {
+        e.preventDefault();
+        // Context-sensitive: check for data-help-article on active element or ancestors
+        const active = document.activeElement as HTMLElement | null;
+        const helpEl = active?.closest("[data-help-article]") as HTMLElement | null;
+        const slug = helpEl?.dataset.helpArticle;
+        setHelpArticleSlug(slug);
+        setShowHelpPanel((v) => !v);
+        return;
+      }
+
       const mod = e.ctrlKey || e.metaKey;
       if (!mod && !e.ctrlKey) return;
 
@@ -1012,7 +1090,7 @@ export default function App() {
       const handled = handleModShortcut(key, shift, e);
       if (handled) e.preventDefault();
     },
-    [toggleBottomPanel, handleNewLocalShell, activeTabId, closeTab, settingsOpen, setSettingsOpen, switchToTabByOffset, switchToTabByIndex],
+    [toggleBottomPanel, handleNewLocalShell, activeTabId, closeTab, settingsOpen, setSettingsOpen, switchToTabByOffset, switchToTabByIndex, showHelpPanel, showShortcutOverlay],
   );
 
   function handleModShortcut(key: string, shift: boolean, e: KeyboardEvent): boolean {
@@ -1021,6 +1099,7 @@ export default function App() {
     if (key === "w" && !shift && activeTabId) { closeTab(activeTabId); return true; }
     if (key === ",") { setSettingsOpen(!settingsOpen); return true; }
     if (key === "n" && shift) { setShowQuickConnect((v) => !v); return true; }
+    if (key === "/") { setShowShortcutOverlay((v) => !v); return true; }
     if (e.key === "Tab" && e.ctrlKey) { switchToTabByOffset(shift ? -1 : 1); return true; }
     if (e.key >= "1" && e.key <= "9" && !shift) { switchToTabByIndex(Number.parseInt(e.key, 10) - 1); return true; }
     return false;
@@ -1042,7 +1121,7 @@ export default function App() {
           <TitleBar />
 
           <div className="flex flex-1 min-h-0">
-            {/* Region C */}
+            {/* Region C - hidden on compact via Sidebar internal logic */}
             <Sidebar />
 
             <div className="flex flex-col flex-1 min-w-0">
@@ -1058,21 +1137,41 @@ export default function App() {
                 <SessionCanvas />
               </div>
 
-              {/* Region E */}
-              {bottomPanelVisible && <BottomPanel />}
+              {/* Region E - only show on expanded+ breakpoints */}
+              {bottomPanelVisible && breakpoint !== "compact" && <BottomPanel />}
             </div>
           </div>
 
-          {/* Region F */}
-          <StatusBar />
+          {/* Compact bottom nav */}
+          {breakpoint === "compact" && (
+            <BottomNav
+              onNewLocalShell={handleNewLocalShell}
+            />
+          )}
+
+          {/* Region F - hide on compact */}
+          {breakpoint !== "compact" && <StatusBar onOpenHelp={() => setShowHelpPanel(true)} onOpenShortcuts={() => setShowShortcutOverlay(true)} onStartTour={(id) => { setActiveTourId(id); setShowFeatureTour(true); }} />}
 
           {/* Overlays */}
           <CommandPalette
             onNewLocalShell={handleNewLocalShell}
             onNewSSHSession={() => setShowQuickConnect(true)}
             onLockVault={() => lockVault()}
+            onOpenHelp={() => setShowHelpPanel(true)}
+            onOpenShortcuts={() => setShowShortcutOverlay(true)}
+            onOpenHelpArticle={(slug) => { setHelpArticleSlug(slug); setShowHelpPanel(true); }}
           />
           {showQuickConnect && <QuickConnect onConnect={() => setShowQuickConnect(false)} />}
+          <HelpPanel open={showHelpPanel} onClose={() => setShowHelpPanel(false)} articleSlug={helpArticleSlug} />
+          <ShortcutOverlay open={showShortcutOverlay} onClose={() => setShowShortcutOverlay(false)} />
+          <WhatsNewPanel />
+          <TipOfTheDay />
+          {showFeatureTour && activeTourId && (
+            <FeatureTour
+              tourId={activeTourId}
+              onComplete={() => { setShowFeatureTour(false); setActiveTourId(undefined); }}
+            />
+          )}
         </div>
       ) : (
         <div className="h-screen w-screen overflow-hidden bg-surface-primary">
