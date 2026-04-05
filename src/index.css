@@ -1,0 +1,324 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===== CrossTerm Dark Theme (default) ===== */
+:root {
+  --surface-primary: #1a1b26;
+  --surface-secondary: #222337;
+  --surface-elevated: #2a2b3d;
+  --surface-sunken: #13141f;
+  --surface-overlay: rgba(0, 0, 0, 0.6);
+
+  --text-primary: #c8d3f5;
+  --text-secondary: #828bb8;
+  --text-disabled: #545976;
+  --text-inverse: #1a1b26;
+  --text-link: #7dcfff;
+
+  --border-default: #2f3048;
+  --border-subtle: #262738;
+  --border-strong: #414264;
+  --border-focus: #7aa2f7;
+
+  --interactive-default: #3d59a1;
+  --interactive-hover: #4e6bbd;
+  --interactive-active: #7aa2f7;
+  --interactive-disabled: #2a2b3d;
+
+  --status-connected: #22c55e;
+  --status-disconnected: #ef4444;
+  --status-connecting: #f59e0b;
+  --status-idle: #6b7280;
+
+  --accent-primary: #2dd4bf;
+  --accent-secondary: #7aa2f7;
+
+  /* Terminal ANSI colors */
+  --terminal-fg: #c8d3f5;
+  --terminal-bg: #1a1b26;
+  --terminal-cursor: #2dd4bf;
+  --terminal-selection: rgba(45, 212, 191, 0.25);
+
+  --terminal-ansi-0: #1a1b26;
+  --terminal-ansi-1: #f7768e;
+  --terminal-ansi-2: #9ece6a;
+  --terminal-ansi-3: #e0af68;
+  --terminal-ansi-4: #7aa2f7;
+  --terminal-ansi-5: #bb9af7;
+  --terminal-ansi-6: #7dcfff;
+  --terminal-ansi-7: #c8d3f5;
+  --terminal-ansi-8: #545976;
+  --terminal-ansi-9: #ff9e9e;
+  --terminal-ansi-10: #b9f27c;
+  --terminal-ansi-11: #ffd394;
+  --terminal-ansi-12: #a4c8ff;
+  --terminal-ansi-13: #d4b8ff;
+  --terminal-ansi-14: #a8e4ff;
+  --terminal-ansi-15: #e4e8ff;
+
+  /* Typography */
+  --font-ui: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-md: 13px;
+  --font-size-lg: 15px;
+  --font-size-xl: 18px;
+  --font-size-terminal: 14px;
+  --line-height-terminal: 1.2;
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* Elevation */
+  --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-3: 0 8px 24px rgba(0, 0, 0, 0.6);
+
+  /* Motion */
+  --duration-micro: 100ms;
+  --duration-short: 150ms;
+  --duration-medium: 250ms;
+  --duration-long: 400ms;
+  --ease-default: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-decelerate: cubic-bezier(0, 0, 0.2, 1);
+  --ease-accelerate: cubic-bezier(0.4, 0, 1, 1);
+
+  /* Layout */
+  --sidebar-width: 240px;
+  --sidebar-collapsed-width: 48px;
+  --titlebar-height: 40px;
+  --tabbar-height: 38px;
+  --statusbar-height: 28px;
+}
+
+/* ===== CrossTerm Light Theme ===== */
+.light {
+  --surface-primary: #f5f5f7;
+  --surface-secondary: #ecedf1;
+  --surface-elevated: #ffffff;
+  --surface-sunken: #e2e3e8;
+  --surface-overlay: rgba(0, 0, 0, 0.3);
+
+  --text-primary: #1e1e2e;
+  --text-secondary: #5c5f77;
+  --text-disabled: #9ca0b0;
+  --text-inverse: #f5f5f7;
+  --text-link: #1e66f5;
+
+  --border-default: #dcdee6;
+  --border-subtle: #e6e7ef;
+  --border-strong: #b4b6c4;
+  --border-focus: #1e66f5;
+
+  --interactive-default: #1e66f5;
+  --interactive-hover: #3b7bf8;
+  --interactive-active: #1150d4;
+  --interactive-disabled: #e2e3e8;
+
+  --status-connected: #22c55e;
+  --status-disconnected: #ef4444;
+  --status-connecting: #f59e0b;
+  --status-idle: #6b7280;
+
+  --accent-primary: #4f46e5;
+  --accent-secondary: #7c3aed;
+
+  --terminal-fg: #1e1e2e;
+  --terminal-bg: #f5f5f7;
+  --terminal-cursor: #4f46e5;
+  --terminal-selection: rgba(79, 70, 229, 0.2);
+
+  --terminal-ansi-0: #5c5f77;
+  --terminal-ansi-1: #d20f39;
+  --terminal-ansi-2: #40a02b;
+  --terminal-ansi-3: #df8e1d;
+  --terminal-ansi-4: #1e66f5;
+  --terminal-ansi-5: #8839ef;
+  --terminal-ansi-6: #179299;
+  --terminal-ansi-7: #4c4f69;
+  --terminal-ansi-8: #9ca0b0;
+  --terminal-ansi-9: #e64553;
+  --terminal-ansi-10: #49b831;
+  --terminal-ansi-11: #eba12a;
+  --terminal-ansi-12: #3b7bf8;
+  --terminal-ansi-13: #a14dff;
+  --terminal-ansi-14: #1fa8b0;
+  --terminal-ansi-15: #1e1e2e;
+
+  --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.1);
+  --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.12);
+  --shadow-3: 0 8px 24px rgba(0, 0, 0, 0.16);
+}
+
+/* ===== Base ===== */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-md);
+  color: var(--text-primary);
+  background-color: var(--surface-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Disable text selection on chrome UI */
+.no-select {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ===== Scrollbar ===== */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-disabled);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ===== xterm.js container ===== */
+.xterm-container {
+  width: 100%;
+  height: 100%;
+}
+
+.xterm-container .xterm {
+  height: 100%;
+  padding: var(--space-1);
+}
+
+.xterm-container .xterm-viewport {
+  overflow-y: auto;
+}
+
+.xterm-container .xterm-viewport::-webkit-scrollbar {
+  width: 8px;
+}
+
+.xterm-container .xterm-viewport::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.xterm-container .xterm-viewport::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
+}
+
+.xterm-container .xterm-screen {
+  height: 100%;
+}
+
+/* ===== Utility animations ===== */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes paletteIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slide-in-left {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes slide-in-bottom {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fade-in var(--duration-short) var(--ease-decelerate);
+}
+
+.animate-slide-left {
+  animation: slide-in-left var(--duration-medium) var(--ease-default);
+}
+
+.animate-slide-bottom {
+  animation: slide-in-bottom var(--duration-medium) var(--ease-default);
+}
+
+/* ===== Reduced motion ===== */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-micro: 0ms;
+    --duration-short: 0ms;
+    --duration-medium: 0ms;
+    --duration-long: 0ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0ms !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0ms !important;
+    transition-delay: 0ms !important;
+  }
+}
+
+/* ===== Focus-visible ring ===== */
+:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+/* Suppress focus ring on terminal containers */
+.xterm-container :focus-visible,
+[data-tauri-drag-region] :focus-visible {
+  outline: none;
+}
