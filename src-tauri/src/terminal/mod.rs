@@ -101,7 +101,6 @@ impl TerminalManager {
         let cols = cols.unwrap_or(80);
         let rows = rows.unwrap_or(24);
         let is_binary = binary_mode.unwrap_or(false);
-
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(PtySize {
@@ -311,6 +310,7 @@ impl TerminalManager {
         Ok(())
     }
 
+
     pub fn stop_logging(&self, id: &str) -> Result<(), TerminalError> {
         let sessions = self.sessions.lock().unwrap();
         let session = sessions
@@ -336,7 +336,6 @@ fn default_shell() -> String {
 }
 
 // ── Tauri commands ──────────────────────────────────────────────────────
-
 #[tauri::command]
 pub fn terminal_create(
     app_handle: AppHandle,

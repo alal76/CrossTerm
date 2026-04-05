@@ -828,26 +828,30 @@ pub fn vault_check_idle(
 
 #[tauri::command]
 pub fn vault_check_orphans(
+    state: tauri::State<'_, Vault>,
     config_state: tauri::State<'_, crate::config::ConfigState>,
-    credential_id: String,
 ) -> Result<Vec<String>, VaultError> {
+    let all_creds = state.credential_list()?;
+    let all_ids: std::collections::HashSet<String> =
+        all_creds.iter().map(|c| c.id.clone()).collect();
+
     let pid = config_state
         .active_profile_id
         .read()
         .unwrap()
         .clone()
         .unwrap_or_default();
-    if pid.is_empty() {
-        return Ok(Vec::new());
-    }
-    let sessions = crate::config::do_session_list_for_profile(&pid);
-    let mut referencing = Vec::new();
-    for session in sessions {
-        if session.credential_ref.as_deref() == Some(&credential_id) {
-            referencing.push(session.name);
-        }
-    }
-    Ok(referencing)
+
+    let referenced: std::collections::HashSet<String> = if !pid.is_empty() {
+        crate::config::do_session_list_for_profile(&pid)
+            .iter()
+            .filter_map(|s| s.credential_ref.clone())
+            .collect()
+    } else {
+        std::collections::HashSet::new()
+    };
+
+    Ok(all_ids.difference(&referenced).cloned().collect())
 }
 
 // ── BE-VAULT-06: Clipboard auto-clear ───────────────────────────────────

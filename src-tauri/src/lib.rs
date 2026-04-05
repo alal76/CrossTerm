@@ -61,6 +61,7 @@ pub fn run() {
             config::session_duplicate,
             config::session_import_ssh_config,
             config::session_bulk_connect,
+            config::session_list_by_group,
             config::settings_get,
             config::settings_update,
             config::settings_get_effective,
@@ -86,6 +87,8 @@ pub fn run() {
             ssh::ssh_port_forward_remove,
             ssh::ssh_exec,
             ssh::ssh_forget_host_key,
+            ssh::ssh_generate_key,
+            ssh::ssh_list_keys,
             // SFTP
             sftp::sftp_open,
             sftp::sftp_close,

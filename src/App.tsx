@@ -462,7 +462,7 @@ function TabBar({
       <button
         onClick={toggleBroadcastMode}
         className={clsx(
-          "flex items-center justify-center w-8 h-8 mx-0.5 rounded transition-colors shrink-0",
+          "flex items-center justify-center w-8 h-8 rounded transition-colors shrink-0",
           broadcastMode
             ? "bg-accent-primary/20 text-accent-primary"
             : "text-text-secondary hover:text-text-primary hover:bg-surface-elevated"
@@ -498,23 +498,11 @@ function Sidebar() {
   const sessions = useSessionStore((s) => s.sessions);
   const favorites = useSessionStore((s) => s.favorites);
   const openTab = useSessionStore((s) => s.openTab);
+  const setSidebarMode = useAppStore((s) => s.setSidebarMode);
   const breakpoint = useBreakpoint();
 
   // Auto-collapse on smaller breakpoints
   useEffect(() => {
-    if (breakpoint === "compact") {
-      setSidebarCollapsed(true);
-    }
-  }, [breakpoint, setSidebarCollapsed]);
-
-  // Hide sidebar entirely on compact
-  if (breakpoint === "compact") return null;
-
-  return (
-    <nav
-      className={clsx(
-        "flex shrink-0 h-full border-r border-border-subtle bg-surface-secondary transition-all",
-        sidebarCollapsed ? "w-12" : breakpoint === "large" ? "w-7
     if (breakpoint === "compact" || breakpoint === "medium") {
       setSidebarCollapsed(true);
     }

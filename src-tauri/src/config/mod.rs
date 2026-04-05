@@ -20,6 +20,8 @@ pub enum ConfigError {
     Io(#[from] std::io::Error),
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("Encryption error: {0}")]
+    Encryption(String),
 }
 
 impl Serialize for ConfigError {
@@ -252,6 +254,24 @@ pub(crate) fn effective_data_dir() -> PathBuf {
         }
     }
     data_base_dir()
+}
+
+// ── Crypto helpers for profile export/import ────────────────────────────
+
+const EXPORT_SALT_LEN: usize = 32;
+const EXPORT_KEY_LEN: usize = 32;
+const EXPORT_NONCE_LEN: usize = 12;
+
+fn derive_export_key(passphrase: &[u8], salt: &[u8]) -> Result<Vec<u8>, ConfigError> {
+    use argon2::{Algorithm, Argon2, Params, Version};
+    let params = Params::new(65536, 3, 4, Some(EXPORT_KEY_LEN))
+        .map_err(|e| ConfigError::Encryption(e.to_string()))?;
+    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    let mut key = vec![0u8; EXPORT_KEY_LEN];
+    argon2
+        .hash_password_into(passphrase, salt, &mut key)
+        .map_err(|e| ConfigError::Encryption(e.to_string()))?;
+    Ok(key)
 }
 
 // ── Config state ────────────────────────────────────────────────────────
@@ -818,6 +838,21 @@ pub fn session_bulk_connect(
     Ok(ids)
 }
 
+// ── BE-CFG-02: Session list by group ────────────────────────────────────
+
+#[tauri::command]
+pub fn session_list_by_group(
+    state: tauri::State<'_, ConfigState>,
+    profile_id: String,
+    group: String,
+) -> Result<Vec<SessionDefinition>, ConfigError> {
+    let sessions = do_session_list(&profile_id)?;
+    Ok(sessions
+        .into_iter()
+        .filter(|s| s.group.as_deref() == Some(&group))
+        .collect())
+}
+
 // ── BE-CFG-04: Profile export/import ────────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -830,11 +865,12 @@ struct ProfileExportData {
 #[tauri::command]
 pub fn profile_export(
     state: tauri::State<'_, ConfigState>,
+    profile_id: String,
     path: String,
+    passphrase: String,
 ) -> Result<(), ConfigError> {
-    let pid = state.active_profile()?;
-    let profile = do_profile_get(&pid)?;
-    let sessions = do_session_list(&pid)?;
+    let profile = do_profile_get(&profile_id)?;
+    let sessions = do_session_list(&profile_id)?;
     let settings = profile.settings.clone();
 
     let export = ProfileExportData {
@@ -844,8 +880,33 @@ pub fn profile_export(
     };
 
     let json = serde_json::to_string_pretty(&export)?;
-    std::fs::write(&path, json)?;
 
+    // Encrypt with AES-256-GCM
+    use aes_gcm::{aead::{Aead, KeyInit}, Aes256Gcm, Nonce};
+    use rand::RngCore;
+
+    let mut salt = vec![0u8; EXPORT_SALT_LEN];
+    aes_gcm::aead::OsRng.fill_bytes(&mut salt);
+    let key = derive_export_key(passphrase.as_bytes(), &salt)?;
+
+    let cipher = Aes256Gcm::new_from_slice(&key)
+        .map_err(|e| ConfigError::Encryption(e.to_string()))?;
+    let mut nonce_bytes = [0u8; EXPORT_NONCE_LEN];
+    aes_gcm::aead::OsRng.fill_bytes(&mut nonce_bytes);
+    let nonce = Nonce::from_slice(&nonce_bytes);
+
+    let ciphertext = cipher.encrypt(nonce, json.as_bytes())
+        .map_err(|e| ConfigError::Encryption(e.to_string()))?;
+
+    // File format: salt (32 bytes) + nonce (12 bytes) + ciphertext
+    let mut output = Vec::with_capacity(EXPORT_SALT_LEN + EXPORT_NONCE_LEN + ciphertext.len());
+    output.extend_from_slice(&salt);
+    output.extend_from_slice(&nonce_bytes);
+    output.extend_from_slice(&ciphertext);
+
+    std::fs::write(&path, output)?;
+
+    let pid = state.active_profile_id.read().unwrap().clone().unwrap_or_default();
     crate::audit::append_event(
         &pid,
         crate::audit::AuditEventType::ProfileExport,
@@ -859,8 +920,28 @@ pub fn profile_export(
 pub fn profile_import(
     state: tauri::State<'_, ConfigState>,
     path: String,
+    passphrase: String,
 ) -> Result<Profile, ConfigError> {
-    let data = std::fs::read_to_string(&path)?;
+    let encrypted = std::fs::read(&path)?;
+    if encrypted.len() < EXPORT_SALT_LEN + EXPORT_NONCE_LEN {
+        return Err(ConfigError::Encryption("Invalid export file".into()));
+    }
+
+    let salt = &encrypted[..EXPORT_SALT_LEN];
+    let nonce_bytes = &encrypted[EXPORT_SALT_LEN..EXPORT_SALT_LEN + EXPORT_NONCE_LEN];
+    let ciphertext = &encrypted[EXPORT_SALT_LEN + EXPORT_NONCE_LEN..];
+
+    let key = derive_export_key(passphrase.as_bytes(), salt)?;
+
+    use aes_gcm::{aead::{Aead, KeyInit}, Aes256Gcm, Nonce};
+    let cipher = Aes256Gcm::new_from_slice(&key)
+        .map_err(|e| ConfigError::Encryption(e.to_string()))?;
+    let nonce = Nonce::from_slice(nonce_bytes);
+
+    let plaintext = cipher.decrypt(nonce, ciphertext)
+        .map_err(|_| ConfigError::Encryption("Invalid passphrase or corrupted file".into()))?;
+    let data = String::from_utf8(plaintext)
+        .map_err(|e| ConfigError::Encryption(e.to_string()))?;
     let export: ProfileExportData = serde_json::from_str(&data)?;
 
     // Create a new profile with imported data
@@ -1451,5 +1532,143 @@ Host *
     fn test_parse_ssh_config_empty() {
         let hosts = parse_ssh_config("");
         assert!(hosts.is_empty());
+    }
+
+    // ── UT-C-11: Session list by group ──────────────────────────────
+
+    #[test]
+    fn test_session_list_by_group() {
+        let env = TestEnv::new();
+
+        let mut req1 = make_session_request("Web1", "10.0.0.1");
+        req1.group = Some("production".to_string());
+        do_session_create(env.id(), req1).unwrap();
+
+        let mut req2 = make_session_request("Web2", "10.0.0.2");
+        req2.group = Some("production".to_string());
+        do_session_create(env.id(), req2).unwrap();
+
+        let mut req3 = make_session_request("Dev1", "10.0.0.3");
+        req3.group = Some("staging".to_string());
+        do_session_create(env.id(), req3).unwrap();
+
+        let sessions = do_session_list(env.id()).unwrap();
+        let prod: Vec<_> = sessions
+            .iter()
+            .filter(|s| s.group.as_deref() == Some("production"))
+            .collect();
+        assert_eq!(prod.len(), 2);
+
+        let staging: Vec<_> = sessions
+            .iter()
+            .filter(|s| s.group.as_deref() == Some("staging"))
+            .collect();
+        assert_eq!(staging.len(), 1);
+
+        let empty: Vec<_> = sessions
+            .iter()
+            .filter(|s| s.group.as_deref() == Some("nonexistent"))
+            .collect();
+        assert!(empty.is_empty());
+    }
+
+    // ── UT-C-12: Encrypted profile export/import ────────────────────
+
+    #[test]
+    fn test_encrypted_export_import_roundtrip() {
+        let env = TestEnv::new();
+
+        do_session_create(env.id(), make_session_request("Server1", "10.0.0.1")).unwrap();
+        do_session_create(env.id(), make_session_request("Server2", "10.0.0.2")).unwrap();
+
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let export_path = tmp.path().to_string_lossy().to_string();
+
+        // Export: serialize + encrypt
+        let profile = do_profile_get(env.id()).unwrap();
+        let sessions = do_session_list(env.id()).unwrap();
+        let export = ProfileExportData {
+            profile: profile.clone(),
+            sessions,
+            settings: profile.settings,
+        };
+        let json = serde_json::to_string_pretty(&export).unwrap();
+        let passphrase = "test-passphrase-123!";
+
+        use aes_gcm::{aead::{Aead, KeyInit}, Aes256Gcm, Nonce};
+        use rand::RngCore;
+
+        let mut salt = vec![0u8; EXPORT_SALT_LEN];
+        aes_gcm::aead::OsRng.fill_bytes(&mut salt);
+        let key = derive_export_key(passphrase.as_bytes(), &salt).unwrap();
+        let cipher = Aes256Gcm::new_from_slice(&key).unwrap();
+        let mut nonce_bytes = [0u8; EXPORT_NONCE_LEN];
+        aes_gcm::aead::OsRng.fill_bytes(&mut nonce_bytes);
+        let nonce = Nonce::from_slice(&nonce_bytes);
+        let ciphertext = cipher.encrypt(nonce, json.as_bytes()).unwrap();
+
+        let mut output = Vec::new();
+        output.extend_from_slice(&salt);
+        output.extend_from_slice(&nonce_bytes);
+        output.extend_from_slice(&ciphertext);
+        std::fs::write(&export_path, &output).unwrap();
+
+        // Import: read + decrypt
+        let encrypted = std::fs::read(&export_path).unwrap();
+        let s = &encrypted[..EXPORT_SALT_LEN];
+        let n = &encrypted[EXPORT_SALT_LEN..EXPORT_SALT_LEN + EXPORT_NONCE_LEN];
+        let ct = &encrypted[EXPORT_SALT_LEN + EXPORT_NONCE_LEN..];
+
+        let dk = derive_export_key(passphrase.as_bytes(), s).unwrap();
+        let dc = Aes256Gcm::new_from_slice(&dk).unwrap();
+        let dn = Nonce::from_slice(n);
+        let plaintext = dc.decrypt(dn, ct).unwrap();
+        let data = String::from_utf8(plaintext).unwrap();
+        let imported: ProfileExportData = serde_json::from_str(&data).unwrap();
+
+        assert_eq!(imported.profile.name, "Test Profile");
+        assert_eq!(imported.sessions.len(), 2);
+    }
+
+    #[test]
+    fn test_encrypted_import_wrong_passphrase() {
+        let env = TestEnv::new();
+
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let export_path = tmp.path().to_string_lossy().to_string();
+
+        let profile = do_profile_get(env.id()).unwrap();
+        let export = ProfileExportData {
+            profile: profile.clone(),
+            sessions: vec![],
+            settings: profile.settings,
+        };
+        let json = serde_json::to_string_pretty(&export).unwrap();
+
+        use aes_gcm::{aead::{Aead, KeyInit}, Aes256Gcm, Nonce};
+        use rand::RngCore;
+
+        let mut salt = vec![0u8; EXPORT_SALT_LEN];
+        aes_gcm::aead::OsRng.fill_bytes(&mut salt);
+        let key = derive_export_key("correct-pass".as_bytes(), &salt).unwrap();
+        let cipher = Aes256Gcm::new_from_slice(&key).unwrap();
+        let mut nonce_bytes = [0u8; EXPORT_NONCE_LEN];
+        aes_gcm::aead::OsRng.fill_bytes(&mut nonce_bytes);
+        let nonce = Nonce::from_slice(&nonce_bytes);
+        let ciphertext = cipher.encrypt(nonce, json.as_bytes()).unwrap();
+
+        let mut output = Vec::new();
+        output.extend_from_slice(&salt);
+        output.extend_from_slice(&nonce_bytes);
+        output.extend_from_slice(&ciphertext);
+        std::fs::write(&export_path, &output).unwrap();
+
+        // Try decrypting with wrong passphrase
+        let encrypted = std::fs::read(&export_path).unwrap();
+        let wrong_key = derive_export_key("wrong-pass".as_bytes(), &encrypted[..EXPORT_SALT_LEN]).unwrap();
+        let wrong_cipher = Aes256Gcm::new_from_slice(&wrong_key).unwrap();
+        let nonce = Nonce::from_slice(&encrypted[EXPORT_SALT_LEN..EXPORT_SALT_LEN + EXPORT_NONCE_LEN]);
+        let result = wrong_cipher.decrypt(nonce, &encrypted[EXPORT_SALT_LEN + EXPORT_NONCE_LEN..]);
+        assert!(result.is_err(), "Decryption with wrong passphrase should fail");
     }
 }
