@@ -3,9 +3,9 @@
 | Field            | Value                     |
 |------------------|---------------------------|
 | Spec Reference   | SPEC-CROSSTERM-001 v1.0   |
-| Analysis Date    | 2025-04-05                |
+| Analysis Date    | 2026-04-05                |
 | Scope            | Phase 1 MVP (§20)         |
-| Overall Coverage | **~72%**                  |
+| Overall Coverage | **>72% (recount pending)** |
 
 ---
 
@@ -26,26 +26,26 @@
 
 ## 1. Executive Summary
 
-The implementation has progressed significantly from a compilable skeleton to a **functional MVP candidate**. Core subsystems — SSH terminal (frontend + backend), SFTP browser, credential vault, session tree, split panes, and tab management — are wired end-to-end. 52 of the original gaps have been resolved. The remaining gaps are mostly polish, security hardening, and Phase 2 features.
+The implementation has progressed significantly from a compilable skeleton to a **functional MVP candidate**. Core subsystems — SSH terminal (frontend + backend), SFTP browser, credential vault, session tree, split panes, and tab management — are wired end-to-end. The blocker set from the original analysis has been substantially reduced, and the remaining work is concentrated in polish, accessibility, CI/CD, packaging, and Phase 2 features.
 
 | Category | Implemented | Present but unstubbed | Missing entirely |
 |----------|:-----------:|:---------------------:|:----------------:|
 | Local Shell | ✅ | — | — |
-| SSH Terminal (backend) | ✅ keep-alive, startup script, exec | Jump hosts, agent fwd | — |
-| SSH Terminal (frontend wiring) | ✅ SshTerminalView + QuickConnect | Auto-reconnect UI | — |
-| SFTP Browser (backend) | ✅ 14 commands, progress events | SCP fallback, throttling | — |
-| SFTP Browser (frontend) | ✅ real ops, context menu, progress | Drag-and-drop | — |
+| SSH Terminal (backend) | ✅ keep-alive, startup script, exec, jump hosts, agent fwd, known_hosts, cipher policy | Connection info fields | — |
+| SSH Terminal (frontend wiring) | ✅ SshTerminalView + QuickConnect + reconnect UI | — | — |
+| SFTP Browser (backend) | ✅ 14 commands, progress events, SCP fallback, throttling | — | — |
+| SFTP Browser (frontend) | ✅ real ops, context menu, progress | Drag-and-drop (OS-to-remote implemented; pane-to-pane remains) | — |
 | Credential Vault (backend) | ✅ AES-256-GCM + pw change + rate limit | Auto-lock enforcement | Biometric |
 | Credential Vault (frontend) | ✅ wired in App.tsx | — | — |
-| Session Tree | ✅ hierarchical, search, favorites, recent | Tag filter chips | — |
+| Session Tree | ✅ hierarchical, search, favorites, recent, tag filters | — | — |
 | Tab Management | ✅ context menu, scroll, middle-click | Detach, multi-window | — |
-| Split Panes | ✅ rendering + drag resize | Keyboard nav, broadcast | — |
-| Theming (dark/light) | ✅ toggle + OS auto-follow + reduced-motion | Theme file loading | Additional themes |
+| Split Panes | ✅ rendering + drag resize + keyboard nav + broadcast | — | — |
+| Theming (dark/light) | ✅ toggle + OS auto-follow + reduced-motion + theme import + shipped themes | — | — |
 | Audit Log | ✅ triggered across modules | — | — |
-| First-Launch Wizard | — | — | ❌ |
-| Testing | ✅ 96 tests (47 Rust + 49 Frontend) | Integration, E2E, fuzz | — |
+| First-Launch Wizard | ✅ | — | — |
+| Testing | ✅ 131 tests (82 Rust + 49 Frontend) | Integration, E2E, fuzz | — |
 
-**Bottom line**: 52 of the original gaps resolved. 2 P1-BLOCKERs remain (jump host, agent forwarding). 65 gaps remain, mostly P1-MEDIUM/LOW and P2.
+**Bottom line**: the original P1 blocker set is cleared. The remaining gaps are mostly tag filtering, session-status synchronization, advanced accessibility, CI/CD hardening, packaging, and Phase 2 scope.
 
 ---
 
@@ -74,13 +74,13 @@ Cross-cutting concerns that apply to Phase 1: Security (§12), Audit (§12.4), A
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| BE-SSH-01 | Jump host / ProxyJump not implemented (`_jump_host` param is unused) | §5.1 | **P1-BLOCKER** | Code stub |
-| BE-SSH-02 | SSH agent forwarding not implemented | §5.1 | **P1-BLOCKER** | Missing |
+| BE-SSH-01 | Jump host / ProxyJump not implemented (`_jump_host` param is unused) | §5.1 | **P1-BLOCKER** | ✅ Done |
+| BE-SSH-02 | SSH agent forwarding not implemented | §5.1 | **P1-BLOCKER** | ✅ Done |
 | BE-SSH-03 | Remote port forwarding incomplete — `tcpip_forward()` called but no incoming connection listener spawned | §9.3 | P1-HIGH | Partial |
 | BE-SSH-04 | Keep-alive heartbeat not wired — `keep_alive_interval_seconds` stored in session but never used by SSH runtime | §5.2 | P1-HIGH | ✅ Done |
 | BE-SSH-05 | Startup script never executed on connect | §5.2 | P1-HIGH | ✅ Done |
-| BE-SSH-06 | Known-hosts verification is TOFU only — no persistent known_hosts file | §12.2 | P1-HIGH | TODO in code |
-| BE-SSH-07 | SSH cipher/kex algorithm policy not enforced — spec requires curve25519-sha256 minimum | §12.2 | P1-MEDIUM | Uses russh defaults |
+| BE-SSH-06 | Known-hosts verification is TOFU only — no persistent known_hosts file | §12.2 | P1-HIGH | ✅ Done |
+| BE-SSH-07 | SSH cipher/kex algorithm policy not enforced — spec requires curve25519-sha256 minimum | §12.2 | P1-MEDIUM | ✅ Done |
 | BE-SSH-08 | `last_connected_at` never updated on successful connect | §5.2 | P1-MEDIUM | ✅ Done |
 | BE-SSH-09 | Connection state (cipher, latency, protocol version) not exposed to frontend | §10.3/F | P1-LOW | Missing fields |
 | BE-SSH-10 | SOCKS5 dynamic forwarding doesn't handle IPv6 (type 0x04) | §9.3 | P2 | Partial |
@@ -91,8 +91,8 @@ Cross-cutting concerns that apply to Phase 1: Security (§12), Audit (§12.4), A
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
 | BE-SFTP-01 | **Entire SFTP backend module does not exist** — no `russh-sftp` dependency, no file listing, no upload/download | §14.1 | **P1-BLOCKER** | ✅ Done |
-| BE-SFTP-02 | No SCP transfer commands | §14.2 | P1-HIGH | Missing |
-| BE-SFTP-03 | No bandwidth throttling infrastructure | §14.1 | P1-MEDIUM | Missing |
+| BE-SFTP-02 | No SCP transfer commands | §14.2 | P1-HIGH | ✅ Done |
+| BE-SFTP-03 | No bandwidth throttling infrastructure | §14.1 | P1-MEDIUM | ✅ Done |
 | BE-SFTP-04 | No transfer queue/progress tracking | §14.1 | P1-HIGH | ✅ Done |
 
 ### 3.3 Credential Vault (`src-tauri/src/vault/mod.rs`)
@@ -103,7 +103,7 @@ Cross-cutting concerns that apply to Phase 1: Security (§12), Audit (§12.4), A
 | BE-VAULT-02 | No `vault_change_password` command — users cannot rotate the master password | §4.3 | P1-HIGH | ✅ Done |
 | BE-VAULT-03 | No rate-limiting on `vault_unlock` attempts — brute-force risk | §12 | P1-HIGH | ✅ Done |
 | BE-VAULT-04 | Verification token uses hardcoded `b"crossterm-vault-ok"` — predictable if DB leaked | §12.1 | P1-MEDIUM | Weak |
-| BE-VAULT-05 | No credential-to-session orphan check on delete | §4.3 | P1-MEDIUM | Missing |
+| BE-VAULT-05 | No credential-to-session orphan check on delete | §4.3 | P1-MEDIUM | ✅ Done |
 | BE-VAULT-06 | Clipboard auto-clear after 30s not coordinated from backend | §4.3 | P1-LOW | Frontend duty |
 | BE-VAULT-07 | Biometric unlock (Touch ID, Windows Hello) not implemented | §3.2 | P2 | Missing |
 | BE-VAULT-08 | OS credential store delegation (Keychain, Credential Manager) not implemented | §3.2 | P2 | Missing |
@@ -113,21 +113,21 @@ Cross-cutting concerns that apply to Phase 1: Security (§12), Audit (§12.4), A
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| BE-TERM-01 | Session output logging to file (plaintext/HTML/raw) not implemented | §6.5 | P1-HIGH | Missing |
+| BE-TERM-01 | Session output logging to file (plaintext/HTML/raw) not implemented | §6.5 | P1-HIGH | ✅ Done |
 | BE-TERM-02 | Reader thread never gracefully joined on drop — potential thread leak | §6 | P1-MEDIUM | ✅ Done |
-| BE-TERM-03 | No bell event emission (BEL/^G passthrough) | §10.8.1 | P1-LOW | Missing |
-| BE-TERM-04 | `String::from_utf8_lossy()` silently drops invalid bytes — should support raw binary output mode | §6.5 | P1-LOW | Lossy |
+| BE-TERM-03 | No bell event emission (BEL/^G passthrough) | §10.8.1 | P1-LOW | ✅ Done |
+| BE-TERM-04 | `String::from_utf8_lossy()` silently drops invalid bytes — should support raw binary output mode | §6.5 | P1-LOW | ✅ Done |
 
 ### 3.5 Config (`src-tauri/src/config/mod.rs`)
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
 | BE-CFG-01 | No session duplication command | §5.4 | P1-MEDIUM | ✅ Done |
-| BE-CFG-02 | No bulk "connect all in folder" command | §5.4 | P1-MEDIUM | Missing |
-| BE-CFG-03 | No session import (PuTTY, MobaXterm, Termius, `~/.ssh/config`) | §3.3 | P1-HIGH | Missing |
-| BE-CFG-04 | No profile export/import as `.crossterm-profile` encrypted archive | §3.3 | P1-HIGH | Missing |
+| BE-CFG-02 | No bulk "connect all in folder" command | §5.4 | P1-MEDIUM | ✅ Done |
+| BE-CFG-03 | No session import (PuTTY, MobaXterm, Termius, `~/.ssh/config`) | §3.3 | P1-HIGH | ✅ Done |
+| BE-CFG-04 | No profile export/import as `.crossterm-profile` encrypted archive | §3.3 | P1-HIGH | ✅ Done |
 | BE-CFG-05 | Settings hierarchy (session → folder → profile → app defaults) not implemented — flat settings only | §15.1 | P1-MEDIUM | Flat |
-| BE-CFG-06 | No portable mode detection (`.crossterm-portable` sentinel file) | §15.3 | P1-LOW | Missing |
+| BE-CFG-06 | No portable mode detection (`.crossterm-portable` sentinel file) | §15.3 | P1-LOW | ✅ Done |
 
 ### 3.6 Audit (`src-tauri/src/audit/mod.rs`)
 
@@ -140,8 +140,8 @@ Cross-cutting concerns that apply to Phase 1: Security (§12), Audit (§12.4), A
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
 | BE-MOD-01 | No SFTP module (`src-tauri/src/sftp/`) | §14 | **P1-BLOCKER** | ✅ Done |
-| BE-MOD-02 | No SSH key manager (generate, import, export, deploy to host) | §11.6 | P1-HIGH | Missing |
-| BE-MOD-03 | Auto-updater not configured in `tauri.conf.json` | §2.2 | P1-MEDIUM | Missing |
+| BE-MOD-02 | No SSH key manager (generate, import, export, deploy to host) | §11.6 | P1-HIGH | ✅ Done |
+| BE-MOD-03 | Auto-updater not configured in `tauri.conf.json` | §2.2 | P1-MEDIUM | ✅ Done |
 | BE-MOD-04 | No CSP (Content Security Policy) in `tauri.conf.json` | §12.3 | P1-MEDIUM | ✅ Done |
 
 ---
@@ -165,14 +165,14 @@ Cross-cutting concerns that apply to Phase 1: Security (§12), Audit (§12.4), A
 |----|-----|--------|----------|--------|
 | FE-SSH-01 | **No SSH terminal rendering** — TerminalView only calls `terminal_write`/`terminal:output` (local PTY). No `ssh_connect` / `ssh_write` / `ssh:output` integration | §5.1 | **P1-BLOCKER** | ✅ Done |
 | FE-SSH-02 | No SSH connection dialog (host, port, auth method, credential selection) | §5.1 | **P1-BLOCKER** | ✅ Done |
-| FE-SSH-03 | No SSH disconnect handling / auto-reconnect UI (exponential backoff countdown) | §10.14.3 | P1-HIGH | Missing |
+| FE-SSH-03 | No SSH disconnect handling / auto-reconnect UI (exponential backoff countdown) | §10.14.3 | P1-HIGH | ✅ Done |
 
 ### 4.3 SFTP Frontend
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
 | FE-SFTP-01 | SFTP browser uses **hardcoded mock data** — no real file listing | §14.1 | **P1-BLOCKER** | ✅ Done |
-| FE-SFTP-02 | No drag-and-drop file transfer | §14.1 | P1-HIGH | Missing |
+| FE-SFTP-02 | No drag-and-drop file transfer | §14.1 | P1-HIGH | Partial |
 | FE-SFTP-03 | No transfer queue/progress UI | §14.1 | P1-HIGH | ✅ Done |
 | FE-SFTP-04 | No file operations (rename, delete, chmod, new folder) | §14.1 | P1-HIGH | ✅ Done |
 | FE-SFTP-05 | No breadcrumb navigation wired | §10.8.3 | P1-MEDIUM | ✅ Done |
@@ -185,7 +185,7 @@ Cross-cutting concerns that apply to Phase 1: Security (§12), Audit (§12.4), A
 | FE-SESS-02 | No "Favorites" quick-access row at top of sidebar | §5.3 | P1-MEDIUM | ✅ Done |
 | FE-SESS-03 | No "Recent" sessions section in sidebar | §5.3 | P1-MEDIUM | ✅ Done |
 | FE-SESS-04 | Search bar not visible in sidebar (filter logic exists in component but no text input rendered) | §5.3 | P1-HIGH | ✅ Done |
-| FE-SESS-05 | No tag-based filtering UI | §5.3 | P1-MEDIUM | Missing |
+| FE-SESS-05 | No tag-based filtering UI | §5.3 | P1-MEDIUM | ✅ Done |
 | FE-SESS-06 | No folder creation/rename/delete from sidebar context menu | §5.3 | P1-HIGH | ✅ Done |
 | FE-SESS-07 | Session data not persisted to disk — all sessions lost on reload | §5 | **P1-BLOCKER** | ✅ Done |
 
@@ -195,8 +195,8 @@ Cross-cutting concerns that apply to Phase 1: Security (§12), Audit (§12.4), A
 |----|-----|--------|----------|--------|
 | FE-SPLIT-01 | **Split pane rendering not implemented** — types and store state exist but zero UI | §11.1 | P1-HIGH | ✅ Done |
 | FE-SPLIT-02 | No drag handle for pane resizing | §11.1 | P1-HIGH | ✅ Done |
-| FE-SPLIT-03 | No keyboard navigation (Alt+Arrow) between panes | §11.1 | P1-MEDIUM | Missing |
-| FE-SPLIT-04 | No "broadcast input to all panes" toggle | §11.1 | P1-MEDIUM | Missing |
+| FE-SPLIT-03 | No keyboard navigation (Alt+Arrow) between panes | §11.1 | P1-MEDIUM | ✅ Done |
+| FE-SPLIT-04 | No "broadcast input to all panes" toggle | §11.1 | P1-MEDIUM | ✅ Done |
 
 ### 4.6 Tab Management
 
@@ -213,19 +213,19 @@ Cross-cutting concerns that apply to Phase 1: Security (§12), Audit (§12.4), A
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
 | FE-TERM-01 | No right-click context menu (Copy, Paste, Select All, Clear, Search, URL open) | §10.8.1 | P1-HIGH | ✅ Done |
-| FE-TERM-02 | No multi-line paste confirmation dialog | §10.4.4 | P1-MEDIUM | Missing |
+| FE-TERM-02 | No multi-line paste confirmation dialog | §10.4.4 | P1-MEDIUM | ✅ Done |
 | FE-TERM-03 | No terminal search UI (Ctrl+Shift+F) | §6.3 | P1-MEDIUM | ✅ Done |
-| FE-TERM-04 | No URL click handling (Ctrl+click to open browser) | §6.3 | P1-LOW | Missing |
-| FE-TERM-05 | No bell handling (visual flash / audio / notification) | §10.8.1 | P1-LOW | Missing |
-| FE-TERM-06 | No cursor style configuration UI | §10.8.1 | P1-LOW | Missing |
+| FE-TERM-04 | No URL click handling (Ctrl+click to open browser) | §6.3 | P1-LOW | ✅ Done |
+| FE-TERM-05 | No bell handling (visual flash / audio / notification) | §10.8.1 | P1-LOW | ✅ Done |
+| FE-TERM-06 | No cursor style configuration UI | §10.8.1 | P1-LOW | ✅ Done |
 
 ### 4.8 Theming
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
 | FE-THEME-01 | No OS dark/light mode auto-follow (`prefers-color-scheme`) | §10.9.3 | P1-HIGH | ✅ Done |
-| FE-THEME-02 | No theme file loading from `.crossterm-theme` JSON | §10.9.2 | P1-MEDIUM | Missing |
-| FE-THEME-03 | Only 2 themes shipped (Dark/Light) — spec requires 8 themes | §10.9.1 | P1-LOW | Partial |
+| FE-THEME-02 | No theme file loading from `.crossterm-theme` JSON | §10.9.2 | P1-MEDIUM | ✅ Done |
+| FE-THEME-03 | Only 2 themes shipped (Dark/Light) — spec requires 8 themes | §10.9.1 | P1-LOW | ✅ Done |
 | FE-THEME-04 | No `prefers-reduced-motion` handling | §10.2.5 | P1-MEDIUM | ✅ Done |
 
 ### 4.9 Accessibility
@@ -234,7 +234,7 @@ Cross-cutting concerns that apply to Phase 1: Security (§12), Audit (§12.4), A
 |----|-----|--------|----------|--------|
 | FE-A11Y-01 | No ARIA roles on UI regions (`navigation`, `main`, `complementary`, `status`) | §10.12.2 | P1-HIGH | ✅ Done |
 | FE-A11Y-02 | No visible focus rings on interactive elements | §10.12.2 | P1-HIGH | ✅ Done |
-| FE-A11Y-03 | No `aria-live` regions for connection state changes | §10.12.2 | P1-MEDIUM | Missing |
+| FE-A11Y-03 | No `aria-live` regions for connection state changes | §10.12.2 | P1-MEDIUM | ✅ Done |
 | FE-A11Y-04 | Status dots use colour alone (need shape supplement: ●/◌/◉/○) | §10.12.2 | P1-MEDIUM | Partial |
 
 ### 4.10 i18n
@@ -250,7 +250,7 @@ Cross-cutting concerns that apply to Phase 1: Security (§12), Audit (§12.4), A
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| FE-MISC-01 | No first-launch wizard | §10.10.1 | P1-HIGH | Missing |
+| FE-MISC-01 | No first-launch wizard | §10.10.1 | P1-HIGH | ✅ Done |
 | FE-MISC-02 | No responsive breakpoint layout switching (Compact/Medium/Expanded/Large) | §10.11 | P1-MEDIUM | Only sidebar collapse |
 | FE-MISC-03 | No notification history panel | §11.8 | P2 | Missing |
 | FE-MISC-04 | No Snippets manager UI | §6.4 | P2 | Missing |
@@ -268,10 +268,10 @@ These gaps represent disconnects between existing frontend components and backen
 | INT-02 | **Profile lifecycle** — no profile creation/switching flow in UI. `profile_create`, `profile_switch` commands never invoked | §3.1 | **P1-BLOCKER** | ✅ Done |
 | INT-03 | **SSH session lifecycle** — clicking "Connect" on an SSH session doesn't call `ssh_connect`, doesn't open an SSH-aware TerminalView | §5.1 | **P1-BLOCKER** | ✅ Done |
 | INT-04 | **Audit event triggers** — vault, config, terminal, SSH modules never call `audit::append_event()` | §12.4 | P1-HIGH | ✅ Done |
-| INT-05 | **Settings persistence** — frontend store settings never loaded from backend on startup, never saved back | §15 | P1-HIGH | Missing |
-| INT-06 | **Theme persistence** — selected theme not loaded from backend settings on startup | §10.9 | P1-MEDIUM | Missing |
+| INT-05 | **Settings persistence** — frontend store settings never loaded from backend on startup, never saved back | §15 | P1-HIGH | ✅ Done |
+| INT-06 | **Theme persistence** — selected theme not loaded from backend settings on startup | §10.9 | P1-MEDIUM | ✅ Done |
 | INT-07 | **Vault auto-lock** — no frontend timer to detect idle and call `vault_lock` | §4.3 | P1-HIGH | ✅ Done |
-| INT-08 | **Session status sync** — backend disconnect events (terminal:exit, ssh:disconnected) don't update tab status dots | Tab stays "connected" | P1-HIGH | Missing |
+| INT-08 | **Session status sync** — backend disconnect events (terminal:exit, ssh:disconnected) don't update tab status dots | Tab stays "connected" | P1-HIGH | ✅ Done |
 | INT-09 | **Terminal dimensions** — status bar shows "80×24" hardcoded; should read from TerminalView fit result | §10.3/F | P1-LOW | ✅ Done |
 
 ---
@@ -282,12 +282,12 @@ These gaps represent disconnects between existing frontend components and backen
 |----|-----|--------|----------|--------|
 | SEC-01 | No Content Security Policy in `tauri.conf.json` (`security.csp: null`) | §12.3 | P1-HIGH | ✅ Done |
 | SEC-02 | No vault unlock rate limiting — unlimited password attempts | §12 | P1-HIGH | ✅ Done |
-| SEC-03 | SSH TOFU — no persistent `known_hosts` verification | §12.2 | P1-HIGH | TODO |
-| SEC-04 | No SSH cipher/kex policy enforcement | §12.2 | P1-MEDIUM | Missing |
+| SEC-03 | SSH TOFU — no persistent `known_hosts` verification | §12.2 | P1-HIGH | ✅ Done |
+| SEC-04 | No SSH cipher/kex policy enforcement | §12.2 | P1-MEDIUM | ✅ Done |
 | SEC-05 | Verification token `b"crossterm-vault-ok"` is predictable | §12.1 | P1-MEDIUM | Weak |
 | SEC-06 | Vault DB metadata (table structure) is plaintext — not full SQLCipher-level encryption | §4.1 | P1-LOW | By design |
-| SEC-07 | No dependency audit in CI (`cargo audit`, `npm audit`) | §17.4 | P1-MEDIUM | Missing |
-| SEC-08 | No Clippy `deny` level in CI | §17.4 | P1-MEDIUM | Missing |
+| SEC-07 | No dependency audit in CI (`cargo audit`, `npm audit`) | §17.4 | P1-MEDIUM | ✅ Done |
+| SEC-08 | No Clippy `deny` level in CI | §17.4 | P1-MEDIUM | ✅ Done |
 | SEC-09 | No SBOM generation (CycloneDX) | §19 | P1-LOW | Missing |
 
 ---
@@ -299,7 +299,7 @@ These gaps represent disconnects between existing frontend components and backen
 | BLD-01 | No application icons (`icons/` directory) — tauri.conf.json references missing files | §18 | P1-HIGH | Missing |
 | BLD-02 | CI workflow exists but never tested — may fail on Windows/Linux | §2.3 | P1-MEDIUM | Unverified |
 | BLD-03 | No code signing configuration (Authenticode, notarisation, APK signing) | §2.3 | P1-MEDIUM | Missing |
-| BLD-04 | No Tauri auto-updater configuration | §2.2 | P1-MEDIUM | Missing |
+| BLD-04 | No Tauri auto-updater configuration | §2.2 | P1-MEDIUM | ✅ Done |
 | BLD-05 | No shell integration script (CWD tracking, command duration) | §18.2 | P2 | Missing |
 | BLD-06 | No `.desktop` file for Linux | §10.6.3 | P1-LOW | Missing |
 | BLD-07 | No Homebrew cask formula for macOS | §18.1 | P2 | Missing |
@@ -800,7 +800,7 @@ Summary of all gaps by priority:
 | **P2** | 10 | 0 | 10 | Phase 2 — defer |
 | **Totals** | **107** | **49** | **58** | — |
 
-### P1-BLOCKER Summary (2 remaining of 15 original)
+### P1-BLOCKER Summary (0 remaining of 15 original)
 
 1. ~~BE-SFTP-01 — Entire SFTP backend module missing~~ ✅
 2. ~~BE-AUDIT-01 — Audit events never triggered~~ ✅
@@ -815,20 +815,20 @@ Summary of all gaps by priority:
 11. ~~INT-01 — Session persistence missing~~ ✅
 12. ~~INT-02 — Profile lifecycle not in UI~~ ✅
 13. ~~INT-03 — SSH session lifecycle not wired~~ ✅
-14. BE-SSH-01 — Jump host / ProxyJump not implemented ❌
-15. BE-SSH-02 — SSH agent forwarding not implemented ❌
+14. ~~BE-SSH-01 — Jump host / ProxyJump not implemented~~ ✅
+15. ~~BE-SSH-02 — SSH agent forwarding not implemented~~ ✅
 
 ### Test Coverage Gap
 
 | Area | Current Tests | Target Tests | Gap |
 |------|:------------:|:------------:|:---:|
-| Rust unit tests | 47 | 90 | 43 |
+| Rust unit tests | 82 | 90 | 8 |
 | Frontend unit tests | 49 | 53 | 4 |
 | Integration tests | 0 | 21 | 21 |
 | E2E tests | 0 | 20 | 20 |
 | Security/fuzz tests | 0 | 10 | 10 |
 | Performance tests | 0 | 7 | 7 |
-| **Total** | **96** | **201** | **105** |
+| **Total** | **131** | **201** | **70** |
 
 ---
 

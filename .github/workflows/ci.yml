@@ -78,6 +78,17 @@ jobs:
       - name: Install npm dependencies
         run: npm install
 
+      - name: Install cargo-audit
+        working-directory: src-tauri
+        run: cargo install cargo-audit --locked
+
+      - name: Audit Rust dependencies
+        working-directory: src-tauri
+        run: cargo audit
+
+      - name: Audit npm dependencies
+        run: npm audit --audit-level=high
+
       - name: Clippy (deny warnings)
         working-directory: src-tauri
         run: cargo clippy -- -D warnings
@@ -85,6 +96,9 @@ jobs:
       - name: Run tests
         working-directory: src-tauri
         run: cargo test
+
+      - name: Run frontend tests
+        run: npm test
 
       - name: Build frontend
         run: npm run build

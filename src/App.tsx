@@ -867,14 +867,15 @@ export default function App() {
   const closeTab = useSessionStore((s) => s.closeTab);
   const updateTabStatus = useSessionStore((s) => s.updateTabStatus);
   const [showQuickConnect, setShowQuickConnect] = useState(false);
+  const [liveAnnouncement, setLiveAnnouncement] = useState("");
 
   // ── Task 3: Load settings from backend on startup ──
   useEffect(() => {
     async function loadSettings() {
       try {
-        const settings = await invoke<{ appearance?: { theme?: ThemeVariant } }>("settings_get");
-        if (settings?.appearance?.theme) {
-          setTheme(settings.appearance.theme);
+        const settings = await invoke<{ theme?: ThemeVariant }>("settings_get");
+        if (settings?.theme) {
+          setTheme(settings.theme);
         }
         // If settings were loaded successfully, first launch is already done
         setFirstLaunchComplete(true);
@@ -887,13 +888,19 @@ export default function App() {
 
   // ── Task 4: Listen for terminal:exit and ssh:disconnected to update tab status ──
   useEffect(() => {
-    const unlistenExit = listen<{ session_id: string }>(
+    const unlistenExit = listen<{ terminal_id: string }>(
       "terminal:exit",
       (event) => {
+        const terminals = useTerminalStore.getState().terminals;
+        const sessionId = terminals.get(event.payload.terminal_id)?.sessionId;
+        if (!sessionId) {
+          return;
+        }
         const tabs = useSessionStore.getState().openTabs;
-        const tab = tabs.find((t) => t.sessionId === event.payload.session_id);
+        const tab = tabs.find((t) => t.sessionId === sessionId);
         if (tab) {
           updateTabStatus(tab.id, ConnectionStatus.Disconnected);
+          setLiveAnnouncement(`Session ${tab.title} disconnected.`);
         }
       }
     );
@@ -902,12 +909,15 @@ export default function App() {
       "ssh:disconnected",
       (event) => {
         const tabs = useSessionStore.getState().openTabs;
-        // Try to match by session_id first, then by scanning terminal store
-        if (event.payload.session_id) {
-          const tab = tabs.find((t) => t.sessionId === event.payload.session_id);
-          if (tab) {
-            updateTabStatus(tab.id, ConnectionStatus.Disconnected);
-          }
+        const terminals = useTerminalStore.getState().terminals;
+        const sessionId = event.payload.session_id ?? terminals.get(event.payload.connection_id)?.sessionId;
+        if (!sessionId) {
+          return;
+        }
+        const tab = tabs.find((t) => t.sessionId === sessionId);
+        if (tab) {
+          updateTabStatus(tab.id, ConnectionStatus.Disconnected);
+          setLiveAnnouncement(`SSH session ${tab.title} disconnected.`);
         }
       }
     );
@@ -1025,6 +1035,9 @@ export default function App() {
     <>
       {firstLaunchComplete ? (
         <div className="flex flex-col h-screen w-screen overflow-hidden bg-surface-primary">
+          <div className="sr-only" aria-live="polite" aria-atomic="true">
+            {liveAnnouncement}
+          </div>
           {/* Region A */}
           <TitleBar />
 

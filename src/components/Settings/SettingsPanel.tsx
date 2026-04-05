@@ -262,7 +262,9 @@ export default function SettingsPanel() {
   const applyThemeTokens = useCallback((tokens: Partial<ThemeTokens>) => {
     const root = document.documentElement;
     for (const [key, value] of Object.entries(tokens)) {
-      root.style.setProperty(`--${key}`, value);
+      if (typeof value === "string") {
+        root.style.setProperty(`--${key}`, value);
+      }
     }
   }, []);
 
