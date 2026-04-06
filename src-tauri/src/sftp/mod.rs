@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 // ── Error ───────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum SftpError {
     #[error("SFTP session not found: {0}")]
@@ -140,6 +141,7 @@ struct TransferCompleteEvent {
 
 // ── Internal session ────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 struct SftpInternalSession {
     info: SftpSessionInfo,
     sftp: SftpSession,
@@ -232,7 +234,7 @@ pub async fn sftp_close(
     let mut sessions = state.sessions.write().await;
     sessions
         .remove(&session_id)
-        .ok_or_else(|| SftpError::NotFound(session_id))?;
+        .ok_or(SftpError::NotFound(session_id))?;
     Ok(())
 }
 

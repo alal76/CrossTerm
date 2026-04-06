@@ -173,6 +173,7 @@ pub(crate) struct SshClientHandler {
     host: String,
     port: u16,
     /// Remote forward configs: remote bind -> local target
+    #[allow(clippy::type_complexity)]
     remote_forwards: Arc<TokioMutex<HashMap<(String, u32), (String, u16)>>>,
     /// Whether SSH agent forwarding is enabled for this connection.
     agent_enabled: bool,
@@ -373,6 +374,7 @@ pub(crate) struct SshConnection {
     pub(crate) jump_host_handle: Option<client::Handle<SshClientHandler>>,
     cmd_tx: mpsc::Sender<SshCommand>,
     forward_tasks: HashMap<String, tokio::task::JoinHandle<()>>,
+    #[allow(clippy::type_complexity)]
     remote_forwards: Arc<TokioMutex<HashMap<(String, u32), (String, u16)>>>,
 }
 
@@ -399,6 +401,7 @@ fn known_hosts_file_path() -> std::path::PathBuf {
         .join("known_hosts")
 }
 
+#[allow(clippy::field_reassign_with_default)]
 fn build_config(keep_alive_secs: Option<u64>) -> Arc<client::Config> {
     let mut config = client::Config::default();
     config.keepalive_interval = Some(std::time::Duration::from_secs(keep_alive_secs.unwrap_or(30)));
@@ -489,6 +492,7 @@ async fn connect_and_auth(
 /// 3. Runs the SSH handshake over that channel to the target
 ///
 /// Returns `(target_handle, jump_host_handle)`.
+#[allow(clippy::too_many_arguments)]
 async fn connect_via_jump(
     jump: &JumpHost,
     target_host: &str,
@@ -574,6 +578,7 @@ async fn connect_via_jump(
 // ── Tauri Commands ──────────────────────────────────────────────────────
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn ssh_connect(
     app_handle: AppHandle,
     state: tauri::State<'_, SshState>,
@@ -1073,10 +1078,8 @@ pub async fn ssh_port_forward_add(
                             return;
                         }
                         let nmethods = buf[1] as usize;
-                        if nmethods > 0 {
-                            if reader.read_exact(&mut buf[..nmethods]).await.is_err() {
-                                return;
-                            }
+                        if nmethods > 0 && reader.read_exact(&mut buf[..nmethods]).await.is_err() {
+                            return;
                         }
                         if writer.write_all(&[0x05, 0x00]).await.is_err() {
                             return;

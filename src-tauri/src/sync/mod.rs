@@ -4,6 +4,7 @@ use thiserror::Error;
 
 // ── Error ───────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum SyncError {
     #[error("Export failed: {0}")]

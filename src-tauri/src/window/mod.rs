@@ -3,6 +3,7 @@ use thiserror::Error;
 
 // ── Error ──
 
+#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum WindowError {
     #[error("Window not found: {0}")]
@@ -19,6 +20,7 @@ impl Serialize for WindowError {
 
 // ── Types ──
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DetachedTab {
     pub window_label: String,
@@ -32,7 +34,7 @@ pub struct DetachedTab {
 pub async fn window_create_for_tab(
     app: tauri::AppHandle,
     tab_id: String,
-    session_id: String,
+    _session_id: String,
     title: String,
     x: Option<f64>,
     y: Option<f64>,

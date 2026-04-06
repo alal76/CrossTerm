@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 // ── Error ───────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum SnippetError {
     #[error("Snippet not found: {0}")]

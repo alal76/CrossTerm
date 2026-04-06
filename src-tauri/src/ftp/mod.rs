@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 // ── Error ───────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum FtpError {
     #[error("Connection failed: {0}")]
@@ -59,6 +60,7 @@ pub struct FtpEntry {
     pub permissions: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct FtpConnection {
     pub id: String,

@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 // ── Error ───────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum CloudError {
     #[error("CLI not found: {0}")]

@@ -289,7 +289,7 @@ pub async fn cloud_azure_bastion_connect(
 }
 
 #[tauri::command]
-pub async fn cloud_azure_cloud_shell(shell_type: String) -> Result<String, CloudError> {
+pub async fn cloud_azure_cloud_shell(_shell_type: String) -> Result<String, CloudError> {
     let session_id = uuid::Uuid::new_v4().to_string();
 
     // Azure Cloud Shell doesn't have a direct CLI command for local embedding,

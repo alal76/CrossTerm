@@ -68,7 +68,7 @@ pub fn notification_dismiss(
     let entry = entries
         .iter_mut()
         .find(|e| e.id == id)
-        .ok_or_else(|| NotificationError::NotFound(id))?;
+        .ok_or(NotificationError::NotFound(id))?;
     entry.dismissed = true;
     Ok(())
 }

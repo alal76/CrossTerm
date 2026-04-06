@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 // ── Error ───────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum VncError {
     #[error("Connection not found: {0}")]
@@ -65,6 +66,7 @@ pub enum VncScalingMode {
     OneToOne,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VncSecurityType {
@@ -74,6 +76,7 @@ pub enum VncSecurityType {
     VeNCryptX509,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VncRfbVersion {
@@ -115,6 +118,7 @@ pub struct VncConnectionInfo {
 
 // ── Tauri Event Payloads ────────────────────────────────────────────────
 
+#[allow(dead_code)]
 #[derive(Clone, Serialize)]
 struct VncFrameEvent {
     connection_id: String,
@@ -140,12 +144,14 @@ struct VncClipboardEvent {
     text: String,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Serialize)]
 struct VncErrorEvent {
     connection_id: String,
     message: String,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Serialize)]
 struct VncBellEvent {
     connection_id: String,
@@ -209,6 +215,7 @@ impl VncBackend for StubVncBackend {
 
 // ── Connection ──────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 struct VncConnection {
     info: VncConnectionInfo,
     config: VncConfig,
@@ -231,6 +238,7 @@ impl VncState {
         }
     }
 
+    #[allow(dead_code)]
     pub fn with_stub() -> Self {
         Self::new(Box::new(StubVncBackend))
     }

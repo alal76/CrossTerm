@@ -18,6 +18,7 @@ use zeroize::{Zeroize, Zeroizing};
 
 // ── Error ───────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum VaultError {
     #[error("Vault is locked")]
@@ -73,6 +74,7 @@ pub enum CredentialType {
     TotpSeed,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CredentialEntry {
     pub id: String,
@@ -148,6 +150,7 @@ pub struct WebAuthnChallenge {
     pub user_name: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebAuthnCredential {
     pub credential_id: String,
@@ -196,6 +199,7 @@ fn decrypt(ciphertext: &[u8], nonce_bytes: &[u8], key: &[u8]) -> Result<Vec<u8>,
 
 // ── Vault ───────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 pub struct VaultInner {
     db: Connection,
     encryption_key: Option<Zeroizing<Vec<u8>>>,

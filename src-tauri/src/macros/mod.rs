@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 // ── Error ───────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum MacroError {
     #[error("Macro not found: {0}")]
@@ -228,7 +229,7 @@ pub fn macro_get(
     macros
         .get(&id)
         .cloned()
-        .ok_or_else(|| MacroError::NotFound(id))
+        .ok_or(MacroError::NotFound(id))
 }
 
 #[tauri::command]

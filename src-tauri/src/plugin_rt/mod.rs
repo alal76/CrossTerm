@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 // ── Error ───────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum PluginError {
     #[error("Invalid manifest: {0}")]
@@ -194,6 +195,7 @@ pub fn plugin_load(
 
 // ── Plugin API Extensions ───────────────────────────────────────────────
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PluginHook {
@@ -205,6 +207,7 @@ pub enum PluginHook {
     OnSessionEnd,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginKvEntry {
     pub key: String,
@@ -293,7 +296,7 @@ pub fn plugin_get_info(
     plugins
         .get(&plugin_id)
         .cloned()
-        .ok_or_else(|| PluginError::NotFound(plugin_id))
+        .ok_or(PluginError::NotFound(plugin_id))
 }
 
 #[tauri::command]
@@ -443,7 +446,7 @@ pub fn plugin_register_hook(
     let mut hooks = state.hooks.lock().unwrap();
     hooks
         .entry(plugin_id)
-        .or_insert_with(Vec::new)
+        .or_default()
         .push(hook);
     Ok(())
 }
@@ -481,7 +484,7 @@ pub fn plugin_kv_set(
 ) -> Result<(), PluginError> {
     let mut kv = state.kv_store.lock().unwrap();
     kv.entry(plugin_id)
-        .or_insert_with(HashMap::new)
+        .or_default()
         .insert(key, value);
     Ok(())
 }

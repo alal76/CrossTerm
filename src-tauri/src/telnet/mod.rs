@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 // ── Error ───────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum TelnetError {
     #[error("Connection failed: {0}")]
@@ -33,6 +34,7 @@ pub struct TelnetConfig {
     pub terminal_type: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct TelnetConnection {
     pub id: String,

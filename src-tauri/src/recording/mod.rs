@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 // ── Error ───────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum RecordingError {
     #[error("Recording not found: {0}")]
@@ -109,6 +110,7 @@ pub struct PlaybackCompleteEvent {
 
 // ── Internal Types ──────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct ActiveRecording {
     pub id: String,
@@ -237,7 +239,7 @@ impl RecordingState {
 
 #[tauri::command]
 pub async fn recording_start(
-    session_id: String,
+    _session_id: String,
     title: Option<String>,
     width: u32,
     height: u32,
@@ -338,7 +340,7 @@ pub async fn recording_append(
     let mut active = state.active_recordings.lock().unwrap();
     let recording = active
         .get_mut(&recording_id)
-        .ok_or_else(|| RecordingError::NotActive(recording_id))?;
+        .ok_or(RecordingError::NotActive(recording_id))?;
 
     let time = recording.start_time.elapsed().as_secs_f64();
     recording.events.push(RecordingEvent {

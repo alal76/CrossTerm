@@ -61,6 +61,7 @@ struct TerminalExitEvent {
 }
 
 /// Internal session state for an active PTY.
+#[allow(dead_code)]
 struct PtySession {
     info: TerminalInfo,
     master_write: Arc<Mutex<Box<dyn Write + Send>>>,
@@ -88,6 +89,7 @@ impl TerminalManager {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn create(
         &self,
         app_handle: &AppHandle,
@@ -337,6 +339,7 @@ fn default_shell() -> String {
 
 // ── Tauri commands ──────────────────────────────────────────────────────
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn terminal_create(
     app_handle: AppHandle,
     state: tauri::State<'_, TerminalManager>,

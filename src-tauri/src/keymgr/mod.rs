@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 // ── Error ───────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum KeyMgrError {
     #[error("Key not found: {0}")]
@@ -214,7 +215,7 @@ pub fn keymgr_delete_key(
 ) -> Result<(), KeyMgrError> {
     let mut keys = state.keys.lock().unwrap();
     keys.remove(&key_id)
-        .ok_or_else(|| KeyMgrError::NotFound(key_id))?;
+        .ok_or(KeyMgrError::NotFound(key_id))?;
     Ok(())
 }
 

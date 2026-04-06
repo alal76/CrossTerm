@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 // ── Error ───────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum EditorError {
     #[error("File not found: {0}")]
@@ -84,6 +85,7 @@ pub struct DiffStats {
     pub modifications: u32,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyntaxToken {
     pub start: u32,
@@ -147,7 +149,7 @@ fn compute_diff(left_lines: &[&str], right_lines: &[&str]) -> Vec<DiffHunk> {
     let mut hunk_right_start: u32 = 1;
     let mut in_hunk = false;
 
-    let max_len = std::cmp::max(left_lines.len(), right_lines.len());
+    let _max_len = std::cmp::max(left_lines.len(), right_lines.len());
 
     while left_idx < left_lines.len() || right_idx < right_lines.len() {
         let left_line = left_lines.get(left_idx).copied();
@@ -171,10 +173,8 @@ fn compute_diff(left_lines: &[&str], right_lines: &[&str]) -> Vec<DiffHunk> {
                 // Modified: line differs
                 if !in_hunk {
                     in_hunk = true;
-                    hunk_left_start = left_idx as u32 + 1;
-                    hunk_right_start = right_idx as u32 + 1;
                     // Add up to 3 context lines before
-                    let ctx_start = if left_idx >= 3 { left_idx - 3 } else { 0 };
+                    let ctx_start = left_idx.saturating_sub(3);
                     for i in ctx_start..left_idx {
                         if let Some(cl) = left_lines.get(i) {
                             current_lines.push(DiffLine {
@@ -420,7 +420,7 @@ pub fn editor_get_content(
     let files = state.open_files.lock().unwrap();
     let file = files
         .get(&file_id)
-        .ok_or_else(|| EditorError::FileNotFound(file_id))?;
+        .ok_or(EditorError::FileNotFound(file_id))?;
     Ok(file.content.clone())
 }
 
@@ -482,7 +482,7 @@ pub fn editor_search(
     let files = state.open_files.lock().unwrap();
     let file = files
         .get(&file_id)
-        .ok_or_else(|| EditorError::FileNotFound(file_id))?;
+        .ok_or(EditorError::FileNotFound(file_id))?;
 
     let mut matches = Vec::new();
 
@@ -530,7 +530,7 @@ pub fn editor_replace(
     let mut files = state.open_files.lock().unwrap();
     let file = files
         .get_mut(&file_id)
-        .ok_or_else(|| EditorError::FileNotFound(file_id))?;
+        .ok_or(EditorError::FileNotFound(file_id))?;
 
     let (new_content, count) = if regex {
         let re = regex::Regex::new(&query)
@@ -549,7 +549,7 @@ pub fn editor_replace(
         let new = file.content.replace(&query, &replacement);
         (new, count)
     } else {
-        if let Some(_) = file.content.find(&query) {
+        if file.content.find(&query).is_some() {
             let new = file.content.replacen(&query, &replacement, 1);
             (new, 1)
         } else {

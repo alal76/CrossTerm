@@ -5,6 +5,7 @@ use thiserror::Error;
 
 // ── Error ───────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum L10nError {
     #[error("Unsupported locale: {0}")]
@@ -34,6 +35,7 @@ pub struct LocaleInfo {
     pub completeness: f64,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranslationEntry {
     pub key: String,

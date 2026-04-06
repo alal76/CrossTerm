@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 // ── Error ───────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum SerialError {
     #[error("Connection failed: {0}")]
@@ -79,6 +80,7 @@ pub struct SerialPort {
     pub manufacturer: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct SerialConnection {
     pub id: String,

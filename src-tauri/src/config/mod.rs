@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 // ── Error ───────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum ConfigError {
     #[error("Profile not found: {0}")]
@@ -248,6 +249,7 @@ pub fn is_portable_mode() -> bool {
 }
 
 /// Return the data directory, respecting portable mode.
+#[allow(dead_code)]
 pub(crate) fn effective_data_dir() -> PathBuf {
     if is_portable_mode() {
         if let Ok(exe) = std::env::current_exe() {
@@ -420,7 +422,7 @@ fn do_session_list(profile_id: &str) -> Result<Vec<SessionDefinition>, ConfigErr
         for entry in std::fs::read_dir(&dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().map_or(false, |e| e == "json") {
+            if path.extension().is_some_and(|e| e == "json") {
                 let data = std::fs::read_to_string(&path)?;
                 let session: SessionDefinition = serde_json::from_str(&data)?;
                 sessions.push(session);
@@ -486,14 +488,14 @@ fn do_session_search(profile_id: &str, query: &str) -> Result<Vec<SessionDefinit
                 || s.connection
                     .host
                     .as_deref()
-                    .map_or(false, |h| h.to_lowercase().contains(&q))
+                    .is_some_and(|h| h.to_lowercase().contains(&q))
                 || s.tags.iter().any(|t| t.to_lowercase().contains(&q))
                 || s.notes
                     .as_deref()
-                    .map_or(false, |n| n.to_lowercase().contains(&q))
+                    .is_some_and(|n| n.to_lowercase().contains(&q))
                 || s.group
                     .as_deref()
-                    .map_or(false, |g| g.to_lowercase().contains(&q))
+                    .is_some_and(|g| g.to_lowercase().contains(&q))
         })
         .collect())
 }
@@ -687,7 +689,7 @@ fn parse_ssh_config(content: &str) -> Vec<ParsedSshHost> {
         }
 
         // Split on first whitespace or '='
-        let (key, value) = match line.find(|c: char| c == ' ' || c == '\t' || c == '=') {
+        let (key, value) = match line.find([' ', '\t', '=']) {
             Some(pos) => {
                 let k = &line[..pos];
                 let v = line[pos + 1..].trim().trim_matches('=').trim();
@@ -799,9 +801,9 @@ pub fn session_import_ssh_config(
                 protocol_options: None,
             },
             startup_script: None,
-            environment_variables: if host.user.is_some() {
+            environment_variables: if let Some(user) = host.user {
                 let mut env = HashMap::new();
-                env.insert("SSH_USER".to_string(), host.user.unwrap());
+                env.insert("SSH_USER".to_string(), user);
                 Some(env)
             } else {
                 None
@@ -851,7 +853,7 @@ pub fn session_bulk_connect(
 
 #[tauri::command]
 pub fn session_list_by_group(
-    state: tauri::State<'_, ConfigState>,
+    _state: tauri::State<'_, ConfigState>,
     profile_id: String,
     group: String,
 ) -> Result<Vec<SessionDefinition>, ConfigError> {
@@ -1115,11 +1117,7 @@ pub fn shell_integration_install(shell: String) -> Result<String, ConfigError> {
         .join("shell-integration")
         .join(script_name);
 
-    let source_line = if shell == "fish" {
-        format!("source \"{}\"", script_path.display())
-    } else {
-        format!("source \"{}\"", script_path.display())
-    };
+    let source_line = format!("source \"{}\"", script_path.display());
 
     let instructions = format!(
         "Add the following line to {config_file}:\n\n  {source_line}\n\nThen restart your shell or run:\n  {source_line}"

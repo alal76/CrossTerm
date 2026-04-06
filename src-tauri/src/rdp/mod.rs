@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 // ── Error ───────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum RdpError {
     #[error("Connection not found: {0}")]
@@ -175,6 +176,7 @@ pub struct RdpConnectionInfo {
 
 // ── Tauri Event Payloads ────────────────────────────────────────────────
 
+#[allow(dead_code)]
 #[derive(Clone, Serialize)]
 struct RdpFrameEvent {
     connection_id: String,
@@ -200,6 +202,7 @@ struct RdpClipboardEvent {
     data: RdpClipboardData,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Serialize)]
 struct RdpErrorEvent {
     connection_id: String,
@@ -287,6 +290,7 @@ impl RdpBackend for StubRdpBackend {
 
 // ── Connection ──────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 struct RdpConnection {
     info: RdpConnectionInfo,
     config: RdpConfig,
@@ -309,6 +313,7 @@ impl RdpState {
         }
     }
 
+    #[allow(dead_code)]
     pub fn with_stub() -> Self {
         Self::new(Box::new(StubRdpBackend))
     }

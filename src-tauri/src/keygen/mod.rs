@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 use thiserror::Error;
 use uuid::Uuid;
@@ -80,7 +80,7 @@ fn detect_key_type(filename: &str) -> String {
     }
 }
 
-fn read_public_key_file(path: &PathBuf) -> Option<String> {
+fn read_public_key_file(path: &Path) -> Option<String> {
     let pub_path = PathBuf::from(format!("{}.pub", path.display()));
     if pub_path.exists() {
         std::fs::read_to_string(&pub_path).ok()

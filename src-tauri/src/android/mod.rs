@@ -4,6 +4,8 @@ use thiserror::Error;
 
 // ── Error ───────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Error)]
 pub enum AndroidError {
     #[error("Service error: {0}")]

@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 // ── Error ───────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum NetworkError {
     #[error("Scan not found: {0}")]
@@ -262,10 +263,8 @@ async fn reverse_dns(ip: IpAddr) -> Option<String> {
             // tokio's lookup_host doesn't do reverse DNS directly;
             // use DNS crate or system resolver via blocking task
             tokio::task::spawn_blocking(move || {
-                use std::net::ToSocketAddrs;
                 // Attempt reverse lookup via getaddrinfo hint
-                let hostname = dns_lookup_reverse(addr.ip());
-                hostname
+                dns_lookup_reverse(addr.ip())
             })
             .await
             .ok()
@@ -287,8 +286,6 @@ fn guess_os(open_ports: &[OpenPort]) -> Option<String> {
     let ports: Vec<u16> = open_ports.iter().map(|p| p.port).collect();
     if ports.contains(&3389) {
         Some("Windows".to_string())
-    } else if ports.contains(&22) && ports.contains(&80) {
-        Some("Linux/Unix".to_string())
     } else if ports.contains(&22) {
         Some("Linux/Unix".to_string())
     } else if ports.contains(&445) && !ports.contains(&22) {
@@ -341,9 +338,7 @@ pub async fn network_scan_start(
     // Spawn async scan task
     tokio::spawn(async move {
         let timeout = Duration::from_millis(1500);
-        let mut hosts_scanned = 0u32;
-
-        for addr in addresses {
+        for (scan_idx, addr) in addresses.into_iter().enumerate() {
             let ip = IpAddr::V4(addr);
             let start = Instant::now();
 
@@ -382,12 +377,11 @@ pub async fn network_scan_start(
                 // Note: scan results are stored via the event; frontend collects them
             }
 
-            hosts_scanned += 1;
             let _ = app.emit(
                 "network:scan_progress",
                 ScanProgress {
                     scan_id: scan_id_clone.clone(),
-                    hosts_scanned,
+                    hosts_scanned: scan_idx as u32 + 1,
                     total_hosts,
                 },
             );
@@ -406,13 +400,13 @@ pub async fn network_scan_results(
     results
         .get(&scan_id)
         .cloned()
-        .ok_or_else(|| NetworkError::ScanNotFound(scan_id))
+        .ok_or(NetworkError::ScanNotFound(scan_id))
 }
 
 #[tauri::command]
 pub async fn network_scan_save_as_sessions(
     scan_id: String,
-    folder: String,
+    _folder: String,
     state: tauri::State<'_, NetworkState>,
 ) -> Result<Vec<String>, NetworkError> {
     let results = state.scan_results.lock().unwrap();
@@ -421,7 +415,7 @@ pub async fn network_scan_save_as_sessions(
         .ok_or_else(|| NetworkError::ScanNotFound(scan_id.clone()))?;
 
     let mut session_ids = Vec::new();
-    for result in scan_results {
+    for _result in scan_results {
         let session_id = Uuid::new_v4().to_string();
         // In a full implementation, this would create actual sessions via the session store.
         // For now, return the generated IDs.
