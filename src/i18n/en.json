@@ -512,5 +512,37 @@
     "today": "Today",
     "yesterday": "Yesterday",
     "older": "Older"
+  },
+  "rdp": {
+    "connecting": "Connecting to remote desktop...",
+    "connected": "Connected",
+    "disconnected": "Disconnected",
+    "disconnect": "Disconnect",
+    "fullScreen": "Full Screen",
+    "ctrlAltDel": "Ctrl+Alt+Del",
+    "scaleMode": "Scale Mode",
+    "clipboard": "Clipboard Sync",
+    "screenshot": "Screenshot",
+    "fitToPane": "Fit to Pane",
+    "actualSize": "Actual Size (1:1)",
+    "fitWidth": "Fit Width",
+    "fitHeight": "Fit Height",
+    "multiMonitor": "Multi-Monitor",
+    "driveRedirection": "Drive Redirection",
+    "audioRedirection": "Audio Redirection"
+  },
+  "vnc": {
+    "connecting": "Connecting to VNC server...",
+    "connected": "Connected",
+    "disconnected": "Disconnected",
+    "disconnect": "Disconnect",
+    "viewOnly": "View Only",
+    "scaleMode": "Scale Mode",
+    "screenshot": "Screenshot",
+    "clipboard": "Clipboard",
+    "fitToWindow": "Fit to Window",
+    "scroll": "Scroll",
+    "actualSize": "Actual Size (1:1)",
+    "encoding": "Encoding"
   }
 }

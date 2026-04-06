@@ -305,3 +305,152 @@ export interface Snippet {
   createdAt: string;
   updatedAt: string;
 }
+
+// --- RDP Types ---
+
+export interface RdpConfig {
+  host: string;
+  port: number;
+  username: string;
+  credential_ref?: string;
+  domain?: string;
+  nla_enabled: boolean;
+  tls_required: boolean;
+  gateway?: RdpGateway;
+  multi_monitor?: RdpMonitorConfig;
+  codec: RdpCodec;
+  clipboard_sync: boolean;
+  drive_paths: DriveMapping[];
+  printer_redirect: boolean;
+  audio_mode: RdpAudioMode;
+  smart_card: boolean;
+}
+
+export type RdpCodec = "auto" | "remotefx" | "gfx" | "progressive";
+export type RdpAudioMode = "none" | "playback" | "record" | "both";
+export type RdpConnectionStatus =
+  | "connecting"
+  | "connected"
+  | "disconnected"
+  | { error: string };
+
+export interface RdpGateway {
+  host: string;
+  port: number;
+  username: string;
+  credential_ref?: string;
+}
+
+export interface RdpMonitorConfig {
+  span_all: boolean;
+  selected_monitors: number[];
+}
+
+export interface DriveMapping {
+  name: string;
+  local_path: string;
+}
+
+export interface RdpConnectionInfo {
+  id: string;
+  host: string;
+  port: number;
+  username: string;
+  status: RdpConnectionStatus;
+  width: number;
+  height: number;
+  connected_at?: string;
+}
+
+export interface RdpClipboardData {
+  text?: string;
+  files?: string[];
+  image_png_base64?: string;
+}
+
+export interface RdpRedirectionConfig {
+  drives: DriveMapping[];
+  printer: boolean;
+  audio: RdpAudioMode;
+  smart_card: boolean;
+}
+
+export type RdpScaleMode = "fit" | "actual" | "fit-width" | "fit-height";
+
+// --- VNC Types ---
+
+export interface VncConfig {
+  host: string;
+  port: number;
+  password?: string;
+  vnc_auth: boolean;
+  vencrypt: boolean;
+  tls_cert_path?: string;
+}
+
+export type VncEncoding = 'raw' | 'copy_rect' | 'rre' | 'hextile' | 'zrle' | 'tight' | 'cursor_pseudo';
+export type VncScalingMode = 'fit_to_window' | 'scroll' | 'one_to_one';
+export type VncSecurityType = 'none' | 'vnc_auth' | 'vencrypt_tls' | 'vencrypt_x509';
+export type VncConnectionStatus = 'connecting' | 'connected' | 'disconnected' | { error: string };
+
+export interface VncConnectionInfo {
+  id: string;
+  host: string;
+  port: number;
+  status: VncConnectionStatus;
+  width: number;
+  height: number;
+  view_only: boolean;
+  scaling_mode: VncScalingMode;
+}
+
+// --- Cloud Types ---
+
+export type CloudProvider = 'aws' | 'azure' | 'gcp';
+
+export interface CloudProviderStatus {
+  provider: CloudProvider;
+  cli_status: CliStatus;
+  profiles: string[];
+  active_profile?: string;
+}
+
+export type CliStatus = { type: 'installed'; version: string; path: string } | { type: 'not_installed' };
+
+export interface CloudAssetNode {
+  id: string;
+  name: string;
+  node_type: CloudAssetType;
+  provider: CloudProvider;
+  children: CloudAssetNode[];
+  metadata: Record<string, string>;
+}
+
+export type CloudAssetType = 'provider' | 'region' | 'resource_group' | 'compute' | 'storage' | 'kubernetes' | 'serverless' | 'database' | 'network';
+
+export interface Ec2Instance {
+  id: string;
+  name: string;
+  state: string;
+  instance_type: string;
+  public_ip?: string;
+  private_ip?: string;
+  key_name?: string;
+  vpc_id?: string;
+  launch_time: string;
+}
+
+export interface S3Bucket { name: string; region: string; creation_date: string; }
+export interface S3Object { key: string; size: number; last_modified: string; storage_class: string; }
+
+export interface AzureSubscription { id: string; name: string; state: string; tenant_id: string; }
+export interface AzureVm { id: string; name: string; resource_group: string; location: string; status: string; public_ip?: string; private_ip?: string; size: string; }
+export interface AzureStorageAccount { name: string; resource_group: string; kind: string; sku: string; location: string; }
+
+export interface GcpConfig { name: string; project: string; region: string; zone: string; is_active: boolean; }
+export interface GcpInstance { id: string; name: string; zone: string; machine_type: string; status: string; internal_ip?: string; external_ip?: string; }
+export interface GcsBucket { name: string; location: string; storage_class: string; time_created: string; }
+export interface GcsObject { name: string; size: number; content_type: string; time_created: string; }
+
+export interface CostSummary { total_cost: number; currency: string; start_date: string; end_date: string; by_service: ServiceCost[]; }
+export interface ServiceCost { service_name: string; cost: number; }
