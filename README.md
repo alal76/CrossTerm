@@ -58,22 +58,97 @@ The release binary will be in `src-tauri/target/release/bundle/`.
 
 ```
 CrossTerm/
-├── src/                    # React frontend (TypeScript)
-│   ├── components/         # UI components (Terminal, Settings, Vault, etc.)
-│   ├── stores/             # Zustand state stores
-│   ├── themes/             # Theme definitions (dark, light, tokens)
-│   ├── i18n/               # Internationalization strings
-│   └── types/              # TypeScript type definitions
-├── src-tauri/              # Tauri / Rust backend
-│   └── src/
-│       ├── lib.rs          # Tauri app setup & command registration
-│       ├── main.rs         # Entry point
-│       ├── audit/          # Audit logging module
-│       ├── config/         # Profile & session configuration
-│       ├── ssh/            # SSH client, port forwarding, jump hosts
-│       ├── terminal/       # Local PTY management
-│       └── vault/          # Encrypted credential vault
-└── .github/workflows/     # CI/CD (build, test, release)
+├── src/                        # React frontend (TypeScript)
+│   ├── App.tsx                 # Root application component
+│   ├── main.tsx                # Entry point
+│   ├── components/             # UI components
+│   │   ├── Android/            # Android-specific views
+│   │   ├── Audit/              # Audit log viewer
+│   │   ├── Cloud/              # Cloud provider integrations
+│   │   ├── Editor/             # Text/config editor
+│   │   ├── Ftp/                # FTP client UI
+│   │   ├── Help/               # Help system & documentation viewer
+│   │   ├── KeyManager/         # SSH key management
+│   │   ├── Macros/             # Macro recording & playback
+│   │   ├── NetworkTools/       # Ping, traceroute, DNS tools
+│   │   ├── Notifications/      # Toast notification system
+│   │   ├── Plugin/             # Plugin management UI
+│   │   ├── RdpViewer/          # Remote Desktop viewer
+│   │   ├── Recording/          # Session recording & playback
+│   │   ├── Serial/             # Serial port terminal
+│   │   ├── SessionTree/        # Session sidebar tree
+│   │   ├── Settings/           # Settings & preferences panels
+│   │   ├── SftpBrowser/        # Dual-pane SFTP file browser
+│   │   ├── Shared/             # Shared/common components
+│   │   ├── Snippets/           # Snippet manager
+│   │   ├── TabBar/             # Tab bar & split pane container
+│   │   ├── Telnet/             # Telnet client
+│   │   ├── Terminal/           # Local & SSH terminal tabs
+│   │   ├── Vault/              # Credential vault UI
+│   │   └── VncViewer/          # VNC remote viewer
+│   ├── hooks/                  # Custom React hooks
+│   ├── i18n/                   # Internationalization strings
+│   ├── stores/                 # Zustand state stores
+│   │   ├── appStore.ts         #   UI state, theme, layout
+│   │   ├── sessionStore.ts     #   Sessions, tabs, connections
+│   │   ├── terminalStore.ts    #   Terminal instances
+│   │   └── vaultStore.ts       #   Credential vault operations
+│   ├── styles/                 # Global CSS
+│   ├── themes/                 # Theme JSON files (9 themes)
+│   ├── types/                  # TypeScript type definitions
+│   ├── utils/                  # Utility functions
+│   └── test/                   # Test setup & helpers
+├── src-tauri/                  # Tauri / Rust backend
+│   ├── src/
+│   │   ├── lib.rs              # App setup & command registration
+│   │   ├── main.rs             # Entry point
+│   │   ├── android/            # Android platform support
+│   │   ├── audit/              # Audit logging
+│   │   ├── cloud/              # Cloud provider backends
+│   │   ├── config/             # Profile & session configuration
+│   │   ├── editor/             # Editor backend
+│   │   ├── ftp/                # FTP client
+│   │   ├── keygen/             # SSH key generation
+│   │   ├── keymgr/             # SSH key manager
+│   │   ├── l10n/               # Localization backend
+│   │   ├── macros/             # Macro engine
+│   │   ├── network/            # Network diagnostic tools
+│   │   ├── notifications/      # Notification system
+│   │   ├── plugin_rt/          # Plugin runtime
+│   │   ├── rdp/                # RDP client
+│   │   ├── recording/          # Session recording
+│   │   ├── security/           # Security utilities
+│   │   ├── serial/             # Serial port I/O
+│   │   ├── sftp/               # SFTP client
+│   │   ├── snippets/           # Snippet storage
+│   │   ├── ssh/                # SSH client, port forwarding, jump hosts
+│   │   ├── sync/               # Settings sync
+│   │   ├── telnet/             # Telnet client
+│   │   ├── terminal/           # Local PTY management
+│   │   ├── vault/              # Encrypted credential vault
+│   │   ├── vnc/                # VNC client
+│   │   └── window/             # Window management
+│   ├── benches/                # Performance benchmarks
+│   ├── capabilities/           # Tauri capability definitions
+│   ├── fuzz/                   # Fuzz testing harnesses
+│   ├── resources/              # Bundled resources
+│   └── tests/                  # Integration tests
+├── docs/                       # Project documentation
+│   ├── ARCHITECTURE.md         # System architecture
+│   ├── CODING-STANDARDS.md     # Code style & conventions
+│   ├── DESIGN.md               # Design system & tokens
+│   ├── QA.md                   # Testing strategy
+│   └── help/                   # User-facing help articles
+├── e2e/                        # Playwright end-to-end tests
+├── build-scripts/              # Platform build scripts
+├── scripts/                    # Dev & CI utility scripts
+│   └── shell-integration/      # Shell integration (bash/zsh/fish)
+├── icons/                      # App icons (all platforms)
+├── packaging/                  # Distribution packaging (Homebrew, etc.)
+├── tests/                      # Docker-based test fixtures
+├── tools/                      # Development tooling
+│   └── mcp-coordinator/        # MCP coordinator server
+└── .github/workflows/          # CI/CD (build, test, release)
 ```
 
 ## Technology Stack

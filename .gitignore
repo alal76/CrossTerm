@@ -35,3 +35,6 @@ tests/fixtures/ssh-keys/test_ed25519.pub
 # Misc
 *.bak
 *.tmp
+.claude.md
+GAP-ANALYSIS.md
+SPEC-CROSSTERM-001.md
