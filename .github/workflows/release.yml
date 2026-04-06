@@ -57,7 +57,7 @@ jobs:
           releaseName: "CrossTerm ${{ github.ref_name }}"
           releaseBody: |
             See the [CHANGELOG](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details.
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
 
       - name: Generate checksums
@@ -80,5 +80,5 @@ jobs:
       - name: Upload checksums
         uses: softprops/action-gh-release@v2
         with:
-          draft: true
+          draft: false
           files: src-tauri/target/release/bundle/**/*.sha256
