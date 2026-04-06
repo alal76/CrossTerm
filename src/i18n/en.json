@@ -125,7 +125,8 @@
     "enrollBiometric": "Enable Biometric Unlock",
     "enrollFido2": "Register Security Key",
     "osStoreEnabled": "OS keychain integration enabled",
-    "osStoreSave": "Save to System Keychain"
+    "osStoreSave": "Save to System Keychain",
+    "selectVault": "Select a vault to unlock"
   },
   "snippets": {
     "title": "Snippets",
@@ -150,6 +151,13 @@
     "copyToClipboard": "Copy to Clipboard",
     "savedFromTerminal": "Saved from terminal",
     "confirmDelete": "Delete this snippet?"
+  },
+  "ssh": {
+    "authRequired": "Authentication required",
+    "authenticate": "Authenticate",
+    "saveCredentials": "Save credentials to vault?",
+    "save": "Save",
+    "dismiss": "Dismiss"
   },
   "newSession": {
     "title": "New Session",

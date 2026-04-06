@@ -6,6 +6,9 @@ const mockInvoke = vi.mocked(invoke);
 
 function resetStore() {
   useVaultStore.setState({
+    vaults: [],
+    activeVaultId: null,
+    vaultLockStates: {},
     vaultLocked: true,
     credentials: [],
     loading: false,
@@ -23,13 +26,14 @@ describe("vaultStore", () => {
 
   describe("unlockVault", () => {
     it("sets vaultLocked to false on success", async () => {
+      useVaultStore.setState({ activeVaultId: "vault-1", vaultLockStates: { "vault-1": true } });
       mockInvoke.mockResolvedValueOnce(undefined); // vault_unlock
       mockInvoke.mockResolvedValueOnce([]);         // credential_list
 
-      await useVaultStore.getState().unlockVault("master-pass");
+      await useVaultStore.getState().unlockVault("vault-1", "master-pass");
 
       expect(mockInvoke).toHaveBeenCalledWith("vault_unlock", {
-        profileId: "default",
+        vaultId: "vault-1",
         masterPassword: "master-pass",
       });
       expect(useVaultStore.getState().vaultLocked).toBe(false);
@@ -40,7 +44,7 @@ describe("vaultStore", () => {
       mockInvoke.mockRejectedValueOnce(new Error("wrong password"));
 
       await expect(
-        useVaultStore.getState().unlockVault("bad-pass")
+        useVaultStore.getState().unlockVault("vault-1", "bad-pass")
       ).rejects.toThrow();
 
       expect(useVaultStore.getState().vaultLocked).toBe(true);
@@ -53,8 +57,11 @@ describe("vaultStore", () => {
 
   describe("lockVault", () => {
     it("sets vaultLocked to true and clears credentials", async () => {
-      // Start unlocked
+      // Start unlocked with one vault
       useVaultStore.setState({
+        vaults: [{ id: "vault-1", name: "Default", is_default: true, owner_profile_id: "default", shared_with: [], created_at: "" }],
+        activeVaultId: "vault-1",
+        vaultLockStates: { "vault-1": false },
         vaultLocked: false,
         credentials: [
           {
@@ -71,7 +78,7 @@ describe("vaultStore", () => {
 
       mockInvoke.mockResolvedValueOnce(undefined); // vault_lock
 
-      await useVaultStore.getState().lockVault();
+      await useVaultStore.getState().lockVault("vault-1");
 
       expect(useVaultStore.getState().vaultLocked).toBe(true);
       expect(useVaultStore.getState().credentials).toHaveLength(0);
@@ -82,7 +89,7 @@ describe("vaultStore", () => {
 
   describe("addCredential", () => {
     it("invokes credential_create and refreshes list", async () => {
-      useVaultStore.setState({ vaultLocked: false });
+      useVaultStore.setState({ vaultLocked: false, activeVaultId: "vault-1", vaultLockStates: { "vault-1": false } });
 
       mockInvoke.mockResolvedValueOnce("new-cred-id"); // credential_create
       mockInvoke.mockResolvedValueOnce([               // credential_list (fetchCredentials)
@@ -106,6 +113,7 @@ describe("vaultStore", () => {
 
       expect(id).toBe("new-cred-id");
       expect(mockInvoke).toHaveBeenCalledWith("credential_create", {
+        vaultId: "vault-1",
         request: {
           name: "My Server",
           credential_type: "password",
@@ -118,7 +126,7 @@ describe("vaultStore", () => {
     });
 
     it("sets error on failure", async () => {
-      useVaultStore.setState({ vaultLocked: false });
+      useVaultStore.setState({ vaultLocked: false, activeVaultId: "vault-1", vaultLockStates: { "vault-1": false } });
       mockInvoke.mockRejectedValueOnce(new Error("encryption failed"));
 
       await expect(
@@ -139,6 +147,8 @@ describe("vaultStore", () => {
     it("removes credential from local state", async () => {
       useVaultStore.setState({
         vaultLocked: false,
+        activeVaultId: "vault-1",
+        vaultLockStates: { "vault-1": false },
         credentials: [
           {
             id: "del-1",

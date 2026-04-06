@@ -62,8 +62,8 @@ describe("CredentialManager", () => {
 
     render(<CredentialManager />);
 
-    // Click the Add button to open the form
-    const addButton = screen.getByRole("button", { name: /Add/ });
+    // Click the Add button to open the form (exact match to avoid "Add Credential" empty-state btn)
+    const addButton = screen.getByRole("button", { name: /^Add$/ });
     await user.click(addButton);
 
     // The form dialog should be open

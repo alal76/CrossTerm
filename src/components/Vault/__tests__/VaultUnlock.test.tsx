@@ -10,10 +10,37 @@ const mockInvoke = vi.mocked(invoke);
 
 function resetStore() {
   useVaultStore.setState({
+    vaults: [],
+    activeVaultId: null,
+    vaultLockStates: {},
     vaultLocked: true,
     credentials: [],
     loading: false,
     error: null,
+  });
+}
+
+const MOCK_VAULT = {
+  id: "vault-1",
+  name: "Default",
+  is_default: true,
+  owner_profile_id: "default",
+  shared_with: [] as string[],
+  created_at: new Date().toISOString(),
+};
+
+/** Route invoke calls by command name instead of sequential mocking */
+function setupMockInvoke(overrides: Record<string, unknown> = {}) {
+  const defaults: Record<string, unknown> = {
+    vault_list: [],
+    vault_is_locked: true,
+    vault_biometric_available: false,
+    vault_fido2_available: false,
+    ...overrides,
+  };
+  mockInvoke.mockImplementation(async (cmd: string) => {
+    if (cmd in defaults) return defaults[cmd];
+    return undefined;
   });
 }
 
@@ -23,9 +50,8 @@ describe("VaultUnlock", () => {
     vi.clearAllMocks();
   });
 
-  it("shows Create mode when vault does not exist", async () => {
-    // vault_is_locked throws => vault doesn't exist => isNewVault = true
-    mockInvoke.mockRejectedValueOnce(new Error("no vault"));
+  it("shows Create mode when no vaults exist for profile", async () => {
+    setupMockInvoke({ vault_list: [] });
 
     render(<VaultUnlock />);
 
@@ -38,15 +64,16 @@ describe("VaultUnlock", () => {
     expect(
       screen.getByText("Set a master password to encrypt your credentials.")
     ).toBeInTheDocument();
-    // Confirm password field should be present
     expect(
       screen.getByPlaceholderText("Confirm password")
     ).toBeInTheDocument();
   });
 
-  it("shows Unlock mode when vault exists but is locked", async () => {
-    // vault_is_locked resolves => vault exists => isNewVault = false
-    mockInvoke.mockResolvedValueOnce(true);
+  it("shows Unlock mode when vaults exist but are locked", async () => {
+    setupMockInvoke({
+      vault_list: [MOCK_VAULT],
+      vault_is_locked: true,
+    });
 
     render(<VaultUnlock />);
 
@@ -59,7 +86,6 @@ describe("VaultUnlock", () => {
     expect(
       screen.getByText("Enter your master password to access saved credentials.")
     ).toBeInTheDocument();
-    // No confirm password field in unlock mode
     expect(
       screen.queryByPlaceholderText("Confirm password")
     ).not.toBeInTheDocument();
@@ -67,8 +93,7 @@ describe("VaultUnlock", () => {
 
   it("validates password minimum length (8 chars)", async () => {
     const user = userEvent.setup();
-    // vault doesn't exist => create mode
-    mockInvoke.mockRejectedValueOnce(new Error("no vault"));
+    setupMockInvoke({ vault_list: [] });
 
     render(<VaultUnlock />);
 
@@ -81,15 +106,12 @@ describe("VaultUnlock", () => {
     const passwordInput = screen.getByPlaceholderText("Master password");
     const confirmInput = screen.getByPlaceholderText("Confirm password");
 
-    // Type a short password
     await user.type(passwordInput, "short");
     await user.type(confirmInput, "short");
 
-    // Submit the form
     const submitButton = screen.getByRole("button", { name: "Create Vault" });
     await user.click(submitButton);
 
-    // Validation error should appear
     expect(
       screen.getByText("Password must be at least 8 characters.")
     ).toBeInTheDocument();
@@ -97,8 +119,7 @@ describe("VaultUnlock", () => {
 
   it("FT-C-12: password confirmation mismatch shows error", async () => {
     const user = userEvent.setup();
-    // vault doesn't exist => create mode
-    mockInvoke.mockRejectedValueOnce(new Error("no vault"));
+    setupMockInvoke({ vault_list: [] });
 
     render(<VaultUnlock />);
 
@@ -111,7 +132,6 @@ describe("VaultUnlock", () => {
     const passwordInput = screen.getByPlaceholderText("Master password");
     const confirmInput = screen.getByPlaceholderText("Confirm password");
 
-    // Type a valid-length password but mismatching confirmation
     await user.type(passwordInput, "securepassword123");
     await user.type(confirmInput, "differentpassword");
 
@@ -125,8 +145,10 @@ describe("VaultUnlock", () => {
 
   it("FT-C-13: submit calls invoke('vault_create') and unlockVault", async () => {
     const user = userEvent.setup();
-    // vault doesn't exist => create mode
-    mockInvoke.mockRejectedValueOnce(new Error("no vault"));
+    setupMockInvoke({
+      vault_list: [],
+      vault_create: MOCK_VAULT,
+    });
 
     render(<VaultUnlock />);
 
@@ -135,9 +157,6 @@ describe("VaultUnlock", () => {
         screen.getByRole("heading", { name: "Create Vault" })
       ).toBeInTheDocument();
     });
-
-    // Mock successful vault_create and vault_unlock calls
-    mockInvoke.mockResolvedValue(undefined);
 
     const passwordInput = screen.getByPlaceholderText("Master password");
     const confirmInput = screen.getByPlaceholderText("Confirm password");
@@ -152,6 +171,8 @@ describe("VaultUnlock", () => {
       expect(mockInvoke).toHaveBeenCalledWith("vault_create", {
         profileId: "default",
         masterPassword: "strongpassword123",
+        name: undefined,
+        isDefault: undefined,
       });
     });
   });

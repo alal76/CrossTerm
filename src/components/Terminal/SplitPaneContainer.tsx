@@ -108,7 +108,10 @@ function LeafPane({
           host={session.connection.host}
           port={session.connection.port}
           username={(session.connection.protocolOptions?.["username"] as string) ?? "root"}
-          auth={{ type: "password", password: (session.connection.protocolOptions?.["password"] as string) ?? "" }}
+          auth={(() => {
+            const pw = (session.connection.protocolOptions?.["password"] as string) ?? "";
+            return pw ? { type: "password" as const, password: pw } : { type: "none" as const };
+          })()}
         />
       ) : (
         <TerminalTab sessionId={tab.sessionId} isActive={isActive} />

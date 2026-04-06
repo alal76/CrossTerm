@@ -54,6 +54,17 @@ export enum CredentialType {
   TOTPSeed = "totp_seed",
 }
 
+// --- Vault Metadata ---
+
+export interface VaultInfo {
+  id: string;
+  name: string;
+  is_default: boolean;
+  owner_profile_id: string;
+  shared_with: string[];
+  created_at: string;
+}
+
 // --- Credential Interfaces ---
 
 export interface PasswordCredential {

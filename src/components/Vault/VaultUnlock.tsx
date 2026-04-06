@@ -2,8 +2,9 @@ import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import clsx from "clsx";
-import { Lock, Eye, EyeOff, ShieldCheck, Loader2, Fingerprint, KeyRound } from "lucide-react";
+import { Lock, Eye, EyeOff, ShieldCheck, Loader2, Fingerprint, KeyRound, Vault as VaultIcon } from "lucide-react";
 import { useVaultStore } from "@/stores/vaultStore";
+import type { VaultInfo } from "@/types";
 
 function validateNewVaultPassword(
   password: string,
@@ -35,7 +36,7 @@ async function detectAuthMethods(
   setIsMac(navigator.userAgent.toUpperCase().includes("MAC"));
 }
 
-function VaultHeader({ isNewVault, t }: { readonly isNewVault: boolean | null; readonly t: (key: string) => string }) {
+function VaultHeader({ isNewVault, t }: { readonly isNewVault: boolean; readonly t: (key: string) => string }) {
   return (
     <div className="flex flex-col items-center mb-8">
       <div className="w-16 h-16 rounded-2xl bg-accent-primary/10 flex items-center justify-center mb-4">
@@ -57,40 +58,80 @@ function VaultHeader({ isNewVault, t }: { readonly isNewVault: boolean | null; r
   );
 }
 
+function VaultListItem({
+  vault,
+  onSelect,
+  selected,
+}: {
+  readonly vault: VaultInfo;
+  readonly onSelect: (v: VaultInfo) => void;
+  readonly selected: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(vault)}
+      className={clsx(
+        "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm",
+        "transition-colors duration-[var(--duration-short)]",
+        "border",
+        selected
+          ? "border-border-focus bg-surface-elevated"
+          : "border-border-default bg-surface-secondary hover:bg-surface-elevated"
+      )}
+    >
+      <VaultIcon size={16} className="text-text-secondary shrink-0" />
+      <div className="flex-1 min-w-0">
+        <span className="text-text-primary truncate block">{vault.name}</span>
+        {vault.is_default && (
+          <span className="text-[10px] text-accent-primary">{vault.is_default ? "Default" : "Shared"}</span>
+        )}
+      </div>
+      <Lock size={14} className="text-text-disabled shrink-0" />
+    </button>
+  );
+}
+
 export default function VaultUnlock() {
   const { t } = useTranslation();
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [isNewVault, setIsNewVault] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checkingVault, setCheckingVault] = useState(true);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [fido2Available, setFido2Available] = useState(false);
   const [isMac, setIsMac] = useState(false);
+  const [selectedVault, setSelectedVault] = useState<VaultInfo | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const vaults = useVaultStore((s) => s.vaults);
+  const vaultLocked = useVaultStore((s) => s.vaultLocked);
+  const vaultLockStates = useVaultStore((s) => s.vaultLockStates);
   const unlockVault = useVaultStore((s) => s.unlockVault);
   const createVault = useVaultStore((s) => s.createVault);
-  const vaultLocked = useVaultStore((s) => s.vaultLocked);
+  const listVaults = useVaultStore((s) => s.listVaults);
 
-  // Detect if vault exists
+  const isNewVault = !checkingVault && vaults.length === 0;
+  const lockedVaults = vaults.filter((v) => vaultLockStates[v.id]);
+
+  // Load vaults for the current profile
   useEffect(() => {
     async function check() {
-      try {
-        await invoke<boolean>("vault_is_locked");
-        // If the command succeeds, a vault exists
-        setIsNewVault(false);
-      } catch {
-        // Vault doesn't exist yet
-        setIsNewVault(true);
-      } finally {
-        setCheckingVault(false);
-      }
+      await listVaults();
+      setCheckingVault(false);
     }
     check();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-select the default vault when vaults load
+  useEffect(() => {
+    if (!selectedVault && lockedVaults.length > 0) {
+      const defaultVault = lockedVaults.find((v) => v.is_default) ?? lockedVaults[0];
+      setSelectedVault(defaultVault);
+    }
+  }, [lockedVaults, selectedVault]);
 
   // Detect biometric and FIDO2 availability
   useEffect(() => {
@@ -124,8 +165,8 @@ export default function VaultUnlock() {
     try {
       if (isNewVault) {
         await createVault(password);
-      } else {
-        await unlockVault(password);
+      } else if (selectedVault) {
+        await unlockVault(selectedVault.id, password);
       }
     } catch (e) {
       setError(String(e));
@@ -139,7 +180,9 @@ export default function VaultUnlock() {
     setLoading(true);
     try {
       await invoke("vault_unlock_biometric");
-      await unlockVault(""); // biometric bypasses password
+      if (selectedVault) {
+        await unlockVault(selectedVault.id, "");
+      }
     } catch (e) {
       setError(String(e) || t("vault.biometricUnavailable"));
     } finally {
@@ -151,8 +194,7 @@ export default function VaultUnlock() {
     setError(null);
     setLoading(true);
     try {
-      await invoke("vault_fido2_auth_begin", { profileId: "" });
-      // In production: pass challenge to browser WebAuthn API, then call auth_complete
+      await invoke("vault_fido2_auth_begin", { vaultId: selectedVault?.id ?? "" });
       setError(t("vault.fido2Unavailable"));
     } catch {
       setError(t("vault.fido2Unavailable"));
@@ -177,6 +219,23 @@ export default function VaultUnlock() {
     <div className="flex items-center justify-center w-full h-full bg-surface-primary">
       <div className="w-full max-w-sm px-6">
         <VaultHeader isNewVault={isNewVault} t={t} />
+
+        {/* Vault selector (when multiple locked vaults exist) */}
+        {!isNewVault && lockedVaults.length > 1 && (
+          <div className="flex flex-col gap-1.5 mb-4">
+            <label className="text-xs text-text-secondary px-1">
+              {t("vault.selectVault")}
+            </label>
+            {lockedVaults.map((v) => (
+              <VaultListItem
+                key={v.id}
+                vault={v}
+                onSelect={setSelectedVault}
+                selected={selectedVault?.id === v.id}
+              />
+            ))}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           <div className="relative">
@@ -230,7 +289,7 @@ export default function VaultUnlock() {
 
           <button
             type="submit"
-            disabled={loading || !password}
+            disabled={loading || !password || (!isNewVault && !selectedVault)}
             className={clsx(
               "w-full py-2.5 rounded-lg text-sm font-medium",
               "transition-colors duration-[var(--duration-short)]",

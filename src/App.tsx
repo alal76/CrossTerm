@@ -773,7 +773,10 @@ function SessionCanvas() {
                 host={session.connection.host}
                 port={session.connection.port}
                 username={username}
-                auth={{ type: "password", password: (session.connection.protocolOptions?.["password"] as string) ?? "" }}
+                auth={(() => {
+                  const pw = (session.connection.protocolOptions?.["password"] as string) ?? "";
+                  return pw ? { type: "password" as const, password: pw } : { type: "none" as const };
+                })()}
               />
             </div>
           );
@@ -979,7 +982,7 @@ export default function App() {
   const setTheme = useAppStore((s) => s.setTheme);
   const firstLaunchComplete = useAppStore((s) => s.firstLaunchComplete);
   const setFirstLaunchComplete = useAppStore((s) => s.setFirstLaunchComplete);
-  const lockVault = useVaultStore((s) => s.lockVault);
+  const lockAllVaults = useVaultStore((s) => s.lockAllVaults);
   const addSession = useSessionStore((s) => s.addSession);
   const openTab = useSessionStore((s) => s.openTab);
   const openTabs = useSessionStore((s) => s.openTabs);
@@ -1065,11 +1068,13 @@ export default function App() {
       }
     );
 
-    const unlistenAutoLock = listen("vault:auto_locked", () => {
-      useVaultStore.getState().lockVault().catch(() => {
-        // Fallback: just set local state if backend already locked
+    const unlistenAutoLock = listen<string>("vault:auto_locked", (event) => {
+      const vaultId = event.payload;
+      if (vaultId) {
+        useVaultStore.getState().markVaultLocked(vaultId);
+      } else {
         useVaultStore.setState({ vaultLocked: true, credentials: [] });
-      });
+      }
     });
 
     return () => {
@@ -1251,7 +1256,7 @@ export default function App() {
             onNewLocalShell={handleNewLocalShell}
             onNewSSHSession={() => setShowQuickConnect(true)}
             onOpenSettings={() => setSettingsOpen(true)}
-            onLockVault={() => lockVault()}
+            onLockVault={() => lockAllVaults()}
             onOpenHelp={() => setShowHelpPanel(true)}
             onOpenShortcuts={() => setShowShortcutOverlay(true)}
             onOpenHelpArticle={(slug) => { setHelpArticleSlug(slug); setShowHelpPanel(true); }}

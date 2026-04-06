@@ -10,7 +10,7 @@ use tauri::{AppHandle, Emitter};
 use thiserror::Error;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{mpsc, Mutex as TokioMutex, RwLock};
+use tokio::sync::{mpsc, oneshot, Mutex as TokioMutex, RwLock};
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
@@ -69,6 +69,7 @@ pub enum SshAuth {
         key_data: String,
         passphrase: Option<String>,
     },
+    None,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -155,6 +156,20 @@ struct SshHostKeyNewEvent {
     port: u16,
     algorithm: String,
     fingerprint: String,
+}
+
+#[derive(Clone, Serialize)]
+struct SshAuthPromptEvent {
+    connection_id: String,
+    name: String,
+    instructions: String,
+    prompts: Vec<AuthPromptInfo>,
+}
+
+#[derive(Clone, Serialize)]
+struct AuthPromptInfo {
+    prompt: String,
+    echo: bool,
 }
 
 // ── Internal command channel for the session task ───────────────────────
@@ -382,12 +397,14 @@ pub(crate) struct SshConnection {
 
 pub struct SshState {
     pub(crate) connections: Arc<RwLock<HashMap<String, Arc<TokioMutex<SshConnection>>>>>,
+    pending_auth_responses: Arc<RwLock<HashMap<String, oneshot::Sender<Vec<String>>>>>,
 }
 
 impl SshState {
     pub fn new() -> Self {
         Self {
             connections: Arc::new(RwLock::new(HashMap::new())),
+            pending_auth_responses: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 }
@@ -436,28 +453,33 @@ fn build_config(keep_alive_secs: Option<u64>) -> Arc<client::Config> {
     Arc::new(config)
 }
 
-async fn connect_and_auth(
+/// Establish the SSH transport (TCP + handshake) without authenticating.
+async fn ssh_connect_transport(
     host: &str,
     port: u16,
-    username: &str,
-    auth: &SshAuth,
     handler: SshClientHandler,
     keep_alive_secs: Option<u64>,
 ) -> Result<client::Handle<SshClientHandler>, SshError> {
     let config = build_config(keep_alive_secs);
     let addr = format!("{}:{}", host, port);
-
-    let mut handle = client::connect(config, &addr, handler)
+    client::connect(config, &addr, handler)
         .await
-        .map_err(|e| SshError::ConnectionFailed(e.to_string()))?;
+        .map_err(|e| SshError::ConnectionFailed(e.to_string()))
+}
 
-    let authenticated = match auth {
+/// Attempt a single authentication method. Returns `Ok(true)` on success.
+async fn ssh_try_auth(
+    handle: &mut client::Handle<SshClientHandler>,
+    username: &str,
+    auth: &SshAuth,
+) -> Result<bool, SshError> {
+    match auth {
         SshAuth::Password { password } => {
             let password = Zeroizing::new(password.clone());
             handle
                 .authenticate_password(username, (*password).clone())
                 .await
-                .map_err(|e| SshError::ConnectionFailed(e.to_string()))?
+                .map_err(|e| SshError::ConnectionFailed(e.to_string()))
         }
         SshAuth::PrivateKey {
             key_data,
@@ -474,14 +496,96 @@ async fn connect_and_auth(
             handle
                 .authenticate_publickey(username, Arc::new(key_pair))
                 .await
-                .map_err(|e| SshError::ConnectionFailed(e.to_string()))?
+                .map_err(|e| SshError::ConnectionFailed(e.to_string()))
         }
-    };
+        SshAuth::None => {
+            handle
+                .authenticate_none(username)
+                .await
+                .map_err(|e| SshError::ConnectionFailed(e.to_string()))
+        }
+    }
+}
 
-    if !authenticated {
+/// Drive keyboard-interactive auth, emitting prompt events and waiting for
+/// frontend responses via a oneshot channel stored in `pending_responses`.
+async fn ssh_keyboard_interactive_auth(
+    handle: &mut client::Handle<SshClientHandler>,
+    username: &str,
+    connection_id: &str,
+    app_handle: &AppHandle,
+    pending_responses: &Arc<RwLock<HashMap<String, oneshot::Sender<Vec<String>>>>>,
+) -> Result<(), SshError> {
+    use russh::client::KeyboardInteractiveAuthResponse;
+
+    let mut result = handle
+        .authenticate_keyboard_interactive_start(username, None::<String>)
+        .await
+        .map_err(|e| SshError::ConnectionFailed(e.to_string()))?;
+
+    loop {
+        match result {
+            KeyboardInteractiveAuthResponse::Success => return Ok(()),
+            KeyboardInteractiveAuthResponse::Failure => return Err(SshError::AuthFailed),
+            KeyboardInteractiveAuthResponse::InfoRequest {
+                name,
+                instructions,
+                prompts,
+            } => {
+                if prompts.is_empty() {
+                    // Empty prompt round — respond with empty vec and continue
+                    result = handle
+                        .authenticate_keyboard_interactive_respond(vec![])
+                        .await
+                        .map_err(|e| SshError::ConnectionFailed(e.to_string()))?;
+                    continue;
+                }
+
+                let (tx, rx) = oneshot::channel();
+                pending_responses
+                    .write()
+                    .await
+                    .insert(connection_id.to_string(), tx);
+
+                let _ = app_handle.emit(
+                    "ssh:auth_prompt",
+                    SshAuthPromptEvent {
+                        connection_id: connection_id.to_string(),
+                        name,
+                        instructions,
+                        prompts: prompts
+                            .iter()
+                            .map(|p| AuthPromptInfo {
+                                prompt: p.prompt.clone(),
+                                echo: p.echo,
+                            })
+                            .collect(),
+                    },
+                );
+
+                let responses = rx.await.map_err(|_| SshError::AuthFailed)?;
+
+                result = handle
+                    .authenticate_keyboard_interactive_respond(responses)
+                    .await
+                    .map_err(|e| SshError::ConnectionFailed(e.to_string()))?;
+            }
+        }
+    }
+}
+
+async fn connect_and_auth(
+    host: &str,
+    port: u16,
+    username: &str,
+    auth: &SshAuth,
+    handler: SshClientHandler,
+    keep_alive_secs: Option<u64>,
+) -> Result<client::Handle<SshClientHandler>, SshError> {
+    let mut handle = ssh_connect_transport(host, port, handler, keep_alive_secs).await?;
+    if !ssh_try_auth(&mut handle, username, auth).await? {
         return Err(SshError::AuthFailed);
     }
-
     Ok(handle)
 }
 
@@ -541,29 +645,7 @@ async fn connect_via_jump(
         ))?;
 
     // Authenticate to the target host
-    let authenticated = match target_auth {
-        SshAuth::Password { password } => {
-            let password = Zeroizing::new(password.clone());
-            target_handle
-                .authenticate_password(target_username, (*password).clone())
-                .await
-                .map_err(|e| SshError::ConnectionFailed(e.to_string()))?
-        }
-        SshAuth::PrivateKey { key_data, passphrase } => {
-            let key_pair = if let Some(pass) = passphrase {
-                let pass = Zeroizing::new(pass.clone());
-                russh_keys::decode_secret_key(key_data, Some(pass.as_str()))
-                    .map_err(|e| SshError::Key(e.to_string()))?
-            } else {
-                russh_keys::decode_secret_key(key_data, None)
-                    .map_err(|e| SshError::Key(e.to_string()))?
-            };
-            target_handle
-                .authenticate_publickey(target_username, Arc::new(key_pair))
-                .await
-                .map_err(|e| SshError::ConnectionFailed(e.to_string()))?
-        }
-    };
+    let authenticated = ssh_try_auth(&mut target_handle, target_username, target_auth).await?;
 
     if !authenticated {
         let _ = jump_handle
@@ -649,14 +731,49 @@ pub async fn ssh_connect(
             }
         }
     } else {
-        match connect_and_auth(&host, port, &username, &auth, handler, keep_alive_secs).await {
-            Ok(h) => (h, None),
-            Err(e) => {
-                crate::audit::append_event(&pid, crate::audit::AuditEventType::SessionConnect,
-                    &format!("SSH connect FAILED {}@{}:{} - {}", username, host, port, e));
-                return Err(e);
-            }
+        // Step 1: Establish transport (TCP + SSH handshake)
+        let mut h = ssh_connect_transport(&host, port, handler, keep_alive_secs)
+            .await
+            .map_err(|e| {
+                crate::audit::append_event(
+                    &pid,
+                    crate::audit::AuditEventType::SessionConnect,
+                    &format!("SSH connect FAILED {}@{}:{} - {}", username, host, port, e),
+                );
+                e
+            })?;
+
+        // Step 2: Try primary auth method
+        let authenticated = ssh_try_auth(&mut h, &username, &auth).await.map_err(|e| {
+            crate::audit::append_event(
+                &pid,
+                crate::audit::AuditEventType::SessionConnect,
+                &format!("SSH connect FAILED {}@{}:{} - {}", username, host, port, e),
+            );
+            e
+        })?;
+
+        // Step 3: If primary auth failed, fall back to keyboard-interactive
+        if !authenticated {
+            ssh_keyboard_interactive_auth(
+                &mut h,
+                &username,
+                &connection_id,
+                &app_handle,
+                &state.pending_auth_responses,
+            )
+            .await
+            .map_err(|e| {
+                crate::audit::append_event(
+                    &pid,
+                    crate::audit::AuditEventType::SessionConnect,
+                    &format!("SSH connect FAILED {}@{}:{} - {}", username, host, port, e),
+                );
+                e
+            })?;
         }
+
+        (h, None)
     };
 
     // Measure connection latency (connect start to auth success)
@@ -875,6 +992,22 @@ pub async fn ssh_disconnect(
         },
     );
 
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn ssh_auth_respond(
+    state: tauri::State<'_, SshState>,
+    connection_id: String,
+    responses: Vec<String>,
+) -> Result<(), SshError> {
+    let tx = state
+        .pending_auth_responses
+        .write()
+        .await
+        .remove(&connection_id)
+        .ok_or_else(|| SshError::NotFound(connection_id))?;
+    tx.send(responses).map_err(|_| SshError::AuthFailed)?;
     Ok(())
 }
 
