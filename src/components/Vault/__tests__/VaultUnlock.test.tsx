@@ -150,7 +150,8 @@ describe("VaultUnlock", () => {
 
     await waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith("vault_create", {
-        password: "strongpassword123",
+        profileId: "default",
+        masterPassword: "strongpassword123",
       });
     });
   });

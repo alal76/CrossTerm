@@ -1011,6 +1011,11 @@ export default function App() {
   useEffect(() => {
     async function loadSettings() {
       try {
+        // Sync active profile to Rust backend
+        const profileId = useAppStore.getState().activeProfileId;
+        if (profileId) {
+          await invoke("profile_switch", { id: profileId }).catch(() => {});
+        }
         const settings = await invoke<{ theme?: ThemeVariant }>("settings_get");
         if (settings?.theme) {
           setTheme(settings.theme);
@@ -1060,9 +1065,17 @@ export default function App() {
       }
     );
 
+    const unlistenAutoLock = listen("vault:auto_locked", () => {
+      useVaultStore.getState().lockVault().catch(() => {
+        // Fallback: just set local state if backend already locked
+        useVaultStore.setState({ vaultLocked: true, credentials: [] });
+      });
+    });
+
     return () => {
       unlistenExit.then((fn) => fn());
       unlistenSshDisconnect.then((fn) => fn());
+      unlistenAutoLock.then((fn) => fn());
     };
   }, [updateTabStatus]);
 

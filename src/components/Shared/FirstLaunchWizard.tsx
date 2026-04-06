@@ -65,6 +65,7 @@ export default function FirstLaunchWizard() {
     setLoading(true);
     try {
       const profileId = await invoke<string>("profile_create", { name });
+      await invoke("profile_switch", { id: profileId }).catch(() => {});
       addProfile({ id: profileId, name, authMethod: "password", createdAt: new Date().toISOString() });
       setActiveProfile(profileId);
     } catch {
@@ -83,7 +84,8 @@ export default function FirstLaunchWizard() {
     if (password.length < 8) { setError(t("wizard.passwordTooShort")); return false; }
     setLoading(true);
     try {
-      await invoke("vault_create", { masterPassword: password });
+      const profileId = useAppStore.getState().activeProfileId ?? "default";
+      await invoke("vault_create", { profileId, masterPassword: password });
     } catch {
       // Backend may not be ready; proceed anyway
     } finally {

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 import { SidebarMode, BottomPanelMode, ThemeVariant } from "@/types";
 import type { Profile, BellStyle, CursorStyle, ThemeTokens } from "@/types";
 
@@ -62,7 +63,7 @@ interface AppState {
 
 const initialTheme = ThemeVariant.Dark;
 
-export const useAppStore = create<AppState>((set) => ({
+export const useAppStore = create<AppState>()(persist((set) => ({
   activeProfileId: "default",
   profiles: [
     {
@@ -136,4 +137,12 @@ export const useAppStore = create<AppState>((set) => ({
       windowHeight: height,
       sidebarCollapsed: width < 900,
     }),
+}), {
+  name: "crossterm-app-store",
+  partialize: (state) => ({
+    activeProfileId: state.activeProfileId,
+    profiles: state.profiles,
+    firstLaunchComplete: state.firstLaunchComplete,
+    theme: state.theme,
+  }),
 }));

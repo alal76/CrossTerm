@@ -72,6 +72,8 @@ export default function VaultUnlock() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const unlockVault = useVaultStore((s) => s.unlockVault);
+  const createVault = useVaultStore((s) => s.createVault);
+  const vaultLocked = useVaultStore((s) => s.vaultLocked);
 
   // Detect if vault exists
   useEffect(() => {
@@ -121,9 +123,10 @@ export default function VaultUnlock() {
     setLoading(true);
     try {
       if (isNewVault) {
-        await invoke("vault_create", { password });
+        await createVault(password);
+      } else {
+        await unlockVault(password);
       }
-      await unlockVault(password);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -164,6 +167,10 @@ export default function VaultUnlock() {
         <Loader2 size={24} className="animate-spin text-accent-primary" />
       </div>
     );
+  }
+
+  if (!vaultLocked) {
+    return null;
   }
 
   return (
