@@ -24,6 +24,7 @@ import {
   Copy,
   MoreVertical,
   Radio,
+  KeyRound,
 } from "lucide-react";
 import { useAppStore } from "@/stores/appStore";
 import { useSessionStore } from "@/stores/sessionStore";
@@ -44,6 +45,11 @@ import HelpMenu from "@/components/Help/HelpMenu";
 import WhatsNewPanel from "@/components/Help/WhatsNewPanel";
 import FeatureTour from "@/components/Help/FeatureTour";
 import TipOfTheDay from "@/components/Help/TipOfTheDay";
+import VaultUnlock from "@/components/Vault/VaultUnlock";
+import CredentialManager from "@/components/Vault/CredentialManager";
+import SettingsPanel from "@/components/Settings/SettingsPanel";
+import SessionEditor from "@/components/SessionTree/SessionEditor";
+import SftpBrowser from "@/components/SftpBrowser/SftpBrowser";
 
 const SESSION_TYPE_ICONS: Record<string, string> = {
   ssh: "⌨",
@@ -499,7 +505,13 @@ const SIDEBAR_MODES = [
   { mode: SidebarMode.Tunnels, icon: Lock, label: "sidebar.tunnels" as const },
 ];
 
-function Sidebar() {
+function Sidebar({
+  onNewSession,
+  onOpenCredentials,
+}: {
+  readonly onNewSession: () => void;
+  readonly onOpenCredentials: () => void;
+}) {
   const { t } = useTranslation();
   const sidebarMode = useAppStore((s) => s.sidebarMode);
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
@@ -559,6 +571,15 @@ function Sidebar() {
             <Icon size={20} />
           </button>
         ))}
+        <div className="flex-1" />
+        <button
+          onClick={onOpenCredentials}
+          className="relative flex items-center justify-center w-9 h-9 rounded transition-colors text-text-secondary hover:text-text-primary hover:bg-surface-elevated"
+          title={t("sidebar.credentials")}
+          data-tooltip={t("sidebar.credentials")}
+        >
+          <KeyRound size={20} />
+        </button>
       </div>
 
       {/* Content panel */}
@@ -582,6 +603,7 @@ function Sidebar() {
                 sessions={sessions}
                 favorites={favorites}
                 onSelect={openTab}
+                onNewSession={onNewSession}
               />
             )}
             {sidebarMode === SidebarMode.Snippets && (
@@ -607,10 +629,12 @@ function SessionsPanel({
   sessions,
   favorites: _favorites,
   onSelect,
+  onNewSession,
 }: {
   sessions: import("@/types").Session[];
   favorites: string[];
   onSelect: (session: import("@/types").Session) => void;
+  onNewSession?: () => void;
 }) {
   const { t } = useTranslation();
 
@@ -619,7 +643,10 @@ function SessionsPanel({
       <div className="flex flex-col items-center justify-center gap-3 py-8 text-center">
         <Terminal size={32} className="text-text-disabled" />
         <p className="text-xs text-text-secondary px-2">{t("sessions.emptyState")}</p>
-        <button className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-interactive-default text-text-inverse hover:bg-interactive-hover transition-colors">
+        <button
+          onClick={onNewSession}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-interactive-default text-text-inverse hover:bg-interactive-hover transition-colors"
+        >
           <Plus size={12} />
           {t("sessions.newSession")}
         </button>
@@ -779,10 +806,7 @@ function BottomPanel() {
       {/* Content */}
       <div className="flex-1 overflow-auto p-3 text-xs text-text-secondary">
         {bottomPanelMode === BottomPanelMode.SFTP && (
-          <EmptyPanel
-            icon={<ChevronRight size={24} className="text-text-disabled" />}
-            message={t("sessions.emptyState")}
-          />
+          <SftpBrowser />
         )}
         {bottomPanelMode === BottomPanelMode.Snippets && (
           <EmptyPanel
@@ -928,6 +952,9 @@ export default function App() {
   const closeTab = useSessionStore((s) => s.closeTab);
   const updateTabStatus = useSessionStore((s) => s.updateTabStatus);
   const [showQuickConnect, setShowQuickConnect] = useState(false);
+  const [showCredentialManager, setShowCredentialManager] = useState(false);
+  const [showSessionEditor, setShowSessionEditor] = useState(false);
+  const [editingSession, setEditingSession] = useState<Session | null>(null);
   const [showHelpPanel, setShowHelpPanel] = useState(false);
   const [showShortcutOverlay, setShowShortcutOverlay] = useState(false);
   const [helpArticleSlug, setHelpArticleSlug] = useState<string | undefined>(undefined);
@@ -1122,14 +1149,23 @@ export default function App() {
 
           <div className="flex flex-1 min-h-0">
             {/* Region C - hidden on compact via Sidebar internal logic */}
-            <Sidebar />
+            <Sidebar
+              onNewSession={() => { setEditingSession(null); setShowSessionEditor(true); }}
+              onOpenCredentials={() => setShowCredentialManager(true)}
+            />
 
             <div className="flex flex-col flex-1 min-w-0">
               {/* Region B */}
               <TabBar
                 onNewLocalShell={handleNewLocalShell}
                 onNewSSH={() => setShowQuickConnect(true)}
-                onNewSFTP={() => {}}
+                onNewSFTP={() => {
+                  const setBottomPanelMode = useAppStore.getState().setBottomPanelMode;
+                  const toggleBottomPanel = useAppStore.getState().toggleBottomPanel;
+                  const bottomPanelVisible = useAppStore.getState().bottomPanelVisible;
+                  setBottomPanelMode(BottomPanelMode.SFTP);
+                  if (!bottomPanelVisible) toggleBottomPanel();
+                }}
               />
 
               {/* Region D */}
@@ -1156,6 +1192,7 @@ export default function App() {
           <CommandPalette
             onNewLocalShell={handleNewLocalShell}
             onNewSSHSession={() => setShowQuickConnect(true)}
+            onOpenSettings={() => setSettingsOpen(true)}
             onLockVault={() => lockVault()}
             onOpenHelp={() => setShowHelpPanel(true)}
             onOpenShortcuts={() => setShowShortcutOverlay(true)}
@@ -1166,6 +1203,15 @@ export default function App() {
           <ShortcutOverlay open={showShortcutOverlay} onClose={() => setShowShortcutOverlay(false)} />
           <WhatsNewPanel />
           <TipOfTheDay />
+          <VaultUnlock />
+          {settingsOpen && <SettingsPanel />}
+          {showCredentialManager && <CredentialManager />}
+          {showSessionEditor && (
+            <SessionEditor
+              session={editingSession}
+              onClose={() => { setShowSessionEditor(false); setEditingSession(null); }}
+            />
+          )}
           {showFeatureTour && activeTourId && (
             <FeatureTour
               tourId={activeTourId}

@@ -48,6 +48,7 @@
   },
   "plugins": {
     "updater": {
+      "active": false,
       "endpoints": [
         "https://releases.crossterm.dev/{{target}}/{{arch}}/{{current_version}}"
       ],

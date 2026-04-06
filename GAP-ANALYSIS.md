@@ -1007,3 +1007,20 @@ All 26 P1-LOW items resolved including HELP-34 (macOS Help Book build script), H
 ---
 
 *End of gap analysis. Last updated: 2026-04-06. **ALL P1 gaps resolved.** Phase 1 MVP is spec-complete. Only 13 P2 items remain for Phase 2.*
+
+### Verification Log
+
+**2026-04-06 — Deep Code Audit:**
+A comprehensive spec-vs-code audit revealed that 5 components were built and tested in isolation but **never mounted in App.tsx**. These have now been fixed:
+- `<VaultUnlock />` — now rendered as overlay (auto-shows when vault state requires unlock)
+- `<SettingsPanel />` — now conditionally rendered when `settingsOpen` state is true (Ctrl+, toggles it)
+- `<CredentialManager />` — now rendered when credential manager is opened via sidebar key icon
+- `<SessionEditor />` — now rendered when "New Session" button clicked in sidebar
+- `<SftpBrowser />` — now wired into Bottom Panel SFTP tab (replaces empty placeholder)
+
+Additional fixes:
+- CommandPalette `onOpenSettings` callback wired
+- TabBar "New SFTP" now opens Bottom Panel in SFTP mode
+- Sidebar has dedicated credential manager icon (KeyRound) at bottom of rail
+- Updater plugin set to `"active": false` for dev builds (pubkey is placeholder until CI injects production key)
+- i18n key `sidebar.credentials` added
