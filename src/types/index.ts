@@ -54,6 +54,17 @@ export enum CredentialType {
   TOTPSeed = "totp_seed",
 }
 
+// --- Vault Metadata ---
+
+export interface VaultInfo {
+  id: string;
+  name: string;
+  is_default: boolean;
+  owner_profile_id: string;
+  shared_with: string[];
+  created_at: string;
+}
+
 // --- Credential Interfaces ---
 
 export interface PasswordCredential {
@@ -245,6 +256,12 @@ export interface ThemeFile {
   tokens: ThemeTokens;
 }
 
+// --- Settings Types ---
+
+export type BellStyle = "visual" | "audio" | "none";
+export type CursorStyle = "block" | "underline" | "bar";
+export type Breakpoint = "compact" | "medium" | "expanded" | "large";
+
 // --- Terminal Instance ---
 
 export interface TerminalInstance {
@@ -254,4 +271,582 @@ export interface TerminalInstance {
   cols: number;
   rows: number;
   title: string;
+}
+
+// --- Help System ---
+
+export interface HelpArticle {
+  slug: string;
+  title: string;
+  category: string;
+  order: number;
+  keywords: string[];
+  body: string;
+}
+
+export interface KeyboardShortcut {
+  id: string;
+  keys: string;
+  macKeys: string;
+  label: string;
+  category: string;
+}
+
+// --- Feature Tour ---
+
+export interface TourStep {
+  targetSelector: string;
+  title: string;
+  description: string;
+  position: "top" | "bottom" | "left" | "right";
+}
+
+export interface TourDefinition {
+  id: string;
+  steps: TourStep[];
+}
+
+// --- Snippets ---
+
+export interface Snippet {
+  id: string;
+  name: string;
+  command: string;
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+// --- RDP Types ---
+
+export interface RdpConfig {
+  host: string;
+  port: number;
+  username: string;
+  credential_ref?: string;
+  domain?: string;
+  nla_enabled: boolean;
+  tls_required: boolean;
+  gateway?: RdpGateway;
+  multi_monitor?: RdpMonitorConfig;
+  codec: RdpCodec;
+  clipboard_sync: boolean;
+  drive_paths: DriveMapping[];
+  printer_redirect: boolean;
+  audio_mode: RdpAudioMode;
+  smart_card: boolean;
+}
+
+export type RdpCodec = "auto" | "remotefx" | "gfx" | "progressive";
+export type RdpAudioMode = "none" | "playback" | "record" | "both";
+export type RdpConnectionStatus =
+  | "connecting"
+  | "connected"
+  | "disconnected"
+  | { error: string };
+
+export interface RdpGateway {
+  host: string;
+  port: number;
+  username: string;
+  credential_ref?: string;
+}
+
+export interface RdpMonitorConfig {
+  span_all: boolean;
+  selected_monitors: number[];
+}
+
+export interface DriveMapping {
+  name: string;
+  local_path: string;
+}
+
+export interface RdpConnectionInfo {
+  id: string;
+  host: string;
+  port: number;
+  username: string;
+  status: RdpConnectionStatus;
+  width: number;
+  height: number;
+  connected_at?: string;
+}
+
+export interface RdpClipboardData {
+  text?: string;
+  files?: string[];
+  image_png_base64?: string;
+}
+
+export interface RdpRedirectionConfig {
+  drives: DriveMapping[];
+  printer: boolean;
+  audio: RdpAudioMode;
+  smart_card: boolean;
+}
+
+export type RdpScaleMode = "fit" | "actual" | "fit-width" | "fit-height";
+
+// --- VNC Types ---
+
+export interface VncConfig {
+  host: string;
+  port: number;
+  password?: string;
+  vnc_auth: boolean;
+  vencrypt: boolean;
+  tls_cert_path?: string;
+}
+
+export type VncEncoding = 'raw' | 'copy_rect' | 'rre' | 'hextile' | 'zrle' | 'tight' | 'cursor_pseudo';
+export type VncScalingMode = 'fit_to_window' | 'scroll' | 'one_to_one';
+export type VncSecurityType = 'none' | 'vnc_auth' | 'vencrypt_tls' | 'vencrypt_x509';
+export type VncConnectionStatus = 'connecting' | 'connected' | 'disconnected' | { error: string };
+
+export interface VncConnectionInfo {
+  id: string;
+  host: string;
+  port: number;
+  status: VncConnectionStatus;
+  width: number;
+  height: number;
+  view_only: boolean;
+  scaling_mode: VncScalingMode;
+}
+
+// --- Cloud Types ---
+
+export type CloudProvider = 'aws' | 'azure' | 'gcp';
+
+export interface CloudProviderStatus {
+  provider: CloudProvider;
+  cli_status: CliStatus;
+  profiles: string[];
+  active_profile?: string;
+}
+
+export type CliStatus = { type: 'installed'; version: string; path: string } | { type: 'not_installed' };
+
+export interface CloudAssetNode {
+  id: string;
+  name: string;
+  node_type: CloudAssetType;
+  provider: CloudProvider;
+  children: CloudAssetNode[];
+  metadata: Record<string, string>;
+}
+
+export type CloudAssetType = 'provider' | 'region' | 'resource_group' | 'compute' | 'storage' | 'kubernetes' | 'serverless' | 'database' | 'network';
+
+export interface Ec2Instance {
+  id: string;
+  name: string;
+  state: string;
+  instance_type: string;
+  public_ip?: string;
+  private_ip?: string;
+  key_name?: string;
+  vpc_id?: string;
+  launch_time: string;
+}
+
+export interface S3Bucket { name: string; region: string; creation_date: string; }
+export interface S3Object { key: string; size: number; last_modified: string; storage_class: string; }
+
+export interface AzureSubscription { id: string; name: string; state: string; tenant_id: string; }
+export interface AzureVm { id: string; name: string; resource_group: string; location: string; status: string; public_ip?: string; private_ip?: string; size: string; }
+export interface AzureStorageAccount { name: string; resource_group: string; kind: string; sku: string; location: string; }
+
+export interface GcpConfig { name: string; project: string; region: string; zone: string; is_active: boolean; }
+export interface GcpInstance { id: string; name: string; zone: string; machine_type: string; status: string; internal_ip?: string; external_ip?: string; }
+export interface GcsBucket { name: string; location: string; storage_class: string; time_created: string; }
+export interface GcsObject { name: string; size: number; content_type: string; time_created: string; }
+
+export interface CostSummary { total_cost: number; currency: string; start_date: string; end_date: string; by_service: ServiceCost[]; }
+export interface ServiceCost { service_name: string; cost: number; }
+
+// --- Network Types ---
+
+export interface ScanResult {
+  ip: string;
+  hostname?: string;
+  mac_address?: string;
+  open_ports: OpenPort[];
+  os_guess?: string;
+  response_time_ms: number;
+}
+
+export interface OpenPort {
+  port: number;
+  service_name: string;
+  protocol: string;
+}
+
+export interface TunnelRule {
+  id: string;
+  name: string;
+  local_port: number;
+  remote_host: string;
+  remote_port: number;
+  tunnel_type: 'local' | 'remote' | 'dynamic';
+  ssh_session_ref?: string;
+  auto_start: boolean;
+  enabled: boolean;
+}
+
+export type TunnelStatus = 'active' | 'inactive' | { error: string };
+
+export interface FileServerInfo {
+  id: string;
+  directory: string;
+  port: number;
+  server_type: 'http' | 'tftp';
+  running: boolean;
+  url: string;
+}
+
+// --- Recording Types ---
+
+export interface RecordingInfo {
+  id: string;
+  path: string;
+  title?: string;
+  duration_secs: number;
+  size_bytes: number;
+  width: number;
+  height: number;
+  created_at: string;
+}
+
+export interface PlaybackState {
+  recording_id: string;
+  position: number;
+  speed: number;
+  playing: boolean;
+}
+
+// --- Sync Types ---
+
+export interface SyncStatus {
+  last_export?: string;
+  last_import?: string;
+}
+
+// --- FTP Types ---
+
+export interface FtpConfig {
+  host: string;
+  port: number;
+  username?: string;
+  password?: string;
+  use_tls: boolean;
+  passive_mode: boolean;
+}
+
+export interface FtpEntry {
+  name: string;
+  size: number;
+  entry_type: 'file' | 'directory' | 'link';
+  modified?: string;
+  permissions?: string;
+}
+
+// --- Serial Types ---
+
+export interface SerialConfig {
+  port_name: string;
+  baud_rate: number;
+  data_bits: 'five' | 'six' | 'seven' | 'eight';
+  stop_bits: 'one' | 'two';
+  parity: 'none' | 'odd' | 'even';
+  flow_control: 'none' | 'software' | 'hardware';
+}
+
+export interface SerialPortInfo {
+  name: string;
+  description?: string;
+  manufacturer?: string;
+}
+
+// --- Telnet Types ---
+
+export interface TelnetConfig {
+  host: string;
+  port: number;
+  terminal_type: string;
+}
+
+// --- Plugin Types ---
+
+export interface PluginManifest {
+  id: string;
+  name: string;
+  version: string;
+  author: string;
+  description: string;
+  permissions: PluginPermission[];
+  entry_point: string;
+  api_version: string;
+}
+
+export type PluginPermission = 'network' | 'file_system' | 'terminal' | 'clipboard' | 'notifications' | 'settings';
+
+export interface PluginInfo {
+  manifest: PluginManifest;
+  enabled: boolean;
+  loaded: boolean;
+  load_time_ms?: number;
+  error?: string;
+}
+
+// --- Macro Types ---
+
+export type MacroStepType = 'send' | 'expect' | 'wait' | 'set_variable' | 'conditional' | 'loop';
+
+export interface MacroStep {
+  type: MacroStepType;
+  data?: string;
+  pattern?: string;
+  timeout_ms?: number;
+  duration_ms?: number;
+  name?: string;
+  value?: string;
+  from_capture?: string;
+  condition?: string;
+  then_steps?: MacroStep[];
+  else_steps?: MacroStep[];
+  count?: number;
+  steps?: MacroStep[];
+}
+
+export interface MacroInfo {
+  id: string;
+  name: string;
+  description?: string;
+  steps: MacroStep[];
+  created_at: string;
+  updated_at: string;
+  tags: string[];
+}
+
+export type MacroExecutionStatus = 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
+
+export interface MacroExecution {
+  id: string;
+  macro_id: string;
+  session_id: string;
+  status: MacroExecutionStatus;
+  current_step: number;
+  total_steps: number;
+  variables: Record<string, string>;
+  started_at: string;
+  completed_at?: string;
+  error?: string;
+}
+
+export type ExpectActionType = 'send_text' | 'run_macro' | 'notify' | 'callback';
+
+export interface ExpectRule {
+  id: string;
+  name: string;
+  pattern: string;
+  action: { type: ExpectActionType; text?: string; macro_id?: string; message?: string; event_name?: string };
+  enabled: boolean;
+}
+
+// --- Editor Types ---
+
+export interface EditorFile {
+  id: string;
+  path: string;
+  content: string;
+  encoding: string;
+  language?: string;
+  modified: boolean;
+  line_count: number;
+  size_bytes: number;
+}
+
+export interface DiffResult {
+  left_path: string;
+  right_path: string;
+  hunks: DiffHunk[];
+  stats: DiffStats;
+}
+
+export interface DiffHunk {
+  left_start: number;
+  left_count: number;
+  right_start: number;
+  right_count: number;
+  lines: DiffLine[];
+}
+
+export interface DiffLine {
+  line_type: 'context' | 'added' | 'removed';
+  content: string;
+  left_line?: number;
+  right_line?: number;
+}
+
+export interface DiffStats {
+  additions: number;
+  deletions: number;
+  modifications: number;
+}
+
+export interface SearchMatch {
+  line: number;
+  column: number;
+  length: number;
+  text: string;
+}
+
+// --- SSH Key Manager Types ---
+
+export interface SshKeyInfo {
+  id: string;
+  name: string;
+  key_type: string;
+  fingerprint: string;
+  public_key: string;
+  private_key_path: string;
+  comment?: string;
+  created_at: string;
+  last_used?: string;
+  tags: string[];
+}
+
+export interface AgentKey {
+  fingerprint: string;
+  key_type: string;
+  comment?: string;
+  lifetime?: number;
+}
+
+export interface CertificateInfo {
+  id: string;
+  key_id: string;
+  serial: number;
+  cert_type: "user" | "host";
+  valid_after: string;
+  valid_before: string;
+  principals: string[];
+  extensions: string[];
+}
+
+// --- Localisation Types ---
+
+export interface LocaleInfo {
+  code: string;
+  name: string;
+  native_name: string;
+  rtl: boolean;
+  completeness: number;
+}
+
+// --- Security Types ---
+
+export interface AuditEntry {
+  id: string;
+  timestamp: string;
+  user: string;
+  action: string;
+  resource: string;
+  details?: string;
+  ip_address?: string;
+  success: boolean;
+}
+
+export interface SecurityConfig {
+  vault_timeout_secs: number;
+  clipboard_clear_secs: number;
+  audit_enabled: boolean;
+  rate_limit: {
+    max_attempts: number;
+    window_secs: number;
+    lockout_secs: number;
+  };
+}
+
+export interface CertFingerprint {
+  sha256: string;
+  valid_from: string;
+  valid_until: string;
+  subject: string;
+  pinned: boolean;
+}
+
+// --- SFTP Preview & Sync Types ---
+
+export interface FilePreview {
+  path: string;
+  content_type: string;
+  data: string;
+  size: number;
+  truncated: boolean;
+}
+
+export interface SyncEntry {
+  path: string;
+  local_modified?: string;
+  remote_modified?: string;
+  sync_action: 'upload' | 'download' | 'skip' | 'conflict';
+  size: number;
+}
+
+export interface SyncResult {
+  uploaded: number;
+  downloaded: number;
+  skipped: number;
+  errors: string[];
+}
+
+// --- Azure Blob Types ---
+
+export interface AzureBlobEntry {
+  name: string;
+  content_length: number;
+  content_type: string;
+  last_modified: string;
+  blob_type: string;
+}
+
+// --- Plugin API Extensions ---
+
+export type PluginHook = 'on_connect' | 'on_disconnect' | 'on_output_line' | 'on_command' | 'on_session_start' | 'on_session_end';
+
+export interface PluginSandboxConfig {
+  allowed_paths: string[];
+  allowed_hosts: string[];
+  max_memory_mb: number;
+  max_cpu_time_ms: number;
+}
+
+export interface PluginRegistryEntry {
+  id: string;
+  name: string;
+  version: string;
+  author: string;
+  description: string;
+  downloads: number;
+  category: string;
+  installed: boolean;
+  update_available: boolean;
+}
+
+// --- Android Types ---
+
+export interface ForegroundServiceConfig {
+  title: string;
+  body: string;
+  channel_id: string;
+}
+
+export interface NotificationChannel {
+  id: string;
+  name: string;
+  description: string;
+  importance: 'default' | 'high' | 'low' | 'min';
 }

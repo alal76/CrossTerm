@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=CrossTerm
+Comment=Cross-Platform Terminal Emulator & Remote Access Suite
+Exec=crossterm %U
+Icon=crossterm
+Type=Application
+Categories=System;TerminalEmulator;Network;
+Keywords=terminal;ssh;sftp;remote;console;
+StartupNotify=true
+Terminal=false
+MimeType=x-scheme-handler/ssh;

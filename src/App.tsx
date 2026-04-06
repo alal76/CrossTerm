@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import clsx from "clsx";
+import { isRtlLocale } from "@/i18n";
 import {
   Terminal,
   Code2,
@@ -17,11 +18,16 @@ import {
   Monitor,
   Globe,
   FolderTree,
+  FolderOpen,
   SplitSquareHorizontal,
   SplitSquareVertical,
   Pencil,
   Copy,
   MoreVertical,
+  Radio,
+  KeyRound,
+  Bell,
+  ExternalLink,
 } from "lucide-react";
 import { useAppStore } from "@/stores/appStore";
 import { useSessionStore } from "@/stores/sessionStore";
@@ -29,12 +35,26 @@ import { useTerminalStore } from "@/stores/terminalStore";
 import { useVaultStore } from "@/stores/vaultStore";
 import { SidebarMode, BottomPanelMode, ThemeVariant, ConnectionStatus, SessionType, SplitDirection } from "@/types";
 import type { Session } from "@/types";
+import { useBreakpoint } from "@/hooks/useBreakpoint";
 import TerminalTab from "@/components/Terminal/TerminalTab";
 import SshTerminalTab from "@/components/Terminal/SshTerminalTab";
 import SplitPaneContainer from "@/components/Terminal/SplitPaneContainer";
 import CommandPalette from "@/components/Shared/CommandPalette";
 import QuickConnect from "@/components/Shared/QuickConnect";
 import FirstLaunchWizard from "@/components/Shared/FirstLaunchWizard";
+import HelpPanel from "@/components/Help/HelpPanel";
+import ShortcutOverlay from "@/components/Help/ShortcutOverlay";
+import HelpMenu from "@/components/Help/HelpMenu";
+import WhatsNewPanel from "@/components/Help/WhatsNewPanel";
+import FeatureTour from "@/components/Help/FeatureTour";
+import TipOfTheDay from "@/components/Help/TipOfTheDay";
+import VaultUnlock from "@/components/Vault/VaultUnlock";
+import CredentialManager from "@/components/Vault/CredentialManager";
+import SettingsPanel from "@/components/Settings/SettingsPanel";
+import SessionEditor from "@/components/SessionTree/SessionEditor";
+import SftpBrowser from "@/components/SftpBrowser/SftpBrowser";
+import SnippetListPanel from "@/components/Snippets/SnippetListPanel";
+import NotificationHistoryPanel from "@/components/Notifications/NotificationHistoryPanel";
 
 const SESSION_TYPE_ICONS: Record<string, string> = {
   ssh: "⌨",
@@ -89,6 +109,8 @@ function TitleBar() {
   const profiles = useAppStore((s) => s.profiles);
   const theme = useAppStore((s) => s.theme);
   const setTheme = useAppStore((s) => s.setTheme);
+  const showNotificationHistory = useAppStore((s) => s.showNotificationHistory);
+  const setShowNotificationHistory = useAppStore((s) => s.setShowNotificationHistory);
 
   const activeProfile = profiles.find((p) => p.id === activeProfileId);
 
@@ -114,15 +136,24 @@ function TitleBar() {
       </span>
       <div className="flex-1" data-tauri-drag-region />
       <button
+        onClick={() => setShowNotificationHistory(!showNotificationHistory)}
+        className="p-1.5 rounded hover:bg-surface-elevated text-text-secondary hover:text-text-primary transition-colors"
+        title={t("notifications.title")}
+        data-tooltip={t("notifications.title")}
+      >
+        <Bell size={14} />
+      </button>
+      <button
         onClick={cycleTheme}
         className="p-1.5 rounded hover:bg-surface-elevated text-text-secondary hover:text-text-primary transition-colors"
         title={themeLabel}
+        data-tooltip={themeLabel}
       >
         {themeIcon}
       </button>
       <div className="flex items-center gap-1.5 ml-2 px-2 py-1 rounded hover:bg-surface-elevated cursor-pointer">
         <User size={14} className="text-text-secondary" />
-        <span className="text-xs text-text-secondary">{activeProfile?.name ?? "Profile"}</span>
+        <span className="text-xs text-text-secondary">{activeProfile?.name ?? t("titleBar.profile")}</span>
       </div>
     </header>
   );
@@ -213,6 +244,26 @@ function TabContextMenu({
     { key: "splitRight", icon: <SplitSquareHorizontal size={13} />, label: t("tabs.splitRight"), action: () => handleSplit(SplitDirection.Horizontal) },
     { key: "splitDown", icon: <SplitSquareVertical size={13} />, label: t("tabs.splitDown"), action: () => handleSplit(SplitDirection.Vertical) },
     { key: "sep2", divider: true as const },
+    {
+      key: "detach",
+      icon: <ExternalLink size={13} />,
+      label: t("tabs.detachTab"),
+      action: async () => {
+        const session = sessions.find((s) => s.id === tab.sessionId);
+        if (!session) return;
+        try {
+          await invoke("window_create_for_tab", {
+            tabId: tab.id,
+            sessionId: tab.sessionId,
+            title: tab.title ?? session.name,
+          });
+          closeTab(tab.id);
+        } catch (err) {
+          console.error("Failed to detach tab:", err);
+        }
+      },
+    },
+    { key: "sep3", divider: true as const },
     { key: "close", icon: <X size={13} />, label: t("tabs.closeTab"), action: () => closeTab(state.tabId) },
     { key: "closeOthers", icon: <X size={13} />, label: t("tabs.closeOthers"), action: handleCloseOthers },
     { key: "closeAll", icon: <X size={13} />, label: t("tabs.closeAll"), action: handleCloseAll, danger: true },
@@ -264,6 +315,7 @@ function NewTabDropdown({
   readonly onClose: () => void;
   readonly anchorRef: React.RefObject<HTMLButtonElement | null>;
 }) {
+  const { t } = useTranslation();
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -294,21 +346,21 @@ function NewTabDropdown({
         className="flex items-center gap-2.5 w-full px-3 py-1.5 text-xs text-left text-text-secondary hover:bg-surface-secondary hover:text-text-primary transition-colors"
       >
         <Terminal size={13} className="shrink-0" />
-        New Local Shell
+        {t("newTabMenu.localShell")}
       </button>
       <button
         onClick={() => { onNewSSH(); onClose(); }}
         className="flex items-center gap-2.5 w-full px-3 py-1.5 text-xs text-left text-text-secondary hover:bg-surface-secondary hover:text-text-primary transition-colors"
       >
         <Globe size={13} className="shrink-0" />
-        New SSH Session
+        {t("newTabMenu.ssh")}
       </button>
       <button
         onClick={() => { onNewSFTP(); onClose(); }}
         className="flex items-center gap-2.5 w-full px-3 py-1.5 text-xs text-left text-text-secondary hover:bg-surface-secondary hover:text-text-primary transition-colors"
       >
         <FolderTree size={13} className="shrink-0" />
-        New SFTP Browser
+        {t("newTabMenu.sftp")}
       </button>
     </div>
   );
@@ -328,6 +380,8 @@ function TabBar({
   const activeTabId = useSessionStore((s) => s.activeTabId);
   const setActiveTab = useSessionStore((s) => s.setActiveTab);
   const closeTab = useSessionStore((s) => s.closeTab);
+  const broadcastMode = useTerminalStore((s) => s.broadcastMode);
+  const toggleBroadcastMode = useTerminalStore((s) => s.toggleBroadcastMode);
 
   const [tabContextMenu, setTabContextMenu] = useState<TabContextMenuState | null>(null);
   const [showNewTabDropdown, setShowNewTabDropdown] = useState(false);
@@ -417,6 +471,7 @@ function TabBar({
                   closeTab(tab.id);
                 }}
                 className="opacity-0 group-hover:opacity-100 hover:bg-surface-elevated rounded p-0.5 transition-opacity"
+                data-tooltip={t("tabs.closeTab")}
               >
                 <X size={12} />
               </button>
@@ -438,6 +493,7 @@ function TabBar({
           onClick={() => setShowNewTabDropdown((v) => !v)}
           className="flex items-center justify-center w-8 h-8 mx-1 rounded hover:bg-surface-elevated text-text-secondary hover:text-text-primary transition-colors"
           title={t("tabs.newTab")}
+          data-tooltip={t("tabs.newTab")}
         >
           <Plus size={16} />
           <MoreVertical size={10} className="ml-px" />
@@ -452,6 +508,20 @@ function TabBar({
           />
         )}
       </div>
+      {/* Broadcast toggle */}
+      <button
+        onClick={toggleBroadcastMode}
+        className={clsx(
+          "flex items-center justify-center w-8 h-8 rounded transition-colors shrink-0",
+          broadcastMode
+            ? "bg-accent-primary/20 text-accent-primary"
+            : "text-text-secondary hover:text-text-primary hover:bg-surface-elevated"
+        )}
+        title={t("broadcast.tooltip")}
+        data-tooltip={t("broadcast.tooltip")}
+      >
+        <Radio size={14} />
+      </button>
       {tabContextMenu && (
         <TabContextMenu
           state={tabContextMenu}
@@ -462,29 +532,54 @@ function TabBar({
   );
 }
 
-// ─── Region C: Sidebar ─────────────────────────────────────────
+// ── Region C: Sidebar ──────────────────────────────────────────
+
+function getSidebarWidth(collapsed: boolean, bp: string) {
+  if (collapsed) return "w-12";
+  return bp === "large" ? "w-72" : "w-60";
+}
 
 const SIDEBAR_MODES = [
-  { mode: SidebarMode.Sessions, icon: Terminal, label: "sidebar.sessions" },
-  { mode: SidebarMode.Snippets, icon: Code2, label: "sidebar.snippets" },
-  { mode: SidebarMode.Tunnels, icon: Lock, label: "sidebar.tunnels" },
-] as const;
+  { mode: SidebarMode.Sessions, icon: FolderOpen, label: "sidebar.sessions" as const },
+  { mode: SidebarMode.Snippets, icon: Code2, label: "sidebar.snippets" as const },
+  { mode: SidebarMode.Tunnels, icon: Lock, label: "sidebar.tunnels" as const },
+];
 
-function Sidebar() {
+function Sidebar({
+  onNewSession,
+  onOpenCredentials,
+}: {
+  readonly onNewSession: () => void;
+  readonly onOpenCredentials: () => void;
+}) {
   const { t } = useTranslation();
   const sidebarMode = useAppStore((s) => s.sidebarMode);
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
-  const setSidebarMode = useAppStore((s) => s.setSidebarMode);
+  const setSidebarCollapsed = useAppStore((s) => s.setSidebarCollapsed);
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
   const sessions = useSessionStore((s) => s.sessions);
   const favorites = useSessionStore((s) => s.favorites);
   const openTab = useSessionStore((s) => s.openTab);
+  const setSidebarMode = useAppStore((s) => s.setSidebarMode);
+  const breakpoint = useBreakpoint();
+
+  // Auto-collapse on smaller breakpoints
+  useEffect(() => {
+    if (breakpoint === "compact" || breakpoint === "medium") {
+      setSidebarCollapsed(true);
+    }
+  }, [breakpoint, setSidebarCollapsed]);
+
+  // Hide sidebar entirely on compact
+  if (breakpoint === "compact") {
+    return null;
+  }
 
   return (
     <nav
       className={clsx(
         "flex shrink-0 h-full border-r border-border-subtle bg-surface-secondary transition-all",
-        sidebarCollapsed ? "w-12" : "w-60"
+        getSidebarWidth(sidebarCollapsed, breakpoint)
       )}
       style={{ transitionDuration: "var(--duration-medium)", transitionTimingFunction: "var(--ease-default)" }}
     >
@@ -508,6 +603,7 @@ function Sidebar() {
                 : "text-text-secondary hover:text-text-primary hover:bg-surface-elevated"
             )}
             title={t(label)}
+            data-tooltip={t(label)}
           >
             {sidebarMode === mode && !sidebarCollapsed && (
               <span className="absolute left-0 top-1 bottom-1 w-0.5 rounded-r bg-accent-primary" />
@@ -515,6 +611,15 @@ function Sidebar() {
             <Icon size={20} />
           </button>
         ))}
+        <div className="flex-1" />
+        <button
+          onClick={onOpenCredentials}
+          className="relative flex items-center justify-center w-9 h-9 rounded transition-colors text-text-secondary hover:text-text-primary hover:bg-surface-elevated"
+          title={t("sidebar.credentials")}
+          data-tooltip={t("sidebar.credentials")}
+        >
+          <KeyRound size={20} />
+        </button>
       </div>
 
       {/* Content panel */}
@@ -538,13 +643,11 @@ function Sidebar() {
                 sessions={sessions}
                 favorites={favorites}
                 onSelect={openTab}
+                onNewSession={onNewSession}
               />
             )}
             {sidebarMode === SidebarMode.Snippets && (
-              <EmptyPanel
-                icon={<Code2 size={32} className="text-text-disabled" />}
-                message={t("snippets.emptyState")}
-              />
+              <SnippetListPanel />
             )}
             {sidebarMode === SidebarMode.Tunnels && (
               <EmptyPanel
@@ -563,11 +666,13 @@ function SessionsPanel({
   sessions,
   favorites: _favorites,
   onSelect,
-}: {
+  onNewSession,
+}: Readonly<{
   sessions: import("@/types").Session[];
   favorites: string[];
   onSelect: (session: import("@/types").Session) => void;
-}) {
+  onNewSession?: () => void;
+}>) {
   const { t } = useTranslation();
 
   if (sessions.length === 0) {
@@ -575,7 +680,10 @@ function SessionsPanel({
       <div className="flex flex-col items-center justify-center gap-3 py-8 text-center">
         <Terminal size={32} className="text-text-disabled" />
         <p className="text-xs text-text-secondary px-2">{t("sessions.emptyState")}</p>
-        <button className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-interactive-default text-text-inverse hover:bg-interactive-hover transition-colors">
+        <button
+          onClick={onNewSession}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-interactive-default text-text-inverse hover:bg-interactive-hover transition-colors"
+        >
           <Plus size={12} />
           {t("sessions.newSession")}
         </button>
@@ -602,7 +710,7 @@ function SessionsPanel({
   );
 }
 
-function EmptyPanel({ icon, message }: { icon: React.ReactNode; message: string }) {
+function EmptyPanel({ icon, message }: Readonly<{ icon: React.ReactNode; message: string }>) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 py-8 text-center">
       {icon}
@@ -665,7 +773,10 @@ function SessionCanvas() {
                 host={session.connection.host}
                 port={session.connection.port}
                 username={username}
-                auth={{ type: "password", password: (session.connection.protocolOptions?.["password"] as string) ?? "" }}
+                auth={(() => {
+                  const pw = (session.connection.protocolOptions?.["password"] as string) ?? "";
+                  return pw ? { type: "password" as const, password: pw } : { type: "none" as const };
+                })()}
               />
             </div>
           );
@@ -735,16 +846,10 @@ function BottomPanel() {
       {/* Content */}
       <div className="flex-1 overflow-auto p-3 text-xs text-text-secondary">
         {bottomPanelMode === BottomPanelMode.SFTP && (
-          <EmptyPanel
-            icon={<ChevronRight size={24} className="text-text-disabled" />}
-            message={t("sessions.emptyState")}
-          />
+          <SftpBrowser />
         )}
         {bottomPanelMode === BottomPanelMode.Snippets && (
-          <EmptyPanel
-            icon={<Code2 size={24} className="text-text-disabled" />}
-            message={t("snippets.emptyState")}
-          />
+          <SnippetListPanel />
         )}
         {bottomPanelMode === BottomPanelMode.AuditLog && (
           <div className="text-text-disabled text-center py-4">
@@ -763,7 +868,15 @@ function BottomPanel() {
 
 // ─── Region F: Status Bar ──────────────────────────────────────
 
-function StatusBar() {
+function StatusBar({
+  onOpenHelp,
+  onOpenShortcuts,
+  onStartTour,
+}: {
+  readonly onOpenHelp: () => void;
+  readonly onOpenShortcuts: () => void;
+  readonly onStartTour: (tourId: string) => void;
+}) {
   const { t } = useTranslation();
   const activeProfileId = useAppStore((s) => s.activeProfileId);
   const profiles = useAppStore((s) => s.profiles);
@@ -787,11 +900,13 @@ function StatusBar() {
   }
 
   return (
-    <footer className="flex items-center h-7 px-3 bg-surface-primary border-t border-border-subtle text-[11px] text-text-secondary no-select shrink-0 gap-4" role="status">
-      <span className="flex items-center gap-1">
-        <User size={11} />
-        {activeProfile?.name ?? t("statusBar.profile")}
-      </span>
+    <footer className="flex items-center h-7 px-3 bg-surface-primary border-t border-border-subtle text-[11px] text-text-secondary no-select shrink-0 gap-4">
+      <output>
+        <span className="flex items-center gap-1">
+          <User size={11} />
+          {activeProfile?.name ?? t("statusBar.profile")}
+        </span>
+      </output>
       {activeTab && (
         <>
           <span className="flex items-center gap-1">
@@ -807,13 +922,55 @@ function StatusBar() {
         <Lock size={11} />
         {t("statusBar.noTunnels")}
       </span>
+      <HelpMenu onOpenHelp={onOpenHelp} onOpenShortcuts={onOpenShortcuts} onStartTour={onStartTour} />
     </footer>
+  );
+}
+
+// ─── Compact Bottom Navigation ─────────────────────────────────
+
+function BottomNav({
+  onNewLocalShell,
+}: {
+  readonly onNewLocalShell: () => void;
+}) {
+  const { t } = useTranslation();
+  const sidebarMode = useAppStore((s) => s.sidebarMode);
+  const setSidebarMode = useAppStore((s) => s.setSidebarMode);
+
+  return (
+    <nav className="flex items-center justify-around h-12 bg-surface-secondary border-t border-border-subtle shrink-0">
+      {SIDEBAR_MODES.map(({ mode, icon: Icon, label }) => (
+        <button
+          key={mode}
+          onClick={() => setSidebarMode(mode)}
+          className={clsx(
+            "flex flex-col items-center justify-center gap-0.5 flex-1 h-full transition-colors",
+            sidebarMode === mode
+              ? "text-accent-primary"
+              : "text-text-secondary hover:text-text-primary"
+          )}
+        >
+          <Icon size={18} />
+          <span className="text-[9px]">{t(label)}</span>
+        </button>
+      ))}
+      <button
+        onClick={onNewLocalShell}
+        className="flex flex-col items-center justify-center gap-0.5 flex-1 h-full text-text-secondary hover:text-text-primary transition-colors"
+      >
+        <Plus size={18} />
+        <span className="text-[9px]">{t("tabs.newTab")}</span>
+      </button>
+    </nav>
   );
 }
 
 // ─── App ───────────────────────────────────────────────────────
 
 export default function App() {
+  const { t, i18n } = useTranslation();
+  const breakpoint = useBreakpoint();
   const theme = useAppStore((s) => s.theme);
   const resolvedTheme = useAppStore((s) => s.resolvedTheme);
   const setResolvedTheme = useAppStore((s) => s.setResolvedTheme);
@@ -825,7 +982,7 @@ export default function App() {
   const setTheme = useAppStore((s) => s.setTheme);
   const firstLaunchComplete = useAppStore((s) => s.firstLaunchComplete);
   const setFirstLaunchComplete = useAppStore((s) => s.setFirstLaunchComplete);
-  const lockVault = useVaultStore((s) => s.lockVault);
+  const lockAllVaults = useVaultStore((s) => s.lockAllVaults);
   const addSession = useSessionStore((s) => s.addSession);
   const openTab = useSessionStore((s) => s.openTab);
   const openTabs = useSessionStore((s) => s.openTabs);
@@ -833,15 +990,38 @@ export default function App() {
   const setActiveTab = useSessionStore((s) => s.setActiveTab);
   const closeTab = useSessionStore((s) => s.closeTab);
   const updateTabStatus = useSessionStore((s) => s.updateTabStatus);
+  const showNotificationHistory = useAppStore((s) => s.showNotificationHistory);
+  const setShowNotificationHistory = useAppStore((s) => s.setShowNotificationHistory);
   const [showQuickConnect, setShowQuickConnect] = useState(false);
+  const [showCredentialManager, setShowCredentialManager] = useState(false);
+  const [showSessionEditor, setShowSessionEditor] = useState(false);
+  const [editingSession, setEditingSession] = useState<Session | null>(null);
+  const [showHelpPanel, setShowHelpPanel] = useState(false);
+  const [showShortcutOverlay, setShowShortcutOverlay] = useState(false);
+  const [helpArticleSlug, setHelpArticleSlug] = useState<string | undefined>(undefined);
+  const [showFeatureTour, setShowFeatureTour] = useState(false);
+  const [activeTourId, setActiveTourId] = useState<string | undefined>(undefined);
+  const [liveAnnouncement, setLiveAnnouncement] = useState("");
+
+  // ── RTL layout direction ──
+  useEffect(() => {
+    const dir = isRtlLocale(i18n.language) ? "rtl" : "ltr";
+    document.documentElement.dir = dir;
+    document.documentElement.lang = i18n.language;
+  }, [i18n.language]);
 
   // ── Task 3: Load settings from backend on startup ──
   useEffect(() => {
     async function loadSettings() {
       try {
-        const settings = await invoke<{ appearance?: { theme?: ThemeVariant } }>("settings_get");
-        if (settings?.appearance?.theme) {
-          setTheme(settings.appearance.theme);
+        // Sync active profile to Rust backend
+        const profileId = useAppStore.getState().activeProfileId;
+        if (profileId) {
+          await invoke("profile_switch", { id: profileId }).catch(() => {});
+        }
+        const settings = await invoke<{ theme?: ThemeVariant }>("settings_get");
+        if (settings?.theme) {
+          setTheme(settings.theme);
         }
         // If settings were loaded successfully, first launch is already done
         setFirstLaunchComplete(true);
@@ -854,13 +1034,19 @@ export default function App() {
 
   // ── Task 4: Listen for terminal:exit and ssh:disconnected to update tab status ──
   useEffect(() => {
-    const unlistenExit = listen<{ session_id: string }>(
+    const unlistenExit = listen<{ terminal_id: string }>(
       "terminal:exit",
       (event) => {
+        const terminals = useTerminalStore.getState().terminals;
+        const sessionId = terminals.get(event.payload.terminal_id)?.sessionId;
+        if (!sessionId) {
+          return;
+        }
         const tabs = useSessionStore.getState().openTabs;
-        const tab = tabs.find((t) => t.sessionId === event.payload.session_id);
+        const tab = tabs.find((t) => t.sessionId === sessionId);
         if (tab) {
           updateTabStatus(tab.id, ConnectionStatus.Disconnected);
+          setLiveAnnouncement(t("announcements.sessionDisconnected", { name: tab.title }));
         }
       }
     );
@@ -869,19 +1055,32 @@ export default function App() {
       "ssh:disconnected",
       (event) => {
         const tabs = useSessionStore.getState().openTabs;
-        // Try to match by session_id first, then by scanning terminal store
-        if (event.payload.session_id) {
-          const tab = tabs.find((t) => t.sessionId === event.payload.session_id);
-          if (tab) {
-            updateTabStatus(tab.id, ConnectionStatus.Disconnected);
-          }
+        const terminals = useTerminalStore.getState().terminals;
+        const sessionId = event.payload.session_id ?? terminals.get(event.payload.connection_id)?.sessionId;
+        if (!sessionId) {
+          return;
+        }
+        const tab = tabs.find((t) => t.sessionId === sessionId);
+        if (tab) {
+          updateTabStatus(tab.id, ConnectionStatus.Disconnected);
+          setLiveAnnouncement(t("announcements.sshDisconnected", { name: tab.title }));
         }
       }
     );
 
+    const unlistenAutoLock = listen<string>("vault:auto_locked", (event) => {
+      const vaultId = event.payload;
+      if (vaultId) {
+        useVaultStore.getState().markVaultLocked(vaultId);
+      } else {
+        useVaultStore.setState({ vaultLocked: true, credentials: [] });
+      }
+    });
+
     return () => {
       unlistenExit.then((fn) => fn());
       unlistenSshDisconnect.then((fn) => fn());
+      unlistenAutoLock.then((fn) => fn());
     };
   }, [updateTabStatus]);
 
@@ -923,7 +1122,7 @@ export default function App() {
     const now = new Date().toISOString();
     const session: Session = {
       id: crypto.randomUUID(),
-      name: "Local Shell",
+      name: t("sessionTypes.local_shell"),
       type: SessionType.LocalShell,
       group: "",
       tags: [],
@@ -960,6 +1159,18 @@ export default function App() {
   // Keyboard shortcuts
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
+      // F1: open help panel (no modifier needed)
+      if (e.key === "F1") {
+        e.preventDefault();
+        // Context-sensitive: check for data-help-article on active element or ancestors
+        const active = document.activeElement as HTMLElement | null;
+        const helpEl = active?.closest("[data-help-article]") as HTMLElement | null;
+        const slug = helpEl?.dataset.helpArticle;
+        setHelpArticleSlug(slug);
+        setShowHelpPanel((v) => !v);
+        return;
+      }
+
       const mod = e.ctrlKey || e.metaKey;
       if (!mod && !e.ctrlKey) return;
 
@@ -969,7 +1180,7 @@ export default function App() {
       const handled = handleModShortcut(key, shift, e);
       if (handled) e.preventDefault();
     },
-    [toggleBottomPanel, handleNewLocalShell, activeTabId, closeTab, settingsOpen, setSettingsOpen, switchToTabByOffset, switchToTabByIndex],
+    [toggleBottomPanel, handleNewLocalShell, activeTabId, closeTab, settingsOpen, setSettingsOpen, switchToTabByOffset, switchToTabByIndex, showHelpPanel, showShortcutOverlay],
   );
 
   function handleModShortcut(key: string, shift: boolean, e: KeyboardEvent): boolean {
@@ -978,6 +1189,7 @@ export default function App() {
     if (key === "w" && !shift && activeTabId) { closeTab(activeTabId); return true; }
     if (key === ",") { setSettingsOpen(!settingsOpen); return true; }
     if (key === "n" && shift) { setShowQuickConnect((v) => !v); return true; }
+    if (key === "/") { setShowShortcutOverlay((v) => !v); return true; }
     if (e.key === "Tab" && e.ctrlKey) { switchToTabByOffset(shift ? -1 : 1); return true; }
     if (e.key >= "1" && e.key <= "9" && !shift) { switchToTabByIndex(Number.parseInt(e.key, 10) - 1); return true; }
     return false;
@@ -992,19 +1204,31 @@ export default function App() {
     <>
       {firstLaunchComplete ? (
         <div className="flex flex-col h-screen w-screen overflow-hidden bg-surface-primary">
+          <div className="sr-only" aria-live="polite" aria-atomic="true">
+            {liveAnnouncement}
+          </div>
           {/* Region A */}
           <TitleBar />
 
           <div className="flex flex-1 min-h-0">
-            {/* Region C */}
-            <Sidebar />
+            {/* Region C - hidden on compact via Sidebar internal logic */}
+            <Sidebar
+              onNewSession={() => { setEditingSession(null); setShowSessionEditor(true); }}
+              onOpenCredentials={() => setShowCredentialManager(true)}
+            />
 
             <div className="flex flex-col flex-1 min-w-0">
               {/* Region B */}
               <TabBar
                 onNewLocalShell={handleNewLocalShell}
                 onNewSSH={() => setShowQuickConnect(true)}
-                onNewSFTP={() => {}}
+                onNewSFTP={() => {
+                  const setBottomPanelMode = useAppStore.getState().setBottomPanelMode;
+                  const toggleBottomPanel = useAppStore.getState().toggleBottomPanel;
+                  const bottomPanelVisible = useAppStore.getState().bottomPanelVisible;
+                  setBottomPanelMode(BottomPanelMode.SFTP);
+                  if (!bottomPanelVisible) toggleBottomPanel();
+                }}
               />
 
               {/* Region D */}
@@ -1012,21 +1236,56 @@ export default function App() {
                 <SessionCanvas />
               </div>
 
-              {/* Region E */}
-              {bottomPanelVisible && <BottomPanel />}
+              {/* Region E - only show on expanded+ breakpoints */}
+              {bottomPanelVisible && breakpoint !== "compact" && <BottomPanel />}
             </div>
           </div>
 
-          {/* Region F */}
-          <StatusBar />
+          {/* Compact bottom nav */}
+          {breakpoint === "compact" && (
+            <BottomNav
+              onNewLocalShell={handleNewLocalShell}
+            />
+          )}
+
+          {/* Region F - hide on compact */}
+          {breakpoint !== "compact" && <StatusBar onOpenHelp={() => setShowHelpPanel(true)} onOpenShortcuts={() => setShowShortcutOverlay(true)} onStartTour={(id) => { setActiveTourId(id); setShowFeatureTour(true); }} />}
 
           {/* Overlays */}
           <CommandPalette
             onNewLocalShell={handleNewLocalShell}
             onNewSSHSession={() => setShowQuickConnect(true)}
-            onLockVault={() => lockVault()}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onLockVault={() => lockAllVaults()}
+            onOpenHelp={() => setShowHelpPanel(true)}
+            onOpenShortcuts={() => setShowShortcutOverlay(true)}
+            onOpenHelpArticle={(slug) => { setHelpArticleSlug(slug); setShowHelpPanel(true); }}
           />
           {showQuickConnect && <QuickConnect onConnect={() => setShowQuickConnect(false)} />}
+          <HelpPanel open={showHelpPanel} onClose={() => setShowHelpPanel(false)} articleSlug={helpArticleSlug} />
+          <ShortcutOverlay open={showShortcutOverlay} onClose={() => setShowShortcutOverlay(false)} />
+          <WhatsNewPanel />
+          <TipOfTheDay />
+          <VaultUnlock />
+          {settingsOpen && <SettingsPanel />}
+          {showCredentialManager && <CredentialManager />}
+          {showSessionEditor && (
+            <SessionEditor
+              session={editingSession}
+              onClose={() => { setShowSessionEditor(false); setEditingSession(null); }}
+            />
+          )}
+          {showFeatureTour && activeTourId && (
+            <FeatureTour
+              tourId={activeTourId}
+              onComplete={() => { setShowFeatureTour(false); setActiveTourId(undefined); }}
+            />
+          )}
+          {showNotificationHistory && (
+            <NotificationHistoryPanel
+              onClose={() => setShowNotificationHistory(false)}
+            />
+          )}
         </div>
       ) : (
         <div className="h-screen w-screen overflow-hidden bg-surface-primary">

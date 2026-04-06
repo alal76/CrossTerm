@@ -248,6 +248,11 @@ body,
   to { opacity: 1; }
 }
 
+@keyframes bell-flash {
+  0% { opacity: 0.3; }
+  100% { opacity: 0; }
+}
+
 @keyframes paletteIn {
   from {
     opacity: 0;
@@ -282,6 +287,10 @@ body,
 
 .animate-fade-in {
   animation: fade-in var(--duration-short) var(--ease-decelerate);
+}
+
+.animate-bell-flash {
+  animation: bell-flash 200ms var(--ease-default) forwards;
 }
 
 .animate-slide-left {
@@ -321,4 +330,52 @@ body,
 .xterm-container :focus-visible,
 [data-tauri-drag-region] :focus-visible {
   outline: none;
+}
+
+/* ===== Tooltip (data-tooltip) ===== */
+[data-tooltip] {
+  position: relative;
+}
+
+[data-tooltip]:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+  padding: 4px 8px;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+  z-index: 9000;
+  pointer-events: none;
+  animation: tooltip-appear 0.15s ease-out 0.5s both;
+}
+
+@keyframes tooltip-appear {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ===== Windows High Contrast / forced-colors (HELP-36) ===== */
+@media (forced-colors: active) {
+  /* Help panel */
+  .help-panel { border: 1px solid ButtonText; }
+  .help-panel a { color: LinkText; }
+  .help-panel code { border: 1px solid ButtonText; }
+  .help-panel pre { border: 1px solid ButtonText; }
+  .help-panel h1,
+  .help-panel h2,
+  .help-panel h3 { color: CanvasText; }
+  .help-search-input { border: 1px solid ButtonText; }
+
+  /* Shortcut overlay */
+  .shortcut-overlay kbd { border: 1px solid ButtonText; }
+
+  /* Feature tour spotlight */
+  .tour-spotlight { outline: 3px solid Highlight; }
+  .tour-popover { border: 2px solid ButtonText; }
 }

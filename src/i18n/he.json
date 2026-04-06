@@ -1,0 +1,86 @@
+{
+  "app": {
+    "name": "קרוס טרם",
+    "tagline": "אמולטור מסוף וכלי גישה מרחוק"
+  },
+  "sidebar": {
+    "sessions": "הפעלות",
+    "snippets": "קטעי קוד",
+    "tunnels": "מנהרות",
+    "credentials": "מנהל אישורים",
+    "collapse": "כווץ סרגל צד",
+    "expand": "הרחב סרגל צד"
+  },
+  "tabs": {
+    "newTab": "לשונית חדשה",
+    "closeTab": "סגור לשונית",
+    "closeOthers": "סגור אחרות",
+    "closeAll": "סגור הכל",
+    "pinTab": "הצמד לשונית",
+    "unpinTab": "בטל הצמדה",
+    "duplicateTab": "שכפל לשונית",
+    "splitRight": "פצל ימינה",
+    "splitDown": "פצל למטה"
+  },
+  "titleBar": {
+    "profile": "פרופיל",
+    "switchProfile": "החלף פרופיל",
+    "settings": "הגדרות",
+    "search": "חיפוש..."
+  },
+  "statusBar": {
+    "profile": "פרופיל",
+    "encoding": "UTF-8",
+    "tunnels": "מנהרות",
+    "noTunnels": "אין מנהרות פעילות",
+    "dimensions": "{{cols}} × {{rows}}"
+  },
+  "emptyCanvas": {
+    "title": "ברוכים הבאים ל-CrossTerm",
+    "hint": "לחץ {{shortcut}} כדי לפתוח הפעלה חדשה",
+    "shortcut": "⌘T"
+  },
+  "status": {
+    "connected": "מחובר",
+    "disconnected": "מנותק",
+    "connecting": "מתחבר...",
+    "idle": "לא פעיל"
+  },
+  "themes": {
+    "title": "ערכת נושא",
+    "dark": "כהה",
+    "light": "בהיר",
+    "system": "מערכת"
+  },
+  "actions": {
+    "save": "שמור",
+    "cancel": "ביטול",
+    "close": "סגור",
+    "create": "צור",
+    "delete": "מחק",
+    "confirm": "אשר",
+    "copy": "העתק",
+    "paste": "הדבק",
+    "selectAll": "בחר הכל",
+    "undo": "בטל",
+    "redo": "בצע שוב",
+    "refresh": "רענן"
+  },
+  "help": {
+    "title": "עזרה",
+    "menu": {
+      "gettingStarted": "תחילת העבודה",
+      "keyboardShortcuts": "קיצורי מקלדת",
+      "troubleshooting": "פתרון בעיות",
+      "reportIssue": "דווח על בעיה",
+      "about": "אודות",
+      "onlineDocs": "תיעוד מקוון"
+    }
+  },
+  "notifications": {
+    "title": "התראות",
+    "empty": "אין התראות",
+    "clearAll": "נקה הכל",
+    "dismiss": "סגור"
+  }
+}

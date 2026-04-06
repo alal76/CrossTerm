@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "name": "CrossTerm Light",
-  "author": "CrossTerm",
+  "author": "Abhishek Lal",
   "variant": "light",
   "tokens": {
     "surface-primary": "#f5f5f7",

@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 // ── Error ───────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum ConfigError {
     #[error("Profile not found: {0}")]
@@ -20,6 +21,8 @@ pub enum ConfigError {
     Io(#[from] std::io::Error),
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("Encryption error: {0}")]
+    Encryption(String),
 }
 
 impl Serialize for ConfigError {
@@ -148,6 +151,9 @@ pub struct SessionDefinition {
     pub auto_reconnect: bool,
     pub keep_alive_interval_seconds: u32,
     pub favorite: bool,
+    /// Optional per-session settings overrides (JSON merge over profile settings).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings_override: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -166,6 +172,7 @@ pub struct SessionCreateRequest {
     pub auto_reconnect: Option<bool>,
     pub keep_alive_interval_seconds: Option<u32>,
     pub favorite: Option<bool>,
+    pub settings_override: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -184,6 +191,7 @@ pub struct SessionUpdateRequest {
     pub auto_reconnect: Option<bool>,
     pub keep_alive_interval_seconds: Option<u32>,
     pub favorite: Option<bool>,
+    pub settings_override: Option<serde_json::Value>,
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────
@@ -221,6 +229,56 @@ fn session_file(profile_id: &str, session_id: &str) -> PathBuf {
 /// Public accessor for cross-module use.
 pub(crate) fn session_file_path(profile_id: &str, session_id: &str) -> PathBuf {
     session_file(profile_id, session_id)
+}
+
+/// Public accessor so vault can scan sessions for orphan checks.
+pub(crate) fn do_session_list_for_profile(profile_id: &str) -> Vec<SessionDefinition> {
+    do_session_list(profile_id).unwrap_or_default()
+}
+
+// ── BE-CFG-06: Portable mode ───────────────────────────────────────────
+
+/// Check for `.crossterm-portable` sentinel file next to the binary.
+pub fn is_portable_mode() -> bool {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            return dir.join(".crossterm-portable").exists();
+        }
+    }
+    false
+}
+
+/// Return the data directory, respecting portable mode.
+#[allow(dead_code)]
+pub(crate) fn effective_data_dir() -> PathBuf {
+    if is_portable_mode() {
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                let portable_dir = dir.join("data");
+                std::fs::create_dir_all(&portable_dir).ok();
+                return portable_dir;
+            }
+        }
+    }
+    data_base_dir()
+}
+
+// ── Crypto helpers for profile export/import ────────────────────────────
+
+const EXPORT_SALT_LEN: usize = 32;
+const EXPORT_KEY_LEN: usize = 32;
+const EXPORT_NONCE_LEN: usize = 12;
+
+fn derive_export_key(passphrase: &[u8], salt: &[u8]) -> Result<Vec<u8>, ConfigError> {
+    use argon2::{Algorithm, Argon2, Params, Version};
+    let params = Params::new(65536, 3, 4, Some(EXPORT_KEY_LEN))
+        .map_err(|e| ConfigError::Encryption(e.to_string()))?;
+    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    let mut key = vec![0u8; EXPORT_KEY_LEN];
+    argon2
+        .hash_password_into(passphrase, salt, &mut key)
+        .map_err(|e| ConfigError::Encryption(e.to_string()))?;
+    Ok(key)
 }
 
 // ── Config state ────────────────────────────────────────────────────────
@@ -348,6 +406,7 @@ fn do_session_create(
         updated_at: now,
         last_connected_at: None,
         auto_reconnect: req.auto_reconnect.unwrap_or(true),
+        settings_override: req.settings_override,
         keep_alive_interval_seconds: req.keep_alive_interval_seconds.unwrap_or(60),
         favorite: req.favorite.unwrap_or(false),
     };
@@ -363,7 +422,7 @@ fn do_session_list(profile_id: &str) -> Result<Vec<SessionDefinition>, ConfigErr
         for entry in std::fs::read_dir(&dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().map_or(false, |e| e == "json") {
+            if path.extension().is_some_and(|e| e == "json") {
                 let data = std::fs::read_to_string(&path)?;
                 let session: SessionDefinition = serde_json::from_str(&data)?;
                 sessions.push(session);
@@ -402,6 +461,7 @@ pub(crate) fn do_session_update(
     if let Some(v) = req.notes { session.notes = Some(v); }
     if let Some(v) = req.auto_reconnect { session.auto_reconnect = v; }
     if let Some(v) = req.keep_alive_interval_seconds { session.keep_alive_interval_seconds = v; }
+    if let Some(v) = req.settings_override { session.settings_override = Some(v); }
     if let Some(v) = req.favorite { session.favorite = v; }
     session.updated_at = Utc::now();
     let json = serde_json::to_string_pretty(&session)?;
@@ -428,14 +488,14 @@ fn do_session_search(profile_id: &str, query: &str) -> Result<Vec<SessionDefinit
                 || s.connection
                     .host
                     .as_deref()
-                    .map_or(false, |h| h.to_lowercase().contains(&q))
+                    .is_some_and(|h| h.to_lowercase().contains(&q))
                 || s.tags.iter().any(|t| t.to_lowercase().contains(&q))
                 || s.notes
                     .as_deref()
-                    .map_or(false, |n| n.to_lowercase().contains(&q))
+                    .is_some_and(|n| n.to_lowercase().contains(&q))
                 || s.group
                     .as_deref()
-                    .map_or(false, |g| g.to_lowercase().contains(&q))
+                    .is_some_and(|g| g.to_lowercase().contains(&q))
         })
         .collect())
 }
@@ -597,6 +657,7 @@ pub fn session_duplicate(
         last_connected_at: None,
         auto_reconnect: source.auto_reconnect,
         keep_alive_interval_seconds: source.keep_alive_interval_seconds,
+        settings_override: source.settings_override,
         favorite: false,
     };
     let json = serde_json::to_string_pretty(&new_session)?;
@@ -628,7 +689,7 @@ fn parse_ssh_config(content: &str) -> Vec<ParsedSshHost> {
         }
 
         // Split on first whitespace or '='
-        let (key, value) = match line.find(|c: char| c == ' ' || c == '\t' || c == '=') {
+        let (key, value) = match line.find([' ', '\t', '=']) {
             Some(pos) => {
                 let k = &line[..pos];
                 let v = line[pos + 1..].trim().trim_matches('=').trim();
@@ -740,9 +801,9 @@ pub fn session_import_ssh_config(
                 protocol_options: None,
             },
             startup_script: None,
-            environment_variables: if host.user.is_some() {
+            environment_variables: if let Some(user) = host.user {
                 let mut env = HashMap::new();
-                env.insert("SSH_USER".to_string(), host.user.unwrap());
+                env.insert("SSH_USER".to_string(), user);
                 Some(env)
             } else {
                 None
@@ -753,6 +814,7 @@ pub fn session_import_ssh_config(
                 Some(notes_parts.join("\n"))
             },
             auto_reconnect: None,
+            settings_override: None,
             keep_alive_interval_seconds: None,
             favorite: None,
         };
@@ -768,6 +830,300 @@ pub fn session_import_ssh_config(
     );
 
     Ok(created_ids)
+}
+
+// ── BE-CFG-02: Bulk connect all in folder ───────────────────────────────
+
+#[tauri::command]
+pub fn session_bulk_connect(
+    state: tauri::State<'_, ConfigState>,
+    folder_path: String,
+) -> Result<Vec<String>, ConfigError> {
+    let pid = state.active_profile()?;
+    let sessions = do_session_list(&pid)?;
+    let ids: Vec<String> = sessions
+        .into_iter()
+        .filter(|s| s.group.as_deref() == Some(&folder_path))
+        .map(|s| s.id)
+        .collect();
+    Ok(ids)
+}
+
+// ── BE-CFG-02: Session list by group ────────────────────────────────────
+
+#[tauri::command]
+pub fn session_list_by_group(
+    _state: tauri::State<'_, ConfigState>,
+    profile_id: String,
+    group: String,
+) -> Result<Vec<SessionDefinition>, ConfigError> {
+    let sessions = do_session_list(&profile_id)?;
+    Ok(sessions
+        .into_iter()
+        .filter(|s| s.group.as_deref() == Some(&group))
+        .collect())
+}
+
+// ── BE-CFG-04: Profile export/import ────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ProfileExportData {
+    profile: Profile,
+    sessions: Vec<SessionDefinition>,
+    settings: Settings,
+}
+
+#[tauri::command]
+pub fn profile_export(
+    state: tauri::State<'_, ConfigState>,
+    profile_id: String,
+    path: String,
+    passphrase: String,
+) -> Result<(), ConfigError> {
+    let profile = do_profile_get(&profile_id)?;
+    let sessions = do_session_list(&profile_id)?;
+    let settings = profile.settings.clone();
+
+    let export = ProfileExportData {
+        profile,
+        sessions,
+        settings,
+    };
+
+    let json = serde_json::to_string_pretty(&export)?;
+
+    // Encrypt with AES-256-GCM
+    use aes_gcm::{aead::{Aead, KeyInit}, Aes256Gcm, Nonce};
+    use rand::RngCore;
+
+    let mut salt = vec![0u8; EXPORT_SALT_LEN];
+    aes_gcm::aead::OsRng.fill_bytes(&mut salt);
+    let key = derive_export_key(passphrase.as_bytes(), &salt)?;
+
+    let cipher = Aes256Gcm::new_from_slice(&key)
+        .map_err(|e| ConfigError::Encryption(e.to_string()))?;
+    let mut nonce_bytes = [0u8; EXPORT_NONCE_LEN];
+    aes_gcm::aead::OsRng.fill_bytes(&mut nonce_bytes);
+    let nonce = Nonce::from_slice(&nonce_bytes);
+
+    let ciphertext = cipher.encrypt(nonce, json.as_bytes())
+        .map_err(|e| ConfigError::Encryption(e.to_string()))?;
+
+    // File format: salt (32 bytes) + nonce (12 bytes) + ciphertext
+    let mut output = Vec::with_capacity(EXPORT_SALT_LEN + EXPORT_NONCE_LEN + ciphertext.len());
+    output.extend_from_slice(&salt);
+    output.extend_from_slice(&nonce_bytes);
+    output.extend_from_slice(&ciphertext);
+
+    std::fs::write(&path, output)?;
+
+    let pid = state.active_profile_id.read().unwrap().clone().unwrap_or_default();
+    crate::audit::append_event(
+        &pid,
+        crate::audit::AuditEventType::ProfileExport,
+        &format!("Exported profile to {}", path),
+    );
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn profile_import(
+    state: tauri::State<'_, ConfigState>,
+    path: String,
+    passphrase: String,
+) -> Result<Profile, ConfigError> {
+    let encrypted = std::fs::read(&path)?;
+    if encrypted.len() < EXPORT_SALT_LEN + EXPORT_NONCE_LEN {
+        return Err(ConfigError::Encryption("Invalid export file".into()));
+    }
+
+    let salt = &encrypted[..EXPORT_SALT_LEN];
+    let nonce_bytes = &encrypted[EXPORT_SALT_LEN..EXPORT_SALT_LEN + EXPORT_NONCE_LEN];
+    let ciphertext = &encrypted[EXPORT_SALT_LEN + EXPORT_NONCE_LEN..];
+
+    let key = derive_export_key(passphrase.as_bytes(), salt)?;
+
+    use aes_gcm::{aead::{Aead, KeyInit}, Aes256Gcm, Nonce};
+    let cipher = Aes256Gcm::new_from_slice(&key)
+        .map_err(|e| ConfigError::Encryption(e.to_string()))?;
+    let nonce = Nonce::from_slice(nonce_bytes);
+
+    let plaintext = cipher.decrypt(nonce, ciphertext)
+        .map_err(|_| ConfigError::Encryption("Invalid passphrase or corrupted file".into()))?;
+    let data = String::from_utf8(plaintext)
+        .map_err(|e| ConfigError::Encryption(e.to_string()))?;
+    let export: ProfileExportData = serde_json::from_str(&data)?;
+
+    // Create a new profile with imported data
+    let new_profile = do_profile_create(ProfileCreateRequest {
+        name: format!("{} (Imported)", export.profile.name),
+        avatar: export.profile.avatar,
+        settings: Some(export.settings),
+    })?;
+
+    // Import sessions
+    for session in export.sessions {
+        let req = SessionCreateRequest {
+            name: session.name,
+            session_type: session.session_type,
+            group: session.group,
+            tags: Some(session.tags),
+            icon: session.icon,
+            color_label: session.color_label,
+            credential_ref: session.credential_ref,
+            connection: session.connection,
+            startup_script: session.startup_script,
+            environment_variables: Some(session.environment_variables),
+            notes: session.notes,
+            auto_reconnect: Some(session.auto_reconnect),
+            settings_override: session.settings_override,
+            keep_alive_interval_seconds: Some(session.keep_alive_interval_seconds),
+            favorite: Some(session.favorite),
+        };
+        do_session_create(&new_profile.id, req)?;
+    }
+
+    let pid = state
+        .active_profile_id
+        .read()
+        .unwrap()
+        .clone()
+        .unwrap_or_default();
+    crate::audit::append_event(
+        &pid,
+        crate::audit::AuditEventType::ProfileImport,
+        &format!("Imported profile '{}' from {}", new_profile.name, path),
+    );
+
+    Ok(new_profile)
+}
+
+// ── BE-CFG-05: Settings hierarchy ───────────────────────────────────────
+
+/// Resolve effective settings with session → folder → profile → app defaults cascade.
+fn do_settings_get_effective(
+    profile_id: &str,
+    session_id: Option<&str>,
+) -> Result<Settings, ConfigError> {
+    // Override with profile settings
+    let profile = do_profile_get(profile_id)?;
+    let mut effective = profile.settings.clone();
+    if let Some(sid) = session_id {
+        let session = do_session_get(profile_id, sid)?;
+
+        // Check folder-level settings: look for a .settings.json in group folder
+        if let Some(ref folder) = session.group {
+            let folder_settings_path = sessions_dir(profile_id).join(format!("{}.settings.json", folder));
+            if folder_settings_path.exists() {
+                if let Ok(data) = std::fs::read_to_string(&folder_settings_path) {
+                    if let Ok(folder_overrides) = serde_json::from_str::<serde_json::Value>(&data) {
+                        let mut base = serde_json::to_value(&effective).unwrap_or_default();
+                        json_merge(&mut base, &folder_overrides);
+                        if let Ok(merged) = serde_json::from_value::<Settings>(base) {
+                            effective = merged;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Session-level overrides from settings_override (JSON merge)
+        if let Some(ref overrides) = session.settings_override {
+            let mut base = serde_json::to_value(&effective).unwrap_or_default();
+            json_merge(&mut base, overrides);
+            if let Ok(merged) = serde_json::from_value::<Settings>(base) {
+                effective = merged;
+            }
+        }
+
+        // Legacy: also apply protocol_options overrides for backward compat
+        if let Some(ref opts) = session.connection.protocol_options {
+            if let Some(font_size) = opts.get("font_size").and_then(|v| v.as_u64()) {
+                effective.font_size = font_size as u32;
+            }
+            if let Some(theme) = opts.get("theme").and_then(|v| v.as_str()) {
+                effective.theme = theme.to_string();
+            }
+            if let Some(font_family) = opts.get("font_family").and_then(|v| v.as_str()) {
+                effective.font_family = font_family.to_string();
+            }
+            if let Some(scrollback) = opts.get("scrollback_lines").and_then(|v| v.as_u64()) {
+                effective.scrollback_lines = scrollback as u32;
+            }
+            if let Some(bell) = opts.get("bell_style").and_then(|v| v.as_str()) {
+                effective.bell_style = bell.to_string();
+            }
+        }
+    }
+
+    Ok(effective)
+}
+
+/// Recursively merge `overlay` into `base`. For objects, overlay keys replace
+/// base keys; non-object values are overwritten entirely.
+fn json_merge(base: &mut serde_json::Value, overlay: &serde_json::Value) {
+    match (base, overlay) {
+        (serde_json::Value::Object(base_map), serde_json::Value::Object(overlay_map)) => {
+            for (key, value) in overlay_map {
+                json_merge(base_map.entry(key.clone()).or_insert(serde_json::Value::Null), value);
+            }
+        }
+        (base, overlay) => {
+            *base = overlay.clone();
+        }
+    }
+}
+
+#[tauri::command]
+pub fn settings_get_effective(
+    state: tauri::State<'_, ConfigState>,
+    session_id: Option<String>,
+) -> Result<Settings, ConfigError> {
+    let pid = state.active_profile()?;
+    do_settings_get_effective(&pid, session_id.as_deref())
+}
+
+// ── BE-CFG-06: Portable mode command ────────────────────────────────────
+
+#[tauri::command]
+pub fn config_is_portable_mode() -> bool {
+    is_portable_mode()
+}
+
+// ── BLD-05: Shell integration install ───────────────────────────────────
+
+#[tauri::command]
+pub fn shell_integration_install(shell: String) -> Result<String, ConfigError> {
+    let (config_file, script_name) = match shell.as_str() {
+        "bash" => ("~/.bashrc", "crossterm.bash"),
+        "zsh" => ("~/.zshrc", "crossterm.zsh"),
+        "fish" => ("~/.config/fish/config.fish", "crossterm.fish"),
+        other => {
+            return Err(ConfigError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("Unsupported shell: {other}"),
+            )));
+        }
+    };
+
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_default();
+
+    let script_path = exe_dir
+        .join("scripts")
+        .join("shell-integration")
+        .join(script_name);
+
+    let source_line = format!("source \"{}\"", script_path.display());
+
+    let instructions = format!(
+        "Add the following line to {config_file}:\n\n  {source_line}\n\nThen restart your shell or run:\n  {source_line}"
+    );
+
+    Ok(instructions)
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────
@@ -825,6 +1181,7 @@ mod tests {
             auto_reconnect: None,
             keep_alive_interval_seconds: None,
             favorite: None,
+            settings_override: None,
         }
     }
 
@@ -919,6 +1276,7 @@ mod tests {
                 auto_reconnect: Some(false),
                 keep_alive_interval_seconds: None,
                 favorite: Some(true),
+                settings_override: None,
             },
         )
         .unwrap();
@@ -942,6 +1300,145 @@ mod tests {
         let env = TestEnv::new();
 
         do_session_create(env.id(), make_session_request("Alpha Web", "10.0.0.1")).unwrap();
+
+    // ── UT-C-07: Bulk connect ───────────────────────────────────────
+
+    #[test]
+    fn test_session_bulk_connect_by_folder() {
+        let env = TestEnv::new();
+
+        // Create sessions in different folders
+        let mut req1 = make_session_request("Web1", "10.0.0.1");
+        req1.group = Some("production".to_string());
+        do_session_create(env.id(), req1).unwrap();
+
+        let mut req2 = make_session_request("Web2", "10.0.0.2");
+        req2.group = Some("production".to_string());
+        do_session_create(env.id(), req2).unwrap();
+
+        let mut req3 = make_session_request("Dev1", "10.0.0.3");
+        req3.group = Some("staging".to_string());
+        do_session_create(env.id(), req3).unwrap();
+
+        // Get all sessions in production folder
+        let all = do_session_list(env.id()).unwrap();
+        let prod_ids: Vec<String> = all
+            .into_iter()
+            .filter(|s| s.group.as_deref() == Some("production"))
+            .map(|s| s.id)
+            .collect();
+
+        assert_eq!(prod_ids.len(), 2);
+    }
+
+    #[test]
+    fn test_session_bulk_connect_empty_folder() {
+        let env = TestEnv::new();
+
+        let all = do_session_list(env.id()).unwrap();
+        let ids: Vec<String> = all
+            .into_iter()
+            .filter(|s| s.group.as_deref() == Some("nonexistent"))
+            .map(|s| s.id)
+            .collect();
+
+        assert!(ids.is_empty());
+    }
+
+    // ── UT-C-08: Profile export/import ──────────────────────────────
+
+    #[test]
+    fn test_profile_export_import_roundtrip() {
+        let env = TestEnv::new();
+
+        // Create sessions
+        do_session_create(env.id(), make_session_request("Server1", "10.0.0.1")).unwrap();
+        do_session_create(env.id(), make_session_request("Server2", "10.0.0.2")).unwrap();
+
+        // Export
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let export_path = tmp.path().to_string_lossy().to_string();
+
+        let profile = do_profile_get(env.id()).unwrap();
+        let sessions = do_session_list(env.id()).unwrap();
+        let export = ProfileExportData {
+            profile: profile.clone(),
+            sessions,
+            settings: profile.settings,
+        };
+        let json = serde_json::to_string_pretty(&export).unwrap();
+        std::fs::write(&export_path, &json).unwrap();
+
+        // Import
+        let data = std::fs::read_to_string(&export_path).unwrap();
+        let imported: ProfileExportData = serde_json::from_str(&data).unwrap();
+
+        assert_eq!(imported.profile.name, "Test Profile");
+        assert_eq!(imported.sessions.len(), 2);
+    }
+
+    #[test]
+    fn test_profile_export_data_serialization() {
+        let export = ProfileExportData {
+            profile: Profile {
+                id: "test-id".into(),
+                name: "Test".into(),
+                avatar: None,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                settings: Settings::default(),
+            },
+            sessions: vec![],
+            settings: Settings::default(),
+        };
+        let json = serde_json::to_string(&export).unwrap();
+        assert!(json.contains("Test"));
+        let deserialized: ProfileExportData = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.profile.name, "Test");
+    }
+
+    // ── UT-C-09: Settings hierarchy ─────────────────────────────────
+
+    #[test]
+    fn test_settings_effective_defaults_to_profile() {
+        let env = TestEnv::new();
+
+        let settings = do_settings_get_effective(env.id(), None).unwrap();
+        let profile = do_profile_get(env.id()).unwrap();
+
+        assert_eq!(settings.theme, profile.settings.theme);
+        assert_eq!(settings.font_size, profile.settings.font_size);
+    }
+
+    #[test]
+    fn test_settings_effective_with_session_overrides() {
+        let env = TestEnv::new();
+
+        let mut req = make_session_request("TestSession", "10.0.0.1");
+        let mut opts = HashMap::new();
+        opts.insert("font_size".into(), serde_json::json!(20));
+        opts.insert("theme".into(), serde_json::json!("solarized"));
+        req.connection.protocol_options = Some(opts);
+        let session = do_session_create(env.id(), req).unwrap();
+
+        let settings = do_settings_get_effective(env.id(), Some(&session.id)).unwrap();
+        assert_eq!(settings.font_size, 20);
+        assert_eq!(settings.theme, "solarized");
+    }
+
+    // ── UT-C-10: Portable mode ──────────────────────────────────────
+
+    #[test]
+    fn test_portable_mode_detection() {
+        // In test environment, sentinel file doesn't exist next to binary
+        assert!(!is_portable_mode());
+    }
+
+    #[test]
+    fn test_effective_data_dir_non_portable() {
+        let dir = effective_data_dir();
+        assert!(dir.to_string_lossy().contains("CrossTerm"));
+    }
         do_session_create(env.id(), make_session_request("Beta Web", "10.0.0.2")).unwrap();
         do_session_create(env.id(), make_session_request("Gamma DB", "10.0.0.3")).unwrap();
 
@@ -1112,5 +1609,499 @@ Host *
     fn test_parse_ssh_config_empty() {
         let hosts = parse_ssh_config("");
         assert!(hosts.is_empty());
+    }
+
+    // ── UT-C-11: Session list by group ──────────────────────────────
+
+    #[test]
+    fn test_session_list_by_group() {
+        let env = TestEnv::new();
+
+        let mut req1 = make_session_request("Web1", "10.0.0.1");
+        req1.group = Some("production".to_string());
+        do_session_create(env.id(), req1).unwrap();
+
+        let mut req2 = make_session_request("Web2", "10.0.0.2");
+        req2.group = Some("production".to_string());
+        do_session_create(env.id(), req2).unwrap();
+
+        let mut req3 = make_session_request("Dev1", "10.0.0.3");
+        req3.group = Some("staging".to_string());
+        do_session_create(env.id(), req3).unwrap();
+
+        let sessions = do_session_list(env.id()).unwrap();
+        let prod: Vec<_> = sessions
+            .iter()
+            .filter(|s| s.group.as_deref() == Some("production"))
+            .collect();
+        assert_eq!(prod.len(), 2);
+
+        let staging: Vec<_> = sessions
+            .iter()
+            .filter(|s| s.group.as_deref() == Some("staging"))
+            .collect();
+        assert_eq!(staging.len(), 1);
+
+        let empty: Vec<_> = sessions
+            .iter()
+            .filter(|s| s.group.as_deref() == Some("nonexistent"))
+            .collect();
+        assert!(empty.is_empty());
+    }
+
+    // ── UT-C-12: Encrypted profile export/import ────────────────────
+
+    #[test]
+    fn test_encrypted_export_import_roundtrip() {
+        let env = TestEnv::new();
+
+        do_session_create(env.id(), make_session_request("Server1", "10.0.0.1")).unwrap();
+        do_session_create(env.id(), make_session_request("Server2", "10.0.0.2")).unwrap();
+
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let export_path = tmp.path().to_string_lossy().to_string();
+
+        // Export: serialize + encrypt
+        let profile = do_profile_get(env.id()).unwrap();
+        let sessions = do_session_list(env.id()).unwrap();
+        let export = ProfileExportData {
+            profile: profile.clone(),
+            sessions,
+            settings: profile.settings,
+        };
+        let json = serde_json::to_string_pretty(&export).unwrap();
+        let passphrase = "test-passphrase-123!";
+
+        use aes_gcm::{aead::{Aead, KeyInit}, Aes256Gcm, Nonce};
+        use rand::RngCore;
+
+        let mut salt = vec![0u8; EXPORT_SALT_LEN];
+        aes_gcm::aead::OsRng.fill_bytes(&mut salt);
+        let key = derive_export_key(passphrase.as_bytes(), &salt).unwrap();
+        let cipher = Aes256Gcm::new_from_slice(&key).unwrap();
+        let mut nonce_bytes = [0u8; EXPORT_NONCE_LEN];
+        aes_gcm::aead::OsRng.fill_bytes(&mut nonce_bytes);
+        let nonce = Nonce::from_slice(&nonce_bytes);
+        let ciphertext = cipher.encrypt(nonce, json.as_bytes()).unwrap();
+
+        let mut output = Vec::new();
+        output.extend_from_slice(&salt);
+        output.extend_from_slice(&nonce_bytes);
+        output.extend_from_slice(&ciphertext);
+        std::fs::write(&export_path, &output).unwrap();
+
+        // Import: read + decrypt
+        let encrypted = std::fs::read(&export_path).unwrap();
+        let s = &encrypted[..EXPORT_SALT_LEN];
+        let n = &encrypted[EXPORT_SALT_LEN..EXPORT_SALT_LEN + EXPORT_NONCE_LEN];
+        let ct = &encrypted[EXPORT_SALT_LEN + EXPORT_NONCE_LEN..];
+
+        let dk = derive_export_key(passphrase.as_bytes(), s).unwrap();
+        let dc = Aes256Gcm::new_from_slice(&dk).unwrap();
+        let dn = Nonce::from_slice(n);
+        let plaintext = dc.decrypt(dn, ct).unwrap();
+        let data = String::from_utf8(plaintext).unwrap();
+        let imported: ProfileExportData = serde_json::from_str(&data).unwrap();
+
+        assert_eq!(imported.profile.name, "Test Profile");
+        assert_eq!(imported.sessions.len(), 2);
+    }
+
+    #[test]
+    fn test_encrypted_import_wrong_passphrase() {
+        let env = TestEnv::new();
+
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let export_path = tmp.path().to_string_lossy().to_string();
+
+        let profile = do_profile_get(env.id()).unwrap();
+        let export = ProfileExportData {
+            profile: profile.clone(),
+            sessions: vec![],
+            settings: profile.settings,
+        };
+        let json = serde_json::to_string_pretty(&export).unwrap();
+
+        use aes_gcm::{aead::{Aead, KeyInit}, Aes256Gcm, Nonce};
+        use rand::RngCore;
+
+        let mut salt = vec![0u8; EXPORT_SALT_LEN];
+        aes_gcm::aead::OsRng.fill_bytes(&mut salt);
+        let key = derive_export_key("correct-pass".as_bytes(), &salt).unwrap();
+        let cipher = Aes256Gcm::new_from_slice(&key).unwrap();
+        let mut nonce_bytes = [0u8; EXPORT_NONCE_LEN];
+        aes_gcm::aead::OsRng.fill_bytes(&mut nonce_bytes);
+        let nonce = Nonce::from_slice(&nonce_bytes);
+        let ciphertext = cipher.encrypt(nonce, json.as_bytes()).unwrap();
+
+        let mut output = Vec::new();
+        output.extend_from_slice(&salt);
+        output.extend_from_slice(&nonce_bytes);
+        output.extend_from_slice(&ciphertext);
+        std::fs::write(&export_path, &output).unwrap();
+
+        // Try decrypting with wrong passphrase
+        let encrypted = std::fs::read(&export_path).unwrap();
+        let wrong_key = derive_export_key("wrong-pass".as_bytes(), &encrypted[..EXPORT_SALT_LEN]).unwrap();
+        let wrong_cipher = Aes256Gcm::new_from_slice(&wrong_key).unwrap();
+        let nonce = Nonce::from_slice(&encrypted[EXPORT_SALT_LEN..EXPORT_SALT_LEN + EXPORT_NONCE_LEN]);
+        let result = wrong_cipher.decrypt(nonce, &encrypted[EXPORT_SALT_LEN + EXPORT_NONCE_LEN..]);
+        assert!(result.is_err(), "Decryption with wrong passphrase should fail");
+    }
+
+    // ── UT-C-11: Session all types ──────────────────────────────────
+
+    #[test]
+    fn test_session_all_types() {
+        let env = TestEnv::new();
+
+        let all_types = vec![
+            (SessionType::SshTerminal, "SSH Terminal"),
+            (SessionType::SftpBrowser, "SFTP Browser"),
+            (SessionType::ScpTransfer, "SCP Transfer"),
+            (SessionType::Rdp, "RDP Session"),
+            (SessionType::Vnc, "VNC Session"),
+            (SessionType::Telnet, "Telnet Session"),
+            (SessionType::SerialConsole, "Serial Console"),
+            (SessionType::LocalShell, "Local Shell"),
+            (SessionType::WslShell, "WSL Shell"),
+            (SessionType::CloudShell, "Cloud Shell"),
+            (SessionType::WebConsole, "Web Console"),
+            (SessionType::KubernetesExec, "Kubernetes Exec"),
+            (SessionType::DockerExec, "Docker Exec"),
+        ];
+
+        let mut created_ids = Vec::new();
+        for (stype, name) in &all_types {
+            let req = SessionCreateRequest {
+                name: name.to_string(),
+                session_type: stype.clone(),
+                group: Some("all-types-test".to_string()),
+                tags: None,
+                icon: None,
+                color_label: None,
+                credential_ref: None,
+                connection: ConnectionDetails {
+                    host: Some("10.0.0.1".to_string()),
+                    port: Some(22),
+                    protocol_options: None,
+                },
+                startup_script: None,
+                environment_variables: None,
+                notes: None,
+                auto_reconnect: None,
+                keep_alive_interval_seconds: None,
+                favorite: None,
+                settings_override: None,
+            };
+            let session = do_session_create(env.id(), req).unwrap();
+            assert_eq!(session.session_type, *stype);
+            created_ids.push(session.id);
+        }
+
+        assert_eq!(created_ids.len(), 13, "All 13 session types must be created");
+
+        // Verify all persist and deserialize correctly
+        let list = do_session_list(env.id()).unwrap();
+        assert_eq!(list.len(), 13);
+
+        for (stype, name) in &all_types {
+            let found = list.iter().find(|s| s.name == *name);
+            assert!(found.is_some(), "Session '{}' not found after persist", name);
+            assert_eq!(found.unwrap().session_type, *stype, "SessionType mismatch for '{}'", name);
+        }
+    }
+
+    // ── UT-C-13: last_connected_at update ───────────────────────────
+
+    #[test]
+    fn test_last_connected_at_update() {
+        let env = TestEnv::new();
+
+        let session = do_session_create(env.id(), make_session_request("Test Server", "10.0.0.1"))
+            .unwrap();
+        assert!(session.last_connected_at.is_none(), "New session should have no last_connected_at");
+
+        let now = Utc::now();
+        let updated = do_session_update(
+            env.id(),
+            &session.id,
+            SessionUpdateRequest {
+                name: None,
+                session_type: None,
+                group: None,
+                tags: None,
+                icon: None,
+                color_label: None,
+                credential_ref: None,
+                connection: None,
+                startup_script: None,
+                environment_variables: None,
+                notes: None,
+                auto_reconnect: None,
+                keep_alive_interval_seconds: None,
+                favorite: None,
+                settings_override: None,
+            },
+        )
+        .unwrap();
+
+        // Manually update last_connected_at by writing to file
+        let mut session_data = do_session_get(env.id(), &session.id).unwrap();
+        session_data.last_connected_at = Some(now);
+        let json = serde_json::to_string_pretty(&session_data).unwrap();
+        let path = session_file(env.id(), &session.id);
+        std::fs::write(&path, json).unwrap();
+
+        // Reload and verify timestamp persists
+        let reloaded = do_session_get(env.id(), &session.id).unwrap();
+        assert!(reloaded.last_connected_at.is_some(), "last_connected_at should persist after update");
+        let lc = reloaded.last_connected_at.unwrap();
+        // Should be within 1 second of `now`
+        let diff = (lc - now).num_seconds().abs();
+        assert!(diff <= 1, "last_connected_at timestamp drift too large: {} seconds", diff);
+    }
+
+    // ── UT-C-04: Session search by host ─────────────────────────────
+
+    #[test]
+    fn test_session_search_by_host() {
+        // UT-C-04
+        let env = TestEnv::new();
+
+        do_session_create(env.id(), make_session_request("Web Prod", "web.prod.example.com")).unwrap();
+        do_session_create(env.id(), make_session_request("DB Staging", "db.staging.internal")).unwrap();
+        do_session_create(env.id(), make_session_request("Cache Prod", "cache.prod.example.com")).unwrap();
+
+        // Search by hostname substring "prod.example"
+        let results = do_session_search(env.id(), "prod.example").unwrap();
+        assert_eq!(results.len(), 2);
+        let names: Vec<&str> = results.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"Web Prod"));
+        assert!(names.contains(&"Cache Prod"));
+
+        // Search by different hostname substring
+        let results = do_session_search(env.id(), "staging.internal").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "DB Staging");
+
+        // Partial host match
+        let results = do_session_search(env.id(), ".com").unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    // ── UT-C-05: Session search by tag ──────────────────────────────
+
+    #[test]
+    fn test_session_search_by_tag() {
+        // UT-C-05
+        let env = TestEnv::new();
+
+        let mut req1 = make_session_request("Server A", "10.0.0.1");
+        req1.tags = Some(vec!["production".to_string(), "web".to_string()]);
+        do_session_create(env.id(), req1).unwrap();
+
+        let mut req2 = make_session_request("Server B", "10.0.0.2");
+        req2.tags = Some(vec!["staging".to_string(), "web".to_string()]);
+        do_session_create(env.id(), req2).unwrap();
+
+        let mut req3 = make_session_request("Server C", "10.0.0.3");
+        req3.tags = Some(vec!["production".to_string(), "database".to_string()]);
+        do_session_create(env.id(), req3).unwrap();
+
+        // Search by tag "production" — should match A and C
+        let results = do_session_search(env.id(), "production").unwrap();
+        assert_eq!(results.len(), 2);
+        let names: Vec<&str> = results.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"Server A"));
+        assert!(names.contains(&"Server C"));
+
+        // Search by tag "web" — should match A and B
+        let results = do_session_search(env.id(), "web").unwrap();
+        assert_eq!(results.len(), 2);
+        let names: Vec<&str> = results.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"Server A"));
+        assert!(names.contains(&"Server B"));
+
+        // Search by tag "database" — should match only C
+        let results = do_session_search(env.id(), "database").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "Server C");
+
+        // Search by tag that doesn't exist
+        let results = do_session_search(env.id(), "monitoring").unwrap();
+        assert!(results.is_empty());
+    }
+
+    // ── UT-C-07: Session duplicate ──────────────────────────────────
+
+    #[test]
+    fn test_session_duplicate() {
+        // UT-C-07
+        let env = TestEnv::new();
+
+        // Create source session with specific connection details
+        let mut req = make_session_request("Original Server", "10.0.0.50");
+        req.tags = Some(vec!["critical".to_string(), "prod".to_string()]);
+        req.group = Some("datacenter-1".to_string());
+        req.startup_script = Some("echo hello".to_string());
+        req.auto_reconnect = Some(true);
+        req.keep_alive_interval_seconds = Some(30);
+        let source = do_session_create(env.id(), req).unwrap();
+
+        // Duplicate using the same logic as session_duplicate command
+        let new_id = Uuid::new_v4().to_string();
+        let now = Utc::now();
+        let dup = SessionDefinition {
+            id: new_id.clone(),
+            name: format!("{} (Copy)", source.name),
+            session_type: source.session_type.clone(),
+            group: source.group.clone(),
+            tags: source.tags.clone(),
+            icon: source.icon.clone(),
+            color_label: source.color_label.clone(),
+            credential_ref: source.credential_ref.clone(),
+            connection: source.connection.clone(),
+            startup_script: source.startup_script.clone(),
+            environment_variables: source.environment_variables.clone(),
+            notes: source.notes.clone(),
+            created_at: now,
+            updated_at: now,
+            last_connected_at: None,
+            auto_reconnect: source.auto_reconnect,
+            keep_alive_interval_seconds: source.keep_alive_interval_seconds,
+            settings_override: source.settings_override.clone(),
+            favorite: false,
+        };
+        let json = serde_json::to_string_pretty(&dup).unwrap();
+        std::fs::write(session_file(env.id(), &new_id), json).unwrap();
+
+        // Verify new UUID differs from source
+        assert_ne!(dup.id, source.id);
+
+        // Verify name has "(Copy)" suffix
+        assert_eq!(dup.name, "Original Server (Copy)");
+
+        // Verify connection details are identical
+        assert_eq!(dup.connection.host, source.connection.host);
+        assert_eq!(dup.connection.port, source.connection.port);
+
+        // Verify other fields carried over
+        assert_eq!(dup.session_type, source.session_type);
+        assert_eq!(dup.group, source.group);
+        assert_eq!(dup.tags, source.tags);
+        assert_eq!(dup.startup_script, source.startup_script);
+        assert_eq!(dup.auto_reconnect, source.auto_reconnect);
+        assert_eq!(dup.keep_alive_interval_seconds, source.keep_alive_interval_seconds);
+
+        // Verify duplicate is persisted and retrievable
+        let reloaded = do_session_get(env.id(), &new_id).unwrap();
+        assert_eq!(reloaded.name, "Original Server (Copy)");
+        assert_eq!(reloaded.connection.host.as_deref(), Some("10.0.0.50"));
+
+        // Verify both sessions exist in list
+        let list = do_session_list(env.id()).unwrap();
+        assert_eq!(list.len(), 2);
+    }
+
+    // ── UT-C-08: Profile switch ─────────────────────────────────────
+
+    #[test]
+    fn test_profile_switch() {
+        // UT-C-08
+        let env_a = TestEnv::new();
+        let env_b = TestEnv::new();
+
+        let state = ConfigState::new();
+
+        // Initially no active profile
+        assert!(state.active_profile_id.read().unwrap().is_none());
+
+        // Switch to profile A
+        {
+            let profile_a = do_profile_get(env_a.id()).unwrap();
+            let mut active = state.active_profile_id.write().unwrap();
+            *active = Some(env_a.id().to_string());
+            assert_eq!(profile_a.id, env_a.id());
+        }
+        assert_eq!(
+            state.active_profile_id.read().unwrap().as_deref(),
+            Some(env_a.id())
+        );
+
+        // Switch to profile B
+        {
+            let profile_b = do_profile_get(env_b.id()).unwrap();
+            let mut active = state.active_profile_id.write().unwrap();
+            *active = Some(env_b.id().to_string());
+            assert_eq!(profile_b.id, env_b.id());
+        }
+        assert_eq!(
+            state.active_profile_id.read().unwrap().as_deref(),
+            Some(env_b.id())
+        );
+
+        // Verify active_profile() returns profile B
+        let active_id = state.active_profile().unwrap();
+        assert_eq!(active_id, env_b.id());
+
+        // Switch back to profile A
+        {
+            let mut active = state.active_profile_id.write().unwrap();
+            *active = Some(env_a.id().to_string());
+        }
+        let active_id = state.active_profile().unwrap();
+        assert_eq!(active_id, env_a.id());
+    }
+
+    // ── UT-C-12: Session protocol options ───────────────────────────
+
+    #[test]
+    fn test_session_protocol_options() {
+        // UT-C-12
+        let env = TestEnv::new();
+
+        let mut protocol_opts = HashMap::new();
+        protocol_opts.insert("compression".to_string(), serde_json::json!(true));
+        protocol_opts.insert("cipher".to_string(), serde_json::json!("aes256-ctr"));
+        protocol_opts.insert("keepalive_interval".to_string(), serde_json::json!(15));
+        protocol_opts.insert("x11_forwarding".to_string(), serde_json::json!(false));
+        protocol_opts.insert("known_hosts_policy".to_string(), serde_json::json!("strict"));
+
+        let req = SessionCreateRequest {
+            name: "SSH with Options".to_string(),
+            session_type: SessionType::SshTerminal,
+            group: None,
+            tags: None,
+            icon: None,
+            color_label: None,
+            credential_ref: None,
+            connection: ConnectionDetails {
+                host: Some("10.0.0.99".to_string()),
+                port: Some(22),
+                protocol_options: Some(protocol_opts.clone()),
+            },
+            startup_script: None,
+            environment_variables: None,
+            notes: None,
+            auto_reconnect: None,
+            keep_alive_interval_seconds: None,
+            favorite: None,
+            settings_override: None,
+        };
+
+        let session = do_session_create(env.id(), req).unwrap();
+        let sid = session.id.clone();
+
+        // Retrieve from disk and verify round-trip
+        let reloaded = do_session_get(env.id(), &sid).unwrap();
+        let opts = reloaded.connection.protocol_options.expect("protocol_options should persist");
+
+        assert_eq!(opts.get("compression"), Some(&serde_json::json!(true)));
+        assert_eq!(opts.get("cipher"), Some(&serde_json::json!("aes256-ctr")));
+        assert_eq!(opts.get("keepalive_interval"), Some(&serde_json::json!(15)));
+        assert_eq!(opts.get("x11_forwarding"), Some(&serde_json::json!(false)));
+        assert_eq!(opts.get("known_hosts_policy"), Some(&serde_json::json!("strict")));
+        assert_eq!(opts.len(), 5);
     }
 }

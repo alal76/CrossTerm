@@ -28,6 +28,10 @@ npm-debug.log*
 # Tauri
 src-tauri/gen/schemas/
 
+# Integration test SSH keys (generated, not committed)
+tests/fixtures/ssh-keys/test_ed25519
+tests/fixtures/ssh-keys/test_ed25519.pub
+
 # Misc
 *.bak
 *.tmp

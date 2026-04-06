@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import clsx from "clsx";
+import { useTranslation } from "react-i18next";
 import {
   Terminal,
   Globe,
@@ -9,15 +10,20 @@ import {
   Lock,
   Palette,
   Command,
+  BookOpen,
+  Keyboard,
+  HelpCircle,
 } from "lucide-react";
 import { useAppStore } from "@/stores/appStore";
 import { ThemeVariant } from "@/types";
+import { helpArticles } from "@/components/Help/helpContent";
 
 interface PaletteAction {
   id: string;
   label: string;
   icon: React.ReactNode;
   shortcut?: string;
+  category?: string;
   handler: () => void;
 }
 
@@ -26,6 +32,9 @@ interface CommandPaletteProps {
   onNewSSHSession?: () => void;
   onOpenSettings?: () => void;
   onLockVault?: () => void;
+  onOpenHelp?: () => void;
+  onOpenShortcuts?: () => void;
+  onOpenHelpArticle?: (slug: string) => void;
 }
 
 export default function CommandPalette({
@@ -33,7 +42,11 @@ export default function CommandPalette({
   onNewSSHSession,
   onOpenSettings,
   onLockVault,
-}: CommandPaletteProps) {
+  onOpenHelp,
+  onOpenShortcuts,
+  onOpenHelpArticle,
+}: Readonly<CommandPaletteProps>) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -120,14 +133,65 @@ export default function CommandPalette({
           setTheme(theme === ThemeVariant.Dark ? ThemeVariant.Light : ThemeVariant.Dark);
         },
       },
+      {
+        id: "open-help",
+        label: "Open Help",
+        icon: <BookOpen size={16} />,
+        shortcut: "F1",
+        handler: () => {
+          close();
+          onOpenHelp?.();
+        },
+      },
+      {
+        id: "keyboard-shortcuts",
+        label: "Keyboard Shortcuts",
+        icon: <Keyboard size={16} />,
+        shortcut: "⌘/",
+        handler: () => {
+          close();
+          onOpenShortcuts?.();
+        },
+      },
     ],
-    [close, onNewLocalShell, onNewSSHSession, onOpenSettings, onLockVault, toggleSidebar, toggleBottomPanel, theme, setTheme]
+    [close, onNewLocalShell, onNewSSHSession, onOpenSettings, onLockVault, onOpenHelp, onOpenShortcuts, toggleSidebar, toggleBottomPanel, theme, setTheme]
+  );
+
+  const helpActions: PaletteAction[] = useMemo(
+    () =>
+      helpArticles.map((article) => ({
+        id: `help-${article.slug}`,
+        label: article.title,
+        icon: <HelpCircle size={16} />,
+        category: t("commandPalette.helpCategory"),
+        handler: () => {
+          close();
+          onOpenHelpArticle?.(article.slug);
+        },
+      })),
+    [close, onOpenHelpArticle, t],
   );
 
   const filtered = useMemo(() => {
-    if (!query) return actions;
     const lower = query.toLowerCase();
-    return actions.filter((a) => {
+
+    // Support "help <topic>" prefix
+    const helpPrefix = /^help\s+(.+)/i.exec(query);
+    if (helpPrefix) {
+      const topic = helpPrefix[1].toLowerCase();
+      return helpActions.filter((a) => {
+        const slug = a.id.replace("help-", "");
+        const article = helpArticles.find((art) => art.slug === slug);
+        return (
+          a.label.toLowerCase().includes(topic) ||
+          (article?.keywords.some((k) => k.includes(topic)) ?? false)
+        );
+      });
+    }
+
+    if (!query) return actions;
+
+    const matchedActions = actions.filter((a) => {
       // Simple fuzzy: check if all chars appear in order
       let ai = 0;
       for (const char of lower) {
@@ -137,7 +201,14 @@ export default function CommandPalette({
       }
       return true;
     });
-  }, [query, actions]);
+
+    // Also include matching help articles
+    const matchedHelp = helpActions.filter((a) =>
+      a.label.toLowerCase().includes(lower),
+    );
+
+    return [...matchedActions, ...matchedHelp];
+  }, [query, actions, helpActions]);
 
   // Global shortcut listener
   useEffect(() => {
@@ -197,23 +268,20 @@ export default function CommandPalette({
   return (
     <div
       className="fixed inset-0 z-[9000] flex justify-center pt-[10vh]"
-      onClick={close}
-      onKeyDown={(e) => e.key === "Escape" && close()}
-      role="presentation"
     >
       <div
         className="absolute inset-0 bg-surface-overlay/60 backdrop-blur-sm"
         style={{ transition: `opacity var(--duration-short) var(--ease-default)` }}
+        onClick={close}
+        aria-hidden="true"
       />
-      <div
+      <dialog
+        open
         className="relative w-full max-w-lg bg-surface-elevated rounded-xl border border-border-default shadow-[var(--shadow-3)] overflow-hidden"
         style={{
           maxHeight: "400px",
           animation: "paletteIn var(--duration-medium) var(--ease-decelerate)",
         }}
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.key === "Escape" && close()}
-        role="dialog"
       >
         <div className="flex items-center gap-2 px-4 py-3 border-b border-border-subtle">
           <Command size={16} className="text-text-secondary shrink-0" />
@@ -230,7 +298,7 @@ export default function CommandPalette({
         <div ref={listRef} className="overflow-y-auto" style={{ maxHeight: "340px" }}>
           {filtered.length === 0 ? (
             <div className="px-4 py-6 text-center text-xs text-text-secondary">
-              No matching commands
+              {t("commandPalette.noMatching")}
             </div>
           ) : (
             filtered.map((action, idx) => (
@@ -247,7 +315,12 @@ export default function CommandPalette({
                 onMouseEnter={() => setSelectedIndex(idx)}
               >
                 <span className="shrink-0 text-text-secondary">{action.icon}</span>
-                <span className="flex-1">{action.label}</span>
+                <span className="flex-1">
+                  {action.label}
+                  {action.category && (
+                    <span className="ml-2 text-[10px] text-text-disabled">{action.category}</span>
+                  )}
+                </span>
                 {action.shortcut && (
                   <kbd className="text-xs text-text-disabled bg-surface-secondary px-1.5 py-0.5 rounded">
                     {action.shortcut}
@@ -257,7 +330,7 @@ export default function CommandPalette({
             ))
           )}
         </div>
-      </div>
+      </dialog>
     </div>
   );
 }

@@ -103,4 +103,6 @@ Please run `cargo clippy -- -D warnings` and `npm run lint` before submitting.
 
 ## License
 
-Dual-licensed under [MIT](LICENSE-MIT) OR [Apache-2.0](LICENSE-APACHE), at your option.
+Licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-only).
+
+Copyright (c) 2024-2026 Abhishek Lal.

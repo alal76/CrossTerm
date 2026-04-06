@@ -1,32 +1,23 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import clsx from "clsx";
 import {
-  FolderOpen,
-  File,
-  FileText,
-  FileCode,
-  FileImage,
   ChevronRight,
-  RefreshCw,
-  Upload,
   Download,
-  Home,
+  FolderOpen,
   HardDrive,
-  Server,
-  WifiOff,
-  FolderPlus,
-  Pencil,
-  Trash2,
-  X,
+  Home,
   Loader2,
-  Check,
+  RefreshCw,
+  Server,
+  Upload,
+  WifiOff,
 } from "lucide-react";
-
-// ── Types ──
+import { formatFileSize, formatDate } from "@/utils/formatters";
 
 interface SftpFileEntry {
   name: string;
@@ -34,13 +25,10 @@ interface SftpFileEntry {
   size: number;
   modified: string | null;
   permissions: string | null;
-  owner: number | null;
-  group: number | null;
 }
 
 interface TransferProgress {
   transfer_id: string;
-  session_id: string;
   filename: string;
   bytes_transferred: number;
   total_bytes: number;
@@ -49,51 +37,19 @@ interface TransferProgress {
 
 interface TransferComplete {
   transfer_id: string;
-  session_id: string;
-  filename: string;
-  direction: string;
   success: boolean;
-  error: string | null;
 }
 
-// ── Helpers ──
-
-function formatSize(bytes: number): string {
-  if (bytes === 0) return "—";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1073741824) return `${(bytes / 1048576).toFixed(1)} MB`;
-  return `${(bytes / 1073741824).toFixed(1)} GB`;
-}
-
-function formatDate(iso: string | null): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  return d.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+interface SftpBrowserProps {
+  readonly connectionId?: string;
 }
 
 function joinPath(base: string, name: string): string {
-  return base === "/" ? `/${name}` : `${base}/${name}`;
+  if (base === "/") {
+    return `/${name}`;
+  }
+  return `${base.replace(/\/$/, "")}/${name}`;
 }
-
-function getFileIcon(entry: SftpFileEntry): React.ReactNode {
-  if (entry.is_dir) return <FolderOpen size={14} className="text-status-connecting" />;
-  const ext = entry.name.split(".").pop()?.toLowerCase();
-  if (ext && ["png", "jpg", "jpeg", "gif", "svg", "webp"].includes(ext))
-    return <FileImage size={14} className="text-accent-primary" />;
-  if (ext && ["ts", "tsx", "js", "jsx", "py", "rs", "go", "sh"].includes(ext))
-    return <FileCode size={14} className="text-accent-secondary" />;
-  if (ext && ["md", "txt", "log", "json", "yaml", "yml", "toml"].includes(ext))
-    return <FileText size={14} className="text-text-link" />;
-  return <File size={14} className="text-text-secondary" />;
-}
-
-// ── Breadcrumb ──
 
 function Breadcrumb({
   path,
@@ -112,11 +68,11 @@ function Breadcrumb({
       >
         <Home size={12} />
       </button>
-      {parts.map((part, i) => (
-        <div key={`${part}-${i}`} className="flex items-center gap-0.5 shrink-0">
+      {parts.map((part, index) => (
+        <div key={`${part}-${index}`} className="flex items-center gap-0.5 shrink-0">
           <ChevronRight size={10} className="text-text-disabled" />
           <button
-            onClick={() => onNavigate("/" + parts.slice(0, i + 1).join("/"))}
+            onClick={() => onNavigate(`/${parts.slice(0, index + 1).join("/")}`)}
             className="px-1 py-0.5 rounded hover:bg-surface-secondary text-text-secondary hover:text-text-primary transition-colors duration-[var(--duration-micro)] truncate max-w-[100px]"
           >
             {part}
@@ -127,691 +83,475 @@ function Breadcrumb({
   );
 }
 
-// ── Context Menu ──
-
-function ContextMenu({
-  x,
-  y,
-  entry,
-  onRename,
-  onDelete,
-  onDownload,
-  onClose,
-}: {
-  readonly x: number;
-  readonly y: number;
-  readonly entry: SftpFileEntry;
-  readonly onRename: () => void;
-  readonly onDelete: () => void;
-  readonly onDownload: () => void;
-  readonly onClose: () => void;
-}) {
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        onClose();
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [onClose]);
-
-  return (
-    <div
-      ref={menuRef}
-      className="fixed z-[9000] min-w-[140px] bg-surface-elevated border border-border-default rounded-lg shadow-[var(--shadow-3)] py-1"
-      style={{ left: x, top: y }}
-    >
-      {!entry.is_dir && (
-        <button
-          onClick={onDownload}
-          className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-text-primary hover:bg-surface-secondary transition-colors"
-        >
-          <Download size={13} />
-          Download
-        </button>
-      )}
-      <button
-        onClick={onRename}
-        className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-text-primary hover:bg-surface-secondary transition-colors"
-      >
-        <Pencil size={13} />
-        Rename
-      </button>
-      <button
-        onClick={onDelete}
-        className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-status-disconnected hover:bg-status-disconnected/10 transition-colors"
-      >
-        <Trash2 size={13} />
-        Delete
-      </button>
-    </div>
-  );
-}
-
-// ── Transfer Progress Bar ──
-
-function TransferBar({
-  transfers,
-}: {
-  readonly transfers: Map<string, TransferProgress>;
-}) {
-  if (transfers.size === 0) return null;
-
-  return (
-    <div className="px-3 py-2 border-t border-border-subtle bg-surface-secondary space-y-1.5">
-      {Array.from(transfers.values()).map((t) => {
-        const pct = t.total_bytes > 0 ? (t.bytes_transferred / t.total_bytes) * 100 : 0;
-        return (
-          <div key={t.transfer_id} className="flex items-center gap-2">
-            {t.direction === "upload" ? (
-              <Upload size={11} className="text-accent-primary shrink-0" />
-            ) : (
-              <Download size={11} className="text-accent-secondary shrink-0" />
-            )}
-            <span className="text-[10px] text-text-secondary truncate flex-1">
-              {t.filename}
-            </span>
-            <div className="w-20 h-1.5 bg-surface-sunken rounded-full overflow-hidden shrink-0">
-              <div
-                className="h-full bg-accent-primary rounded-full transition-all duration-300"
-                style={{ width: `${pct}%` }}
-              />
-            </div>
-            <span className="text-[10px] text-text-disabled w-8 text-right shrink-0">
-              {Math.round(pct)}%
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// ── Local Pane (Upload Zone) ──
-
-function LocalPane({
-  onUpload,
-  uploadDisabled,
-}: {
-  readonly onUpload: () => void;
-  readonly uploadDisabled: boolean;
-}) {
-  return (
-    <div className="flex-1 flex flex-col border border-border-default rounded-lg overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-2 bg-surface-secondary border-b border-border-subtle shrink-0">
-        <HardDrive size={13} className="text-text-secondary" />
-        <span className="text-xs font-medium text-text-secondary">Local</span>
-      </div>
-      <div className="flex-1 flex flex-col items-center justify-center text-center px-6">
-        <Upload size={28} className="text-text-disabled mb-3" />
-        <p className="text-xs text-text-secondary mb-1">Upload files</p>
-        <p className="text-[10px] text-text-disabled mb-4">
-          Select files from your computer to upload to the remote server.
-        </p>
-        <button
-          onClick={onUpload}
-          disabled={uploadDisabled}
-          className={clsx(
-            "flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors duration-[var(--duration-short)]",
-            uploadDisabled
-              ? "bg-interactive-disabled text-text-disabled cursor-not-allowed"
-              : "bg-interactive-default hover:bg-interactive-hover text-text-primary"
-          )}
-        >
-          <Upload size={13} />
-          Choose Files
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ── Remote File Pane ──
-
-function RemotePane({
-  files,
-  path,
-  loading,
-  error,
-  selected,
-  renaming,
-  renameValue,
-  newFolderMode,
-  newFolderName,
-  onNavigate,
-  onDoubleClick,
-  onSelect,
-  onContextMenu,
-  onRefresh,
-  onNewFolder,
-  onRenameChange,
-  onRenameSubmit,
-  onRenameCancel,
-  onNewFolderChange,
-  onNewFolderSubmit,
-  onNewFolderCancel,
-}: {
-  readonly files: SftpFileEntry[];
-  readonly path: string;
-  readonly loading: boolean;
-  readonly error: string | null;
-  readonly selected: string | null;
-  readonly renaming: string | null;
-  readonly renameValue: string;
-  readonly newFolderMode: boolean;
-  readonly newFolderName: string;
-  readonly onNavigate: (path: string) => void;
-  readonly onDoubleClick: (entry: SftpFileEntry) => void;
-  readonly onSelect: (name: string | null) => void;
-  readonly onContextMenu: (e: React.MouseEvent, entry: SftpFileEntry) => void;
-  readonly onRefresh: () => void;
-  readonly onNewFolder: () => void;
-  readonly onRenameChange: (val: string) => void;
-  readonly onRenameSubmit: () => void;
-  readonly onRenameCancel: () => void;
-  readonly onNewFolderChange: (val: string) => void;
-  readonly onNewFolderSubmit: () => void;
-  readonly onNewFolderCancel: () => void;
-}) {
-  return (
-    <div className="flex-1 flex flex-col border border-border-default rounded-lg overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2 bg-surface-secondary border-b border-border-subtle shrink-0">
-        <Server size={13} className="text-text-secondary" />
-        <span className="text-xs font-medium text-text-secondary">Remote</span>
-        <div className="flex-1" />
-        <button
-          onClick={onNewFolder}
-          className="p-1 rounded hover:bg-surface-elevated text-text-disabled hover:text-text-secondary transition-colors duration-[var(--duration-micro)]"
-          title="New folder"
-        >
-          <FolderPlus size={12} />
-        </button>
-        <button
-          onClick={onRefresh}
-          className={clsx(
-            "p-1 rounded hover:bg-surface-elevated text-text-disabled hover:text-text-secondary transition-colors duration-[var(--duration-micro)]",
-            loading && "animate-spin"
-          )}
-          title="Refresh"
-        >
-          <RefreshCw size={12} />
-        </button>
-      </div>
-
-      {/* Breadcrumb */}
-      <div className="px-2 py-1.5 border-b border-border-subtle bg-surface-primary shrink-0">
-        <Breadcrumb path={path} onNavigate={onNavigate} />
-      </div>
-
-      {/* Error */}
-      {error && (
-        <div className="px-3 py-2 bg-status-disconnected/10 text-[11px] text-status-disconnected border-b border-border-subtle">
-          {error}
-        </div>
-      )}
-
-      {/* Content */}
-      {loading && files.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center">
-          <Loader2 size={20} className="animate-spin text-accent-primary" />
-        </div>
-      ) : (
-        <div className="flex-1 overflow-y-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="text-left text-[10px] text-text-disabled uppercase tracking-wider border-b border-border-subtle">
-                <th className="px-3 py-1.5 font-normal">Name</th>
-                <th className="px-2 py-1.5 font-normal w-20 text-right">Size</th>
-                <th className="px-2 py-1.5 font-normal w-28 text-right">Modified</th>
-                <th className="px-2 py-1.5 font-normal w-20 text-right">Perms</th>
-              </tr>
-            </thead>
-            <tbody>
-              {newFolderMode && (
-                <tr className="bg-interactive-default/10">
-                  <td colSpan={4} className="px-3 py-1.5">
-                    <div className="flex items-center gap-2">
-                      <FolderOpen size={14} className="text-status-connecting" />
-                      <input
-                        autoFocus
-                        value={newFolderName}
-                        onChange={(e) => onNewFolderChange(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") onNewFolderSubmit();
-                          if (e.key === "Escape") onNewFolderCancel();
-                        }}
-                        onBlur={onNewFolderCancel}
-                        placeholder="New folder name"
-                        className="flex-1 bg-transparent text-text-primary outline-none text-xs"
-                      />
-                      <button
-                        onClick={onNewFolderSubmit}
-                        className="p-0.5 text-status-connected hover:text-text-primary"
-                      >
-                        <Check size={12} />
-                      </button>
-                      <button
-                        onClick={onNewFolderCancel}
-                        className="p-0.5 text-text-disabled hover:text-text-primary"
-                      >
-                        <X size={12} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              )}
-              {files.map((entry) => (
-                <tr
-                  key={entry.name}
-                  className={clsx(
-                    "cursor-pointer transition-colors duration-[var(--duration-micro)]",
-                    selected === entry.name
-                      ? "bg-interactive-default/15"
-                      : "hover:bg-surface-elevated/50"
-                  )}
-                  onClick={() => onSelect(entry.name)}
-                  onDoubleClick={() => onDoubleClick(entry)}
-                  onContextMenu={(e) => onContextMenu(e, entry)}
-                >
-                  <td className="px-3 py-1.5">
-                    <div className="flex items-center gap-2">
-                      {getFileIcon(entry)}
-                      {renaming === entry.name ? (
-                        <input
-                          autoFocus
-                          value={renameValue}
-                          onChange={(e) => onRenameChange(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") onRenameSubmit();
-                            if (e.key === "Escape") onRenameCancel();
-                          }}
-                          onBlur={onRenameCancel}
-                          className="flex-1 bg-transparent text-text-primary outline-none border-b border-border-focus text-xs"
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                      ) : (
-                        <span className="text-text-primary truncate">{entry.name}</span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-2 py-1.5 text-right text-text-secondary">
-                    {entry.is_dir ? "—" : formatSize(entry.size)}
-                  </td>
-                  <td className="px-2 py-1.5 text-right text-text-secondary">
-                    {formatDate(entry.modified)}
-                  </td>
-                  <td className="px-2 py-1.5 text-right text-text-disabled font-mono text-[10px]">
-                    {entry.permissions ?? "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!loading && files.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-8 text-center">
-              <FolderOpen size={24} className="text-text-disabled mb-2" />
-              <p className="text-xs text-text-secondary">Empty directory</p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Footer */}
-      <div className="px-3 py-1.5 border-t border-border-subtle bg-surface-secondary text-[10px] text-text-disabled shrink-0">
-        {loading ? "Loading…" : `${files.length} items`}
-        {selected && ` · ${selected}`}
-      </div>
-    </div>
-  );
-}
-
-// ── Not Connected Pane ──
-
-function NotConnectedPane() {
-  return (
-    <div className="flex-1 flex flex-col border border-border-default rounded-lg overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-2 bg-surface-secondary border-b border-border-subtle shrink-0">
-        <Server size={13} className="text-text-secondary" />
-        <span className="text-xs font-medium text-text-secondary">Remote</span>
-      </div>
-      <div className="flex-1 flex flex-col items-center justify-center text-center px-6">
-        <WifiOff size={28} className="text-text-disabled mb-3" />
-        <p className="text-xs text-text-secondary mb-1">Not connected</p>
-        <p className="text-[10px] text-text-disabled">
-          Connect to a remote server to browse files.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// ── Main Component ──
-
-interface SftpBrowserProps {
-  readonly connectionId?: string;
-}
-
 export default function SftpBrowser({ connectionId }: SftpBrowserProps) {
+  const { t } = useTranslation();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [remotePath, setRemotePath] = useState("/");
-  const [remoteFiles, setRemoteFiles] = useState<SftpFileEntry[]>([]);
+  const [entries, setEntries] = useState<SftpFileEntry[]>([]);
+  const [selectedName, setSelectedName] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [contextMenu, setContextMenu] = useState<{
-    x: number;
-    y: number;
-    entry: SftpFileEntry;
-  } | null>(null);
-  const [transfers, setTransfers] = useState<Map<string, TransferProgress>>(
-    new Map()
-  );
-  const [renaming, setRenaming] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState("");
-  const [newFolderMode, setNewFolderMode] = useState(false);
-  const [newFolderName, setNewFolderName] = useState("");
-
-  const connected = !!sessionId;
-
-  // ── Open SFTP session ──
+  const [transfers, setTransfers] = useState<Map<string, TransferProgress>>(new Map());
+  const [dragActive, setDragActive] = useState(false);
+  const [localDropActive, setLocalDropActive] = useState(false);
+  const [remoteDropActive, setRemoteDropActive] = useState(false);
 
   useEffect(() => {
-    if (!connectionId) return;
-    let cancelled = false;
+    if (!connectionId) {
+      setSessionId(null);
+      return;
+    }
 
+    let cancelled = false;
     async function openSession() {
+      setLoading(true);
+      setError(null);
       try {
-        setLoading(true);
-        setError(null);
         const id = await invoke<string>("sftp_open", { connectionId });
         if (!cancelled) {
           setSessionId(id);
         }
-      } catch (e) {
-        if (!cancelled) setError(String(e));
+      } catch (nextError) {
+        if (!cancelled) {
+          setError(String(nextError));
+        }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     }
 
-    openSession();
+    void openSession();
     return () => {
       cancelled = true;
     };
   }, [connectionId]);
 
-  // ── Close SFTP session on unmount ──
-
   useEffect(() => {
     const id = sessionId;
     return () => {
       if (id) {
-        invoke("sftp_close", { sessionId: id }).catch(() => {});
+        void invoke("sftp_close", { sessionId: id }).catch(() => {});
       }
     };
   }, [sessionId]);
 
-  // ── Fetch directory listing ──
-
   const fetchDirectory = useCallback(async () => {
-    if (!sessionId) return;
+    if (!sessionId) {
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
-      const files = await invoke<SftpFileEntry[]>("sftp_list", {
+      const nextEntries = await invoke<SftpFileEntry[]>("sftp_list", {
         sessionId,
         path: remotePath,
       });
-      setRemoteFiles(files);
-      setSelected(null);
-    } catch (e) {
-      setError(String(e));
-      setRemoteFiles([]);
+      setEntries(nextEntries);
+      setSelectedName(null);
+    } catch (nextError) {
+      setEntries([]);
+      setError(String(nextError));
     } finally {
       setLoading(false);
     }
-  }, [sessionId, remotePath]);
+  }, [remotePath, sessionId]);
 
   useEffect(() => {
-    fetchDirectory();
+    void fetchDirectory();
   }, [fetchDirectory]);
-
-  // ── Transfer event listeners ──
 
   useEffect(() => {
     const unlisteners: UnlistenFn[] = [];
 
-    listen<TransferProgress>("sftp:transfer_progress", (event) => {
-      setTransfers((prev) => {
-        const next = new Map(prev);
+    void listen<TransferProgress>("sftp:transfer_progress", (event) => {
+      setTransfers((previous) => {
+        const next = new Map(previous);
         next.set(event.payload.transfer_id, event.payload);
         return next;
       });
-    }).then((fn) => unlisteners.push(fn));
+    }).then((unlisten) => unlisteners.push(unlisten));
 
-    listen<TransferComplete>("sftp:transfer_complete", (event) => {
-      setTransfers((prev) => {
-        const next = new Map(prev);
+    void listen<TransferComplete>("sftp:transfer_complete", (event) => {
+      setTransfers((previous) => {
+        const next = new Map(previous);
         next.delete(event.payload.transfer_id);
         return next;
       });
       if (event.payload.success) {
-        fetchDirectory();
+        void fetchDirectory();
       }
-    }).then((fn) => unlisteners.push(fn));
+    }).then((unlisten) => unlisteners.push(unlisten));
 
     return () => {
-      unlisteners.forEach((fn) => fn());
+      for (const unlisten of unlisteners) {
+        unlisten();
+      }
     };
   }, [fetchDirectory]);
 
-  // ── Navigation ──
+  const selectedEntry = useMemo(
+    () => entries.find((entry) => entry.name === selectedName) ?? null,
+    [entries, selectedName],
+  );
 
-  function navigateTo(path: string) {
-    setRemotePath(path || "/");
-    setContextMenu(null);
-  }
-
-  function handleDoubleClick(entry: SftpFileEntry) {
-    if (entry.is_dir) {
-      navigateTo(joinPath(remotePath, entry.name));
+  const handleUpload = useCallback(async () => {
+    if (!sessionId) {
+      return;
     }
-  }
-
-  // ── Context menu handlers ──
-
-  function handleContextMenu(e: React.MouseEvent, entry: SftpFileEntry) {
-    e.preventDefault();
-    setContextMenu({ x: e.clientX, y: e.clientY, entry });
-    setSelected(entry.name);
-  }
-
-  async function handleDelete(entry: SftpFileEntry) {
-    const fullPath = joinPath(remotePath, entry.name);
     try {
-      if (entry.is_dir) {
-        await invoke("sftp_rmdir", { sessionId, path: fullPath });
-      } else {
-        await invoke("sftp_delete", { sessionId, path: fullPath });
+      const selected = await open({ directory: false, multiple: false });
+      if (!selected || Array.isArray(selected)) {
+        return;
       }
-      await fetchDirectory();
-    } catch (e) {
-      setError(String(e));
-    }
-    setContextMenu(null);
-  }
-
-  function startRename(entry: SftpFileEntry) {
-    setRenaming(entry.name);
-    setRenameValue(entry.name);
-    setContextMenu(null);
-  }
-
-  async function handleRenameSubmit() {
-    if (!renaming || !renameValue.trim() || renameValue === renaming) {
-      setRenaming(null);
-      return;
-    }
-    const oldPath = joinPath(remotePath, renaming);
-    const newPath = joinPath(remotePath, renameValue.trim());
-    try {
-      await invoke("sftp_rename", { sessionId, oldPath, newPath });
-      await fetchDirectory();
-    } catch (e) {
-      setError(String(e));
-    }
-    setRenaming(null);
-  }
-
-  async function handleNewFolderSubmit() {
-    if (!newFolderName.trim()) {
-      setNewFolderMode(false);
-      return;
-    }
-    const path = joinPath(remotePath, newFolderName.trim());
-    try {
-      await invoke("sftp_mkdir", { sessionId, path });
-      await fetchDirectory();
-    } catch (e) {
-      setError(String(e));
-    }
-    setNewFolderMode(false);
-    setNewFolderName("");
-  }
-
-  // ── Upload / Download ──
-
-  async function handleUpload() {
-    if (!sessionId) return;
-    try {
-      const result = await open({ multiple: false, directory: false });
-      if (!result) return;
-      const localPath = result;
-      const filename =
-        localPath.split("/").pop() ?? localPath.split("\\").pop() ?? localPath;
-      const remote = joinPath(remotePath, filename);
+      const fileName = selected.split("/").pop() ?? selected.split("\\").pop() ?? selected;
       await invoke("sftp_upload", {
         sessionId,
-        localPath,
-        remotePath: remote,
+        localPath: selected,
+        remotePath: joinPath(remotePath, fileName),
       });
-    } catch (e) {
-      setError(String(e));
+    } catch (nextError) {
+      setError(String(nextError));
     }
-  }
+  }, [remotePath, sessionId]);
 
-  async function handleDownload(entry: SftpFileEntry) {
-    if (!sessionId) return;
+  const handleDownload = useCallback(async () => {
+    if (!sessionId || !selectedEntry || selectedEntry.is_dir) {
+      return;
+    }
     try {
-      const localPath = await save({ defaultPath: entry.name });
-      if (!localPath) return;
-      const remote = joinPath(remotePath, entry.name);
+      const destination = await save({ defaultPath: selectedEntry.name });
+      if (!destination) {
+        return;
+      }
       await invoke("sftp_download", {
         sessionId,
-        remotePath: remote,
-        localPath,
+        remotePath: joinPath(remotePath, selectedEntry.name),
+        localPath: destination,
       });
-    } catch (e) {
-      setError(String(e));
+    } catch (nextError) {
+      setError(String(nextError));
     }
-    setContextMenu(null);
+  }, [remotePath, selectedEntry, sessionId]);
+
+  const handleExternalDrop = useCallback(
+    async (event: React.DragEvent<HTMLElement>) => {
+      event.preventDefault();
+      setDragActive(false);
+
+      if (!sessionId) {
+        return;
+      }
+
+      const droppedFiles = Array.from(event.dataTransfer.files);
+      for (const droppedFile of droppedFiles) {
+        const localPath = (droppedFile as File & { path?: string }).path;
+        if (!localPath) {
+          continue;
+        }
+        try {
+          await invoke("sftp_upload", {
+            sessionId,
+            localPath,
+            remotePath: joinPath(remotePath, droppedFile.name),
+          });
+        } catch (nextError) {
+          setError(String(nextError));
+        }
+      }
+    },
+    [remotePath, sessionId],
+  );
+
+  // ── Pane-to-pane drag handlers ──
+
+  const handlePaneDragStart = useCallback(
+    (e: React.DragEvent<HTMLTableRowElement>, fileName: string, source: "local" | "remote") => {
+      e.dataTransfer.setData("application/x-sftp-file", JSON.stringify({ fileName, source, remotePath }));
+      e.dataTransfer.effectAllowed = "copyMove";
+    },
+    [remotePath],
+  );
+
+  const handleLocalPaneDrop = useCallback(
+    async (e: React.DragEvent<HTMLElement>) => {
+      e.preventDefault();
+      setLocalDropActive(false);
+      const raw = e.dataTransfer.getData("application/x-sftp-file");
+      if (!raw || !sessionId) return;
+      try {
+        const { fileName, source, remotePath: srcPath } = JSON.parse(raw) as {
+          fileName: string;
+          source: string;
+          remotePath: string;
+        };
+        if (source === "remote") {
+          // Download remote file to a local temp path via save dialog
+          const { save: saveDialog } = await import("@tauri-apps/plugin-dialog");
+          const destination = await saveDialog({ defaultPath: fileName });
+          if (!destination) return;
+          await invoke("sftp_download", {
+            sessionId,
+            remotePath: joinPath(srcPath, fileName),
+            localPath: destination,
+          });
+        }
+      } catch (nextError) {
+        setError(String(nextError));
+      }
+    },
+    [sessionId],
+  );
+
+  const handleRemotePaneDrop = useCallback(
+    async (e: React.DragEvent<HTMLElement>) => {
+      e.preventDefault();
+      setRemoteDropActive(false);
+      const raw = e.dataTransfer.getData("application/x-sftp-file");
+      if (!raw || !sessionId) return;
+      try {
+        const { fileName, source } = JSON.parse(raw) as {
+          fileName: string;
+          source: string;
+        };
+        if (source === "local") {
+          // Upload local file: prompt user for the local path via dialog
+          const { open: openDialog } = await import("@tauri-apps/plugin-dialog");
+          const selected = await openDialog({ directory: false, multiple: false, defaultPath: fileName });
+          if (!selected || Array.isArray(selected)) return;
+          const uploadName = selected.split("/").pop() ?? selected.split("\\").pop() ?? selected;
+          await invoke("sftp_upload", {
+            sessionId,
+            localPath: selected,
+            remotePath: joinPath(remotePath, uploadName),
+          });
+        }
+      } catch (nextError) {
+        setError(String(nextError));
+      }
+    },
+    [remotePath, sessionId],
+  );
+
+  if (!connectionId) {
+    return (
+      <section
+        aria-label="File drop zone"
+        className={clsx(
+          "relative flex-1 flex flex-col border border-border-default rounded-lg overflow-hidden",
+          dragActive ? "ring-2 ring-accent-primary ring-inset" : "",
+        )}
+        onDragOver={(event) => {
+          if (!sessionId) {
+            return;
+          }
+          event.preventDefault();
+          setDragActive(true);
+        }}
+        onDragLeave={() => setDragActive(false)}
+        onDrop={(event) => {
+          void handleExternalDrop(event);
+        }}
+      >
+        {dragActive ? (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-surface-primary/80 pointer-events-none">
+            <div className="flex flex-col items-center gap-2 text-text-secondary">
+              <Upload size={32} />
+              <span className="text-sm font-medium">{t("sftp.dropFilesHere")}</span>
+            </div>
+          </div>
+        ) : null}
+        <div className="flex items-center gap-2 px-3 py-2 bg-surface-secondary border-b border-border-subtle shrink-0">
+          <Server size={13} className="text-text-secondary" />
+          <span className="text-xs font-medium text-text-secondary">{t("sftp.remote")}</span>
+        </div>
+        <div className="flex-1 flex flex-col items-center justify-center text-center px-6">
+          <WifiOff size={28} className="text-text-disabled mb-3" />
+          <p className="text-xs text-text-secondary mb-1">{t("sftp.notConnected")}</p>
+          <p className="text-[10px] text-text-disabled">{t("sftp.connectToBrowse")}</p>
+        </div>
+      </section>
+    );
   }
 
   return (
-    <div className="flex flex-col h-full bg-surface-primary">
-      {/* Toolbar */}
-      <div className="flex items-center justify-center gap-2 px-4 py-2 border-b border-border-subtle shrink-0">
-        <button
-          onClick={handleUpload}
-          disabled={!connected}
-          className={clsx(
-            "flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors duration-[var(--duration-short)]",
-            connected
-              ? "bg-interactive-default hover:bg-interactive-hover text-text-primary"
-              : "bg-interactive-disabled text-text-disabled cursor-not-allowed"
-          )}
-        >
-          <Upload size={13} />
-          Upload
-        </button>
-        <button
-          onClick={() => {
-            const entry = remoteFiles.find((f) => f.name === selected);
-            if (entry && !entry.is_dir) handleDownload(entry);
-          }}
-          disabled={
-            !connected ||
-            !selected ||
-            remoteFiles.find((f) => f.name === selected)?.is_dir !== false
-          }
-          className={clsx(
-            "flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors duration-[var(--duration-short)]",
-            connected &&
-              selected &&
-              remoteFiles.find((f) => f.name === selected)?.is_dir === false
-              ? "bg-interactive-default hover:bg-interactive-hover text-text-primary"
-              : "bg-interactive-disabled text-text-disabled cursor-not-allowed"
-          )}
-        >
-          <Download size={13} />
-          Download
-        </button>
-      </div>
-
-      {/* Dual panes */}
-      <div className="flex-1 flex gap-2 p-2 min-h-0">
-        <LocalPane onUpload={handleUpload} uploadDisabled={!connected} />
-        {connected ? (
-          <RemotePane
-            files={remoteFiles}
-            path={remotePath}
-            loading={loading}
-            error={error}
-            selected={selected}
-            renaming={renaming}
-            renameValue={renameValue}
-            newFolderMode={newFolderMode}
-            newFolderName={newFolderName}
-            onNavigate={navigateTo}
-            onDoubleClick={handleDoubleClick}
-            onSelect={setSelected}
-            onContextMenu={handleContextMenu}
-            onRefresh={fetchDirectory}
-            onNewFolder={() => setNewFolderMode(true)}
-            onRenameChange={setRenameValue}
-            onRenameSubmit={handleRenameSubmit}
-            onRenameCancel={() => setRenaming(null)}
-            onNewFolderChange={setNewFolderName}
-            onNewFolderSubmit={handleNewFolderSubmit}
-            onNewFolderCancel={() => {
-              setNewFolderMode(false);
-              setNewFolderName("");
-            }}
-          />
-        ) : (
-          <NotConnectedPane />
+    <div className="flex h-full gap-4 bg-surface-primary" data-help-article="sftp-file-transfer">
+      <section
+        aria-label="Local file panel"
+        className={clsx(
+          "w-56 shrink-0 flex flex-col border rounded-lg overflow-hidden transition-colors",
+          localDropActive
+            ? "border-dashed border-2 border-accent-primary bg-accent-primary/5"
+            : "border-border-default",
         )}
-      </div>
+        onDragOver={(e) => {
+          if (e.dataTransfer.types.includes("application/x-sftp-file")) {
+            e.preventDefault();
+            setLocalDropActive(true);
+          }
+        }}
+        onDragLeave={() => setLocalDropActive(false)}
+        onDrop={(e) => { void handleLocalPaneDrop(e); }}
+      >
+        <div className="flex items-center gap-2 px-3 py-2 bg-surface-secondary border-b border-border-subtle shrink-0">
+          <HardDrive size={13} className="text-text-secondary" />
+          <span className="text-xs font-medium text-text-secondary">{t("sftp.local")}</span>
+        </div>
+        <div className="flex-1 flex flex-col items-center justify-center text-center px-6">
+          <Upload size={28} className="text-text-disabled mb-3" />
+          <p className="text-xs text-text-secondary mb-1">{t("sftp.uploadFiles")}</p>
+          <p className="text-[10px] text-text-disabled mb-4">{t("sftp.chooseFilesDescription")}</p>
+          <button
+            onClick={() => {
+              void handleUpload();
+            }}
+            disabled={!sessionId}
+            className={clsx(
+              "flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors duration-[var(--duration-short)]",
+              sessionId
+                ? "bg-interactive-default hover:bg-interactive-hover text-text-primary"
+                : "bg-interactive-disabled text-text-disabled cursor-not-allowed",
+            )}
+          >
+            <Upload size={13} />
+            {t("sftp.chooseFiles")}
+          </button>
+        </div>
+      </section>
 
-      {/* Transfer progress */}
-      <TransferBar transfers={transfers} />
+      <section
+        aria-label="Remote file panel"
+        className={clsx(
+          "flex-1 flex flex-col border rounded-lg overflow-hidden transition-colors",
+          remoteDropActive
+            ? "border-dashed border-2 border-accent-primary bg-accent-primary/5"
+            : "border-border-default",
+        )}
+        onDragOver={(e) => {
+          if (e.dataTransfer.types.includes("application/x-sftp-file")) {
+            e.preventDefault();
+            setRemoteDropActive(true);
+          }
+        }}
+        onDragLeave={() => setRemoteDropActive(false)}
+        onDrop={(e) => { void handleRemotePaneDrop(e); }}
+      >
+        <div className="flex items-center gap-2 px-3 py-2 bg-surface-secondary border-b border-border-subtle shrink-0">
+          <Server size={13} className="text-text-secondary" />
+          <span className="text-xs font-medium text-text-secondary">{t("sftp.remote")}</span>
+          <div className="flex-1" />
+          <button
+            onClick={() => {
+              void handleDownload();
+            }}
+            disabled={!selectedEntry || selectedEntry.is_dir}
+            className="p-1 rounded hover:bg-surface-elevated text-text-disabled hover:text-text-secondary transition-colors duration-[var(--duration-micro)] disabled:opacity-50 disabled:cursor-not-allowed"
+            title={t("sftp.download")}
+          >
+            <Download size={12} />
+          </button>
+          <button
+            onClick={() => {
+              void fetchDirectory();
+            }}
+            className={clsx(
+              "p-1 rounded hover:bg-surface-elevated text-text-disabled hover:text-text-secondary transition-colors duration-[var(--duration-micro)]",
+              loading ? "animate-spin" : "",
+            )}
+            title={t("actions.refresh")}
+          >
+            <RefreshCw size={12} />
+          </button>
+        </div>
 
-      {/* Context Menu */}
-      {contextMenu && (
-        <ContextMenu
-          x={contextMenu.x}
-          y={contextMenu.y}
-          entry={contextMenu.entry}
-          onRename={() => startRename(contextMenu.entry)}
-          onDelete={() => handleDelete(contextMenu.entry)}
-          onDownload={() => handleDownload(contextMenu.entry)}
-          onClose={() => setContextMenu(null)}
-        />
-      )}
+        <div className="px-2 py-1.5 border-b border-border-subtle bg-surface-primary shrink-0">
+          <Breadcrumb path={remotePath} onNavigate={setRemotePath} />
+        </div>
+
+        {error ? (
+          <div className="px-3 py-2 bg-status-disconnected/10 text-[11px] text-status-disconnected border-b border-border-subtle">
+            {error}
+          </div>
+        ) : null}
+
+        <div className="flex-1 overflow-y-auto">
+          {loading && entries.length === 0 ? (
+            <div className="flex h-full items-center justify-center">
+              <Loader2 size={20} className="animate-spin text-accent-primary" />
+            </div>
+          ) : (
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-[10px] text-text-disabled uppercase tracking-wider border-b border-border-subtle">
+                  <th className="px-3 py-1.5 font-normal">{t("sftp.name")}</th>
+                  <th className="px-2 py-1.5 font-normal w-24 text-right">{t("sftp.size")}</th>
+                  <th className="px-2 py-1.5 font-normal w-44 text-right">{t("sftp.modified")}</th>
+                  <th className="px-2 py-1.5 font-normal w-24 text-right">{t("sftp.permissions")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {entries.map((entry) => (
+                  <tr
+                    key={entry.name}
+                    className={clsx(
+                      "cursor-pointer transition-colors duration-[var(--duration-micro)]",
+                      selectedName === entry.name ? "bg-interactive-default/15" : "hover:bg-surface-elevated/50",
+                    )}
+                    draggable
+                    onDragStart={(e) => handlePaneDragStart(e, entry.name, "remote")}
+                    onClick={() => setSelectedName(entry.name)}
+                    onDoubleClick={() => {
+                      if (entry.is_dir) {
+                        setRemotePath(joinPath(remotePath, entry.name));
+                      }
+                    }}
+                  >
+                    <td className="px-3 py-1.5">
+                      <div className="flex items-center gap-2">
+                        <FolderOpen size={14} className={entry.is_dir ? "text-status-connecting" : "text-text-secondary opacity-0"} />
+                        <span className="text-text-primary truncate">{entry.name}</span>
+                      </div>
+                    </td>
+                    <td className="px-2 py-1.5 text-right text-text-secondary">{entry.is_dir ? "-" : formatFileSize(entry.size)}</td>
+                    <td className="px-2 py-1.5 text-right text-text-secondary">{formatDate(entry.modified)}</td>
+                    <td className="px-2 py-1.5 text-right text-text-disabled font-mono text-[10px]">{entry.permissions ?? "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {!loading && entries.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+              <FolderOpen size={24} className="text-text-disabled mb-2" />
+              <p className="text-xs text-text-secondary">{t("sftp.emptyDirectory")}</p>
+            </div>
+          ) : null}
+        </div>
+
+        {transfers.size > 0 ? (
+          <div className="px-3 py-2 border-t border-border-subtle bg-surface-secondary space-y-1.5">
+            {Array.from(transfers.values()).map((transfer) => {
+              const percent = transfer.total_bytes > 0 ? (transfer.bytes_transferred / transfer.total_bytes) * 100 : 0;
+              return (
+                <div key={transfer.transfer_id} className="flex items-center gap-2">
+                  {transfer.direction === "upload" ? (
+                    <Upload size={11} className="text-accent-primary shrink-0" />
+                  ) : (
+                    <Download size={11} className="text-accent-secondary shrink-0" />
+                  )}
+                  <span className="text-[10px] text-text-secondary truncate flex-1">{transfer.filename}</span>
+                  <div className="w-20 h-1.5 bg-surface-sunken rounded-full overflow-hidden shrink-0">
+                    <div className="h-full bg-accent-primary rounded-full transition-all duration-300" style={{ width: `${percent}%` }} />
+                  </div>
+                  <span className="text-[10px] text-text-disabled w-8 text-right shrink-0">{Math.round(percent)}%</span>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
+      </section>
     </div>
   );
 }

@@ -60,6 +60,8 @@ CrossTerm is a cross-platform terminal emulator and remote access suite built wi
 - Frontend: Vitest for stores. ≥70% coverage on stores/utilities.
 - E2E: Playwright. 20 critical user journeys.
 - Security: `cargo audit`, `npm audit`, `cargo clippy -D warnings` all clean.
+- Validate tests against specs and written code before merging. In case of drift, resolve the drift by validating against the spec.
+- Do not assume signatures , API's or other details that are not explicitly defined in the spec. If the spec is missing details, add them to the spec and validate against those.
 
 ## File Conventions
 

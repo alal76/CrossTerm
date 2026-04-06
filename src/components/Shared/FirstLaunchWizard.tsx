@@ -11,6 +11,7 @@ import {
   Monitor,
   Check,
   ChevronRight,
+  ChevronDown,
   AlertCircle,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -64,6 +65,7 @@ export default function FirstLaunchWizard() {
     setLoading(true);
     try {
       const profileId = await invoke<string>("profile_create", { name });
+      await invoke("profile_switch", { id: profileId }).catch(() => {});
       addProfile({ id: profileId, name, authMethod: "password", createdAt: new Date().toISOString() });
       setActiveProfile(profileId);
     } catch {
@@ -82,7 +84,8 @@ export default function FirstLaunchWizard() {
     if (password.length < 8) { setError(t("wizard.passwordTooShort")); return false; }
     setLoading(true);
     try {
-      await invoke("vault_create", { masterPassword: password });
+      const profileId = useAppStore.getState().activeProfileId ?? "default";
+      await invoke("vault_create", { profileId, masterPassword: password });
     } catch {
       // Backend may not be ready; proceed anyway
     } finally {
@@ -154,6 +157,10 @@ export default function FirstLaunchWizard() {
                   {t("wizard.profileDescription")}
                 </p>
               </div>
+              <LearnMore
+                summary={t("wizard.learnMoreProfile")}
+                content={t("wizard.learnMoreProfileContent")}
+              />
               <div className="flex flex-col gap-2">
                 <label className="text-xs text-text-secondary" htmlFor="profile-name">
                   {t("wizard.profileName")}
@@ -193,6 +200,10 @@ export default function FirstLaunchWizard() {
                   {t("wizard.passwordDescription")}
                 </p>
               </div>
+              <LearnMore
+                summary={t("wizard.learnMoreVault")}
+                content={t("wizard.learnMoreVaultContent")}
+              />
               <div className="flex flex-col gap-4">
                 <div className="flex flex-col gap-2">
                   <label className="text-xs text-text-secondary" htmlFor="master-password">
@@ -244,6 +255,10 @@ export default function FirstLaunchWizard() {
                   {t("wizard.themeDescription")}
                 </p>
               </div>
+              <LearnMore
+                summary={t("wizard.learnMoreTheme")}
+                content={t("wizard.learnMoreThemeContent")}
+              />
               <div className="flex gap-3 justify-center">
                 {([
                   { value: ThemeVariant.Dark, icon: <Moon size={20} />, label: t("themes.dark") },
@@ -278,6 +293,32 @@ export default function FirstLaunchWizard() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function LearnMore({ summary, content }: { readonly summary: string; readonly content: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-lg border border-border-subtle overflow-hidden">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-2 w-full px-3 py-2 text-xs text-text-secondary hover:text-text-primary hover:bg-surface-secondary transition-colors text-left"
+      >
+        <ChevronDown
+          size={12}
+          className={clsx(
+            "shrink-0 transition-transform duration-[var(--duration-short)]",
+            !open && "-rotate-90"
+          )}
+        />
+        {summary}
+      </button>
+      {open && (
+        <div className="px-3 pb-3 text-xs text-text-secondary leading-relaxed animate-fade-in">
+          {content}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,0 +1,65 @@
+{
+  "app": {
+    "name": "CrossTerm",
+    "tagline": "ターミナルエミュレータ＆リモートアクセススイート"
+  },
+  "sidebar": {
+    "sessions": "セッション",
+    "snippets": "スニペット",
+    "tunnels": "トンネル",
+    "credentials": "認証情報マネージャー"
+  },
+  "tabs": {
+    "newTab": "新しいタブ",
+    "closeTab": "タブを閉じる",
+    "closeOthers": "他を閉じる",
+    "closeAll": "すべて閉じる",
+    "pinTab": "タブをピン留め",
+    "unpinTab": "ピン留めを解除"
+  },
+  "emptyCanvas": {
+    "title": "CrossTermへようこそ",
+    "hint": "{{shortcut}}を押して新しいセッションを開きます",
+    "shortcut": "⌘T"
+  },
+  "status": {
+    "connected": "接続済み",
+    "disconnected": "切断",
+    "connecting": "接続中...",
+    "idle": "アイドル"
+  },
+  "themes": {
+    "title": "テーマ",
+    "dark": "ダーク",
+    "light": "ライト",
+    "system": "システム"
+  },
+  "actions": {
+    "save": "保存",
+    "cancel": "キャンセル",
+    "close": "閉じる",
+    "create": "作成",
+    "delete": "削除",
+    "confirm": "確認",
+    "copy": "コピー",
+    "paste": "貼り付け",
+    "refresh": "更新"
+  },
+  "settings": {
+    "title": "設定",
+    "general": "一般",
+    "appearance": "外観"
+  },
+  "vault": {
+    "title": "認証情報ボールト",
+    "locked": "ロック中",
+    "unlocked": "アンロック済み",
+    "unlock": "アンロック",
+    "lock": "ロック"
+  },
+  "terminal": {
+    "starting": "ターミナルを起動中…",
+    "failedCreate": "ターミナルの作成に失敗しました",
+    "retry": "再試行"
+  }
+}

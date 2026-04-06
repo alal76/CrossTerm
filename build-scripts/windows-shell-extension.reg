@@ -1,0 +1,8 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_CLASSES_ROOT\Directory\Background\shell\CrossTerm]
+@="Open CrossTerm Here"
+"Icon"="\"%LOCALAPPDATA%\\CrossTerm\\CrossTerm.exe\""
+
+[HKEY_CLASSES_ROOT\Directory\Background\shell\CrossTerm\command]
+@="\"%LOCALAPPDATA%\\CrossTerm\\CrossTerm.exe\" --working-dir \"%V\""

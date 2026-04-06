@@ -1,0 +1,92 @@
+{
+  "app": {
+    "name": "CrossTerm",
+    "tagline": "Emulador de terminal y suite de acceso remoto"
+  },
+  "sidebar": {
+    "sessions": "Sesiones",
+    "snippets": "Fragmentos",
+    "tunnels": "Túneles",
+    "credentials": "Gestor de credenciales",
+    "collapse": "Contraer barra lateral",
+    "expand": "Expandir barra lateral"
+  },
+  "tabs": {
+    "newTab": "Nueva pestaña",
+    "closeTab": "Cerrar pestaña",
+    "closeOthers": "Cerrar otras",
+    "closeAll": "Cerrar todas",
+    "pinTab": "Fijar pestaña",
+    "unpinTab": "Desfijar pestaña",
+    "duplicateTab": "Duplicar pestaña",
+    "splitRight": "Dividir a la derecha",
+    "splitDown": "Dividir abajo"
+  },
+  "titleBar": {
+    "profile": "Perfil",
+    "switchProfile": "Cambiar perfil",
+    "settings": "Configuración",
+    "search": "Buscar..."
+  },
+  "emptyCanvas": {
+    "title": "Bienvenido a CrossTerm",
+    "hint": "Presiona {{shortcut}} para abrir una nueva sesión",
+    "shortcut": "⌘T"
+  },
+  "status": {
+    "connected": "Conectado",
+    "disconnected": "Desconectado",
+    "connecting": "Conectando...",
+    "idle": "Inactivo"
+  },
+  "themes": {
+    "title": "Tema",
+    "dark": "Oscuro",
+    "light": "Claro",
+    "system": "Sistema"
+  },
+  "actions": {
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "close": "Cerrar",
+    "create": "Crear",
+    "delete": "Eliminar",
+    "confirm": "Confirmar",
+    "copy": "Copiar",
+    "paste": "Pegar",
+    "selectAll": "Seleccionar todo",
+    "undo": "Deshacer",
+    "redo": "Rehacer",
+    "refresh": "Actualizar"
+  },
+  "sessions": {
+    "title": "Sesiones",
+    "newSession": "Nueva sesión",
+    "favorites": "Favoritos",
+    "recent": "Recientes",
+    "connect": "Conectar",
+    "disconnect": "Desconectar",
+    "edit": "Editar",
+    "delete": "Eliminar"
+  },
+  "vault": {
+    "title": "Bóveda de credenciales",
+    "locked": "Bóveda bloqueada",
+    "unlocked": "Bóveda desbloqueada",
+    "unlock": "Desbloquear",
+    "lock": "Bloquear"
+  },
+  "terminal": {
+    "starting": "Iniciando terminal…",
+    "failedCreate": "Error al crear el terminal",
+    "retry": "Reintentar",
+    "clearTerminal": "Limpiar terminal",
+    "search": "Buscar"
+  },
+  "settings": {
+    "title": "Configuración",
+    "general": "General",
+    "appearance": "Apariencia",
+    "security": "Seguridad"
+  }
+}

@@ -1,6 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
+import { readTextFile } from "@tauri-apps/plugin-fs";
 import clsx from "clsx";
 import {
   Settings,
@@ -12,48 +14,76 @@ import {
   Moon,
   Monitor,
   Check,
+  Upload,
 } from "lucide-react";
 import { useAppStore } from "@/stores/appStore";
 import { ThemeVariant } from "@/types";
+import type { BellStyle, CursorStyle, ThemeFile, ThemeTokens } from "@/types";
+import FieldHelp from "@/components/Help/FieldHelp";
 
-// ── Types ──
+import darkTheme from "@/themes/dark.json";
+import lightTheme from "@/themes/light.json";
+import solarizedDarkTheme from "@/themes/solarized-dark.json";
+import solarizedLightTheme from "@/themes/solarized-light.json";
+import draculaTheme from "@/themes/dracula.json";
+import nordTheme from "@/themes/nord.json";
+import monokaiProTheme from "@/themes/monokai-pro.json";
+import highContrastTheme from "@/themes/high-contrast.json";
 
-interface SettingsData {
-  general: {
-    defaultProfile: string;
-    language: string;
-  };
-  appearance: {
-    theme: ThemeVariant;
-    fontSize: number;
-    fontFamily: string;
-  };
-  terminal: {
-    scrollbackLines: number;
-    cursorStyle: "block" | "underline" | "bar";
-    cursorBlink: boolean;
-    bellMode: "none" | "visual" | "sound" | "both";
-  };
-  ssh: {
-    defaultPort: number;
-    keepAliveInterval: number;
-  };
-  security: {
-    vaultAutoLockMinutes: number;
-    clipboardAutoClearSeconds: number;
-    pasteConfirmationThreshold: number;
-  };
-}
-
-const DEFAULT_SETTINGS: SettingsData = {
-  general: { defaultProfile: "default", language: "en" },
-  appearance: { theme: ThemeVariant.Dark, fontSize: 13, fontFamily: "Inter" },
-  terminal: { scrollbackLines: 10000, cursorStyle: "block", cursorBlink: true, bellMode: "none" },
-  ssh: { defaultPort: 22, keepAliveInterval: 60 },
-  security: { vaultAutoLockMinutes: 15, clipboardAutoClearSeconds: 30, pasteConfirmationThreshold: 5000 },
-};
+const BUILT_IN_THEMES: ThemeFile[] = [
+  darkTheme as ThemeFile,
+  lightTheme as ThemeFile,
+  solarizedDarkTheme as ThemeFile,
+  solarizedLightTheme as ThemeFile,
+  draculaTheme as ThemeFile,
+  nordTheme as ThemeFile,
+  monokaiProTheme as ThemeFile,
+  highContrastTheme as ThemeFile,
+];
 
 type Category = "general" | "appearance" | "terminal" | "ssh" | "security";
+
+interface BackendSettings {
+  theme: string;
+  font_size: number;
+  font_family: string;
+  font_ligatures: boolean;
+  cursor_style: string;
+  cursor_blink: boolean;
+  scrollback_lines: number;
+  line_height: number;
+  letter_spacing: number;
+  tab_title_format: string;
+  default_shell: string | null;
+  copy_on_select: boolean;
+  paste_warning_lines: number;
+  idle_lock_timeout_secs: number;
+  auto_update: boolean;
+  gpu_acceleration: boolean;
+  bell_style: string;
+  terminal_opacity: number;
+}
+
+const DEFAULT_SETTINGS: BackendSettings = {
+  theme: ThemeVariant.Dark,
+  font_size: 14,
+  font_family: "JetBrains Mono",
+  font_ligatures: true,
+  cursor_style: "block",
+  cursor_blink: true,
+  scrollback_lines: 10000,
+  line_height: 1.2,
+  letter_spacing: 0,
+  tab_title_format: "{name} - {host}",
+  default_shell: null,
+  copy_on_select: false,
+  paste_warning_lines: 5,
+  idle_lock_timeout_secs: 900,
+  auto_update: true,
+  gpu_acceleration: true,
+  bell_style: "visual",
+  terminal_opacity: 1,
+};
 
 const CATEGORIES: { id: Category; label: string; icon: React.ReactNode }[] = [
   { id: "general", label: "settings.general", icon: <Settings size={15} /> },
@@ -63,22 +93,25 @@ const CATEGORIES: { id: Category; label: string; icon: React.ReactNode }[] = [
   { id: "security", label: "settings.security", icon: <Shield size={15} /> },
 ];
 
-// ── Helpers ──
-
 function SettingRow({
   label,
   description,
+  help,
   children,
 }: {
   readonly label: string;
   readonly description?: string;
+  readonly help?: React.ReactNode;
   readonly children: React.ReactNode;
 }) {
   return (
     <div className="flex items-start justify-between gap-4 py-3 border-b border-border-subtle last:border-0">
       <div className="flex-1 min-w-0">
-        <p className="text-xs text-text-primary">{label}</p>
-        {description && <p className="text-[10px] text-text-secondary mt-0.5">{description}</p>}
+        <p className="flex items-center text-xs text-text-primary">
+          {label}
+          {help}
+        </p>
+        {description ? <p className="text-[10px] text-text-secondary mt-0.5">{description}</p> : null}
       </div>
       <div className="shrink-0">{children}</div>
     </div>
@@ -90,20 +123,20 @@ function Toggle({
   onChange,
 }: {
   readonly value: boolean;
-  readonly onChange: (v: boolean) => void;
+  readonly onChange: (value: boolean) => void;
 }) {
   return (
     <button
       onClick={() => onChange(!value)}
       className={clsx(
         "relative w-9 h-5 rounded-full transition-colors duration-[var(--duration-short)]",
-        value ? "bg-accent-primary" : "bg-surface-secondary border border-border-default"
+        value ? "bg-accent-primary" : "bg-surface-secondary border border-border-default",
       )}
     >
       <span
         className={clsx(
           "absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-[var(--duration-short)]",
-          value ? "translate-x-4" : "translate-x-0.5"
+          value ? "translate-x-4" : "translate-x-0.5",
         )}
       />
     </button>
@@ -116,18 +149,18 @@ function SelectInput({
   onChange,
 }: {
   readonly value: string;
-  readonly options: { value: string; label: string }[];
-  readonly onChange: (v: string) => void;
+  readonly options: Array<{ value: string; label: string }>;
+  readonly onChange: (value: string) => void;
 }) {
   return (
     <select
       value={value}
-      onChange={(e) => onChange(e.target.value)}
+      onChange={(event) => onChange(event.target.value)}
       className="px-2 py-1 rounded-lg text-xs bg-surface-secondary border border-border-default text-text-primary outline-none focus:border-border-focus transition-colors duration-[var(--duration-short)]"
     >
-      {options.map((opt) => (
-        <option key={opt.value} value={opt.value}>
-          {opt.label}
+      {options.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
         </option>
       ))}
     </select>
@@ -142,7 +175,7 @@ function NumberInput({
   step,
 }: {
   readonly value: number;
-  readonly onChange: (v: number) => void;
+  readonly onChange: (value: number) => void;
   readonly min?: number;
   readonly max?: number;
   readonly step?: number;
@@ -151,151 +184,235 @@ function NumberInput({
     <input
       type="number"
       value={value}
-      onChange={(e) => {
-        const v = Number.parseInt(e.target.value, 10);
-        if (!Number.isNaN(v)) onChange(v);
+      onChange={(event) => {
+        const nextValue = Number.parseFloat(event.target.value);
+        if (!Number.isNaN(nextValue)) {
+          onChange(nextValue);
+        }
       }}
       min={min}
       max={max}
       step={step}
-      className="w-20 px-2 py-1 rounded-lg text-xs bg-surface-secondary border border-border-default text-text-primary outline-none focus:border-border-focus text-right transition-colors duration-[var(--duration-short)]"
+      className="w-24 px-2 py-1 rounded-lg text-xs bg-surface-secondary border border-border-default text-text-primary outline-none focus:border-border-focus text-right transition-colors duration-[var(--duration-short)]"
     />
   );
 }
 
-// ── Main Component ──
-
 export default function SettingsPanel() {
-  const [category, setCategory] = useState<Category>("general");
-  const [settings, setSettings] = useState<SettingsData>(DEFAULT_SETTINGS);
-  const [loading, setLoading] = useState(true);
   const { t } = useTranslation();
+  const [category, setCategory] = useState<Category>("general");
+  const [settings, setSettings] = useState<BackendSettings>(DEFAULT_SETTINGS);
+  const [loading, setLoading] = useState(true);
 
-  const appTheme = useAppStore((s) => s.theme);
-  const setAppTheme = useAppStore((s) => s.setTheme);
-  const profiles = useAppStore((s) => s.profiles);
+  const appTheme = useAppStore((state) => state.theme);
+  const setAppTheme = useAppStore((state) => state.setTheme);
+  const profiles = useAppStore((state) => state.profiles);
+  const customThemeName = useAppStore((state) => state.customThemeName);
+  const setCustomTheme = useAppStore((state) => state.setCustomTheme);
+  const bellStyle = useAppStore((state) => state.bellStyle);
+  const setBellStyle = useAppStore((state) => state.setBellStyle);
+  const cursorStyle = useAppStore((state) => state.cursorStyle);
+  const setCursorStyle = useAppStore((state) => state.setCursorStyle);
+  const cursorBlink = useAppStore((state) => state.cursorBlink);
+  const setCursorBlink = useAppStore((state) => state.setCursorBlink);
 
-  // Load settings from backend
   useEffect(() => {
-    async function load() {
+    let mounted = true;
+
+    async function loadSettings() {
       try {
-        const data = await invoke<SettingsData>("settings_get");
-        setSettings({ ...DEFAULT_SETTINGS, ...data });
+        const loaded = await invoke<BackendSettings>("settings_get");
+        if (!mounted) {
+          return;
+        }
+        const next = { ...DEFAULT_SETTINGS, ...loaded };
+        setSettings(next);
+        setAppTheme((next.theme as ThemeVariant) ?? ThemeVariant.Dark);
+        setBellStyle((next.bell_style as BellStyle) ?? "visual");
+        setCursorStyle((next.cursor_style as CursorStyle) ?? "block");
+        setCursorBlink(next.cursor_blink);
       } catch {
-        // Use defaults
+        if (mounted) {
+          setSettings(DEFAULT_SETTINGS);
+        }
       } finally {
-        setLoading(false);
+        if (mounted) {
+          setLoading(false);
+        }
       }
     }
-    load();
+
+    loadSettings();
+    return () => {
+      mounted = false;
+    };
+  }, [setAppTheme, setBellStyle, setCursorBlink, setCursorStyle]);
+
+  const persistSettings = useCallback(async (next: BackendSettings) => {
+    setSettings(next);
+    try {
+      await invoke("settings_update", { settings: next });
+    } catch {
+      // Keep optimistic local state.
+    }
   }, []);
 
-  // Persist a setting change
-  const updateSetting = useCallback(
-    <K extends keyof SettingsData>(section: K, key: keyof SettingsData[K], value: SettingsData[K][keyof SettingsData[K]]) => {
-      setSettings((prev) => {
-        const next = {
-          ...prev,
-          [section]: { ...prev[section], [key]: value },
-        };
-        // Fire and forget save
-        invoke("settings_update", { settings: next }).catch(() => {});
-        return next;
-      });
+  const updateSettings = useCallback(
+    <K extends keyof BackendSettings>(key: K, value: BackendSettings[K]) => {
+      const next = { ...settings, [key]: value };
+      void persistSettings(next);
     },
-    []
+    [persistSettings, settings],
   );
 
-  function renderCategory() {
+  const applyThemeTokens = useCallback((tokens: Partial<ThemeTokens>) => {
+    const root = document.documentElement;
+    for (const [key, value] of Object.entries(tokens)) {
+      if (typeof value === "string") {
+        root.style.setProperty(`--${key}`, value);
+      }
+    }
+  }, []);
+
+  const handleSelectBuiltInTheme = useCallback(
+    (themeFile: ThemeFile) => {
+      applyThemeTokens(themeFile.tokens);
+      setCustomTheme(themeFile.name, themeFile.tokens);
+      setAppTheme(themeFile.variant);
+      updateSettings("theme", themeFile.variant);
+    },
+    [applyThemeTokens, setAppTheme, setCustomTheme, updateSettings],
+  );
+
+  const handleImportTheme = useCallback(async () => {
+    try {
+      const selected = await open({
+        title: t("themeImport.selectFile"),
+        filters: [{ name: "JSON", extensions: ["json"] }],
+        multiple: false,
+      });
+      if (!selected || Array.isArray(selected)) {
+        return;
+      }
+      const content = await readTextFile(selected);
+      const parsed = JSON.parse(content) as ThemeFile;
+      applyThemeTokens(parsed.tokens);
+      setCustomTheme(parsed.name ?? t("themeImport.customTheme"), parsed.tokens);
+      setAppTheme(parsed.variant ?? ThemeVariant.Dark);
+    } catch {
+      // Ignore import failures.
+    }
+  }, [applyThemeTokens, setAppTheme, setCustomTheme, t]);
+
+  const renderCategory = () => {
     switch (category) {
       case "general":
         return (
           <div>
-            <SettingRow label={t("settings.defaultProfile")} description={t("settings.profileOnStartup")}>
+            <SettingRow label={t("settings.defaultProfile")} description={t("settings.generalDescription")}>
               <SelectInput
-                value={settings.general.defaultProfile}
-                options={profiles.map((p) => ({ value: p.id, label: p.name }))}
-                onChange={(v) => updateSetting("general", "defaultProfile", v)}
+                value={profiles[0]?.id ?? "default"}
+                options={profiles.map((profile) => ({ value: profile.id, label: profile.name }))}
+                onChange={() => {}}
               />
             </SettingRow>
-            <SettingRow label={t("settings.language")}>
-              <SelectInput
-                value={settings.general.language}
-                options={[
-                  { value: "en", label: "English" },
-                  { value: "zh", label: "中文" },
-                  { value: "ja", label: "日本語" },
-                  { value: "ko", label: "한국어" },
-                  { value: "es", label: "Español" },
-                  { value: "de", label: "Deutsch" },
-                  { value: "fr", label: "Français" },
-                ]}
-                onChange={(v) => updateSetting("general", "language", v)}
-              />
+            <SettingRow label={t("settings.autoUpdate")} description={t("settings.securityDescription")}>
+              <Toggle value={settings.auto_update} onChange={(value) => updateSettings("auto_update", value)} />
+            </SettingRow>
+            <SettingRow label={t("settings.gpuAcceleration")} description={t("settings.terminalDescription")}>
+              <Toggle value={settings.gpu_acceleration} onChange={(value) => updateSettings("gpu_acceleration", value)} />
             </SettingRow>
           </div>
         );
-
       case "appearance":
         return (
           <div>
-            <SettingRow label={t("settings.theme")} description={t("settings.themeDescription")}>
-              <div className="flex gap-2">
+            <SettingRow label={t("settings.theme")} description={t("settings.themeDescription")} help={<FieldHelp description={t("fieldHelp.theme")} />}>
+              <div className="flex flex-wrap gap-2 justify-end">
                 {[
-                  { value: ThemeVariant.Dark, icon: <Moon size={14} />, label: "Dark" },
-                  { value: ThemeVariant.Light, icon: <Sun size={14} />, label: "Light" },
-                  { value: ThemeVariant.System, icon: <Monitor size={14} />, label: "System" },
-                ].map((t) => (
+                  { value: ThemeVariant.Dark, label: t("themes.dark"), icon: <Moon size={12} /> },
+                  { value: ThemeVariant.Light, label: t("themes.light"), icon: <Sun size={12} /> },
+                  { value: ThemeVariant.System, label: t("themes.system"), icon: <Monitor size={12} /> },
+                ].map((themeOption) => (
                   <button
-                    key={t.value}
+                    key={themeOption.value}
                     onClick={() => {
-                      setAppTheme(t.value);
-                      updateSetting("appearance", "theme", t.value);
+                      setAppTheme(themeOption.value);
+                      setCustomTheme(null, null);
+                      updateSettings("theme", themeOption.value);
                     }}
                     className={clsx(
-                      "flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs",
-                      "transition-colors duration-[var(--duration-short)]",
-                      appTheme === t.value
+                      "flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition-colors duration-[var(--duration-short)]",
+                      appTheme === themeOption.value && !customThemeName
                         ? "border-border-focus bg-interactive-default/10 text-text-primary"
-                        : "border-border-default hover:bg-surface-secondary text-text-secondary"
+                        : "border-border-default hover:bg-surface-secondary text-text-secondary",
                     )}
                   >
-                    {t.icon}
-                    {t.label}
-                    {appTheme === t.value && <Check size={12} className="text-accent-primary" />}
+                    {themeOption.icon}
+                    {themeOption.label}
+                    {appTheme === themeOption.value && !customThemeName ? (
+                      <Check size={12} className="text-accent-primary" />
+                    ) : null}
                   </button>
                 ))}
               </div>
             </SettingRow>
+            <SettingRow label={t("themeImport.customTheme")} description={t("settings.themeDescription")}>
+              <div className="flex flex-col gap-2">
+                <div className="grid grid-cols-2 gap-1.5">
+                  {BUILT_IN_THEMES.map((themeFile) => (
+                    <button
+                      key={themeFile.name}
+                      onClick={() => handleSelectBuiltInTheme(themeFile)}
+                      className={clsx(
+                        "px-2.5 py-1.5 rounded-lg border text-xs text-left transition-colors duration-[var(--duration-short)]",
+                        customThemeName === themeFile.name
+                          ? "border-border-focus bg-interactive-default/10 text-text-primary"
+                          : "border-border-default hover:bg-surface-secondary text-text-secondary",
+                      )}
+                    >
+                      {themeFile.name}
+                      {customThemeName === themeFile.name ? (
+                        <Check size={10} className="inline ml-1 text-accent-primary" />
+                      ) : null}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={() => {
+                    void handleImportTheme();
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-border-default hover:bg-surface-secondary text-text-secondary transition-colors"
+                >
+                  <Upload size={13} />
+                  {t("themeImport.importTheme")}
+                </button>
+              </div>
+            </SettingRow>
             <SettingRow label={t("settings.fontSize")} description={t("settings.fontSizeDescription")}>
-              <NumberInput
-                value={settings.appearance.fontSize}
-                onChange={(v) => updateSetting("appearance", "fontSize", v)}
-                min={10}
-                max={20}
-              />
+              <NumberInput value={settings.font_size} onChange={(value) => updateSettings("font_size", value)} min={10} max={24} />
             </SettingRow>
             <SettingRow label={t("settings.fontFamily")}>
               <SelectInput
-                value={settings.appearance.fontFamily}
+                value={settings.font_family}
                 options={[
-                  { value: "Inter", label: "Inter" },
-                  { value: "SF Pro", label: "SF Pro" },
-                  { value: "system-ui", label: "System" },
+                  { value: "JetBrains Mono", label: "JetBrains Mono" },
+                  { value: "SF Mono", label: "SF Mono" },
+                  { value: "Menlo", label: "Menlo" },
+                  { value: "monospace", label: "Monospace" },
                 ]}
-                onChange={(v) => updateSetting("appearance", "fontFamily", v)}
+                onChange={(value) => updateSettings("font_family", value)}
               />
             </SettingRow>
           </div>
         );
-
       case "terminal":
         return (
           <div>
-            <SettingRow label={t("settings.scrollbackLines")} description={t("settings.scrollbackDescription")}>
+            <SettingRow label={t("settings.scrollbackLines")} description={t("settings.scrollbackDescription")} help={<FieldHelp description={t("fieldHelp.scrollback")} />}>
               <NumberInput
-                value={settings.terminal.scrollbackLines}
-                onChange={(v) => updateSetting("terminal", "scrollbackLines", v)}
+                value={settings.scrollback_lines}
+                onChange={(value) => updateSettings("scrollback_lines", value)}
                 min={1000}
                 max={100000}
                 step={1000}
@@ -303,129 +420,115 @@ export default function SettingsPanel() {
             </SettingRow>
             <SettingRow label={t("settings.cursorStyle")}>
               <SelectInput
-                value={settings.terminal.cursorStyle}
+                value={cursorStyle}
                 options={[
-                  { value: "block", label: "Block" },
-                  { value: "underline", label: "Underline" },
-                  { value: "bar", label: "Bar" },
+                  { value: "block", label: t("cursorStyles.block") },
+                  { value: "underline", label: t("cursorStyles.underline") },
+                  { value: "bar", label: t("cursorStyles.bar") },
                 ]}
-                onChange={(v) => updateSetting("terminal", "cursorStyle", v as "block" | "underline" | "bar")}
+                onChange={(value) => {
+                  setCursorStyle(value as CursorStyle);
+                  updateSettings("cursor_style", value);
+                }}
               />
             </SettingRow>
             <SettingRow label={t("settings.cursorBlink")}>
               <Toggle
-                value={settings.terminal.cursorBlink}
-                onChange={(v) => updateSetting("terminal", "cursorBlink", v)}
+                value={cursorBlink}
+                onChange={(value) => {
+                  setCursorBlink(value);
+                  updateSettings("cursor_blink", value);
+                }}
               />
             </SettingRow>
             <SettingRow label={t("settings.bellMode")} description={t("settings.bellDescription")}>
               <SelectInput
-                value={settings.terminal.bellMode}
+                value={bellStyle}
                 options={[
-                  { value: "none", label: "None" },
-                  { value: "visual", label: "Visual" },
-                  { value: "sound", label: "Sound" },
-                  { value: "both", label: "Both" },
+                  { value: "none", label: t("bellStyles.none") },
+                  { value: "visual", label: t("bellStyles.visual") },
+                  { value: "audio", label: t("bellStyles.audio") },
                 ]}
-                onChange={(v) => updateSetting("terminal", "bellMode", v as "none" | "visual" | "sound" | "both")}
+                onChange={(value) => {
+                  setBellStyle(value as BellStyle);
+                  updateSettings("bell_style", value);
+                }}
               />
+            </SettingRow>
+            <SettingRow label={t("settings.opacity")} description={t("settings.opacityDescription")}>
+              <NumberInput value={settings.terminal_opacity} onChange={(value) => updateSettings("terminal_opacity", value)} min={0.2} max={1} step={0.1} />
             </SettingRow>
           </div>
         );
-
       case "ssh":
         return (
           <div>
-            <SettingRow label={t("settings.defaultPort")} description={t("settings.defaultPortDescription")}>
-              <NumberInput
-                value={settings.ssh.defaultPort}
-                onChange={(v) => updateSetting("ssh", "defaultPort", v)}
-                min={1}
-                max={65535}
+            <SettingRow label={t("settings.defaultShell")} description={t("settings.sshDescription")}>
+              <input
+                value={settings.default_shell ?? ""}
+                onChange={(event) => updateSettings("default_shell", event.target.value || null)}
+                className="w-56 px-2 py-1 rounded-lg text-xs bg-surface-secondary border border-border-default text-text-primary outline-none focus:border-border-focus transition-colors duration-[var(--duration-short)]"
               />
             </SettingRow>
-            <SettingRow
-              label={t("settings.keepAliveInterval")}
-              description={t("settings.keepAliveDescription")}
-            >
-              <NumberInput
-                value={settings.ssh.keepAliveInterval}
-                onChange={(v) => updateSetting("ssh", "keepAliveInterval", v)}
-                min={0}
-                max={3600}
+            <SettingRow label={t("settings.tabTitleFormat")} description={t("settings.tabTitleFormatDescription")}>
+              <input
+                value={settings.tab_title_format}
+                onChange={(event) => updateSettings("tab_title_format", event.target.value)}
+                className="w-56 px-2 py-1 rounded-lg text-xs bg-surface-secondary border border-border-default text-text-primary outline-none focus:border-border-focus transition-colors duration-[var(--duration-short)]"
               />
             </SettingRow>
           </div>
         );
-
       case "security":
         return (
           <div>
-            <SettingRow
-              label={t("settings.vaultAutoLock")}
-              description={t("settings.vaultAutoLockDescription")}
-            >
+            <SettingRow label={t("settings.vaultAutoLock")} description={t("settings.vaultAutoLockDescription")}>
               <NumberInput
-                value={settings.security.vaultAutoLockMinutes}
-                onChange={(v) => updateSetting("security", "vaultAutoLockMinutes", v)}
+                value={Math.round(settings.idle_lock_timeout_secs / 60)}
+                onChange={(value) => updateSettings("idle_lock_timeout_secs", value * 60)}
                 min={0}
                 max={1440}
               />
             </SettingRow>
-            <SettingRow
-              label={t("settings.clipboardAutoClear")}
-              description={t("settings.clipboardAutoClearDescription")}
-            >
-              <NumberInput
-                value={settings.security.clipboardAutoClearSeconds}
-                onChange={(v) => updateSetting("security", "clipboardAutoClearSeconds", v)}
-                min={0}
-                max={600}
-              />
+            <SettingRow label={t("settings.copyOnSelect")} description={t("settings.copyOnSelectDescription")}>
+              <Toggle value={settings.copy_on_select} onChange={(value) => updateSettings("copy_on_select", value)} />
             </SettingRow>
-            <SettingRow
-              label={t("settings.pasteConfirmation")}
-              description={t("settings.pasteConfirmationDescription")}
-            >
+            <SettingRow label={t("settings.pasteConfirmation")} description={t("settings.pasteConfirmationDescription")}>
               <NumberInput
-                value={settings.security.pasteConfirmationThreshold}
-                onChange={(v) => updateSetting("security", "pasteConfirmationThreshold", v)}
+                value={settings.paste_warning_lines}
+                onChange={(value) => updateSettings("paste_warning_lines", value)}
                 min={0}
-                max={100000}
-                step={100}
+                max={1000}
               />
             </SettingRow>
           </div>
         );
     }
-  }
+  };
 
   return (
-    <div className="flex h-full bg-surface-primary">
-      {/* Sidebar */}
+    <div className="flex h-full bg-surface-primary" data-help-article="getting-started">
       <nav className="w-48 border-r border-border-subtle shrink-0 py-3 px-2">
         <div className="text-[10px] uppercase tracking-wider text-text-disabled px-2 mb-2">
           {t("settings.title")}
         </div>
-        {CATEGORIES.map((cat) => (
+        {CATEGORIES.map((entry) => (
           <button
-            key={cat.id}
-            onClick={() => setCategory(cat.id)}
+            key={entry.id}
+            onClick={() => setCategory(entry.id)}
             className={clsx(
-              "flex items-center gap-2.5 w-full px-2.5 py-2 rounded-lg text-xs",
-              "transition-colors duration-[var(--duration-micro)]",
-              category === cat.id
+              "flex items-center gap-2.5 w-full px-2.5 py-2 rounded-lg text-xs transition-colors duration-[var(--duration-micro)]",
+              category === entry.id
                 ? "bg-interactive-default/15 text-text-primary"
-                : "text-text-secondary hover:bg-surface-elevated hover:text-text-primary"
+                : "text-text-secondary hover:bg-surface-elevated hover:text-text-primary",
             )}
           >
-            <span className="shrink-0">{cat.icon}</span>
-            {t(cat.label)}
+            <span className="shrink-0">{entry.icon}</span>
+            {t(entry.label)}
           </button>
         ))}
       </nav>
 
-      {/* Content */}
       <div className="flex-1 overflow-y-auto px-6 py-4">
         <h2 className="text-sm font-semibold text-text-primary mb-1">
           {t(`settings.${category === "terminal" ? "terminalCategory" : category}`)}
