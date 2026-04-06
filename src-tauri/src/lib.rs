@@ -1,13 +1,16 @@
 mod audit;
 mod config;
 mod keygen;
+mod notifications;
 mod sftp;
+mod snippets;
 mod ssh;
 mod terminal;
 #[cfg(feature = "integration")]
 pub mod vault;
 #[cfg(not(feature = "integration"))]
 mod vault;
+mod window;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -31,6 +34,8 @@ pub fn run() {
         .manage(ssh::SshState::new())
         .manage(sftp::SftpState::new())
         .manage(keygen::KeygenState::new())
+        .manage(snippets::SnippetState::new())
+        .manage(notifications::NotificationState::new())
         .invoke_handler(tauri::generate_handler![
             // Vault
             vault::vault_create,
@@ -41,6 +46,21 @@ pub fn run() {
             vault::vault_check_idle,
             vault::vault_check_orphans,
             vault::vault_clipboard_copy,
+            // Vault: Biometric (BE-VAULT-07)
+            vault::vault_biometric_available,
+            vault::vault_unlock_biometric,
+            vault::vault_biometric_enroll,
+            // Vault: OS Credential Store (BE-VAULT-08)
+            vault::vault_os_store_available,
+            vault::vault_os_store_save,
+            vault::vault_os_store_retrieve,
+            vault::vault_os_store_delete,
+            // Vault: FIDO2/WebAuthn (BE-VAULT-09)
+            vault::vault_fido2_available,
+            vault::vault_fido2_register_begin,
+            vault::vault_fido2_register_complete,
+            vault::vault_fido2_auth_begin,
+            vault::vault_fido2_auth_complete,
             vault::credential_create,
             vault::credential_list,
             vault::credential_get,
@@ -115,6 +135,24 @@ pub fn run() {
             keygen::keygen_import,
             keygen::keygen_get_public,
             keygen::keygen_deploy,
+            // Snippets
+            snippets::snippet_create,
+            snippets::snippet_list,
+            snippets::snippet_get,
+            snippets::snippet_update,
+            snippets::snippet_delete,
+            snippets::snippet_search,
+            // Notifications
+            notifications::notification_list,
+            notifications::notification_dismiss,
+            notifications::notification_clear_all,
+            notifications::notification_add,
+            // Config extras
+            config::shell_integration_install,
+            // Window
+            window::window_create_for_tab,
+            window::window_close,
+            window::window_list,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

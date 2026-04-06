@@ -22,6 +22,7 @@
     "splitRight": "Split Right",
     "splitDown": "Split Down",
     "moveToNewWindow": "Move to New Window",
+    "detachTab": "Detach to New Window",
     "reconnect": "Reconnect",
     "rename": "Rename"
   },
@@ -115,16 +116,40 @@
     "noCredentials": "No credentials",
     "noCredentialsHint": "Add passwords, SSH keys, or API tokens to your vault.",
     "credentials": "Credentials",
-    "add": "Add"
+    "add": "Add",
+    "useBiometric": "Use Touch ID",
+    "useWindowsHello": "Use Windows Hello",
+    "useSecurityKey": "Use Security Key",
+    "biometricUnavailable": "Biometric authentication is not available on this device",
+    "fido2Unavailable": "Hardware key authentication is not yet configured",
+    "enrollBiometric": "Enable Biometric Unlock",
+    "enrollFido2": "Register Security Key",
+    "osStoreEnabled": "OS keychain integration enabled",
+    "osStoreSave": "Save to System Keychain"
   },
   "snippets": {
     "title": "Snippets",
     "new": "New Snippet",
     "edit": "Edit Snippet",
     "delete": "Delete Snippet",
-    "insert": "Insert Snippet",
     "search": "Search snippets...",
-    "emptyState": "No snippets saved. Highlight a command in any terminal and choose 'Save as Snippet'."
+    "emptyState": "No snippets yet",
+    "newSnippet": "New Snippet",
+    "editSnippet": "Edit Snippet",
+    "deleteSnippet": "Delete Snippet",
+    "searchPlaceholder": "Search snippets...",
+    "name": "Name",
+    "command": "Command",
+    "tags": "Tags",
+    "tagsHint": "Comma-separated tags",
+    "save": "Save",
+    "cancel": "Cancel",
+    "insert": "Insert",
+    "insertSnippet": "Insert Snippet",
+    "placeholderPrompt": "Fill in placeholders",
+    "copyToClipboard": "Copy to Clipboard",
+    "savedFromTerminal": "Saved from terminal",
+    "confirmDelete": "Delete this snippet?"
   },
   "newSession": {
     "title": "New Session",
@@ -418,7 +443,8 @@
       "keyboardShortcuts": "Keyboard Shortcuts",
       "troubleshooting": "Troubleshooting",
       "reportIssue": "Report Issue",
-      "about": "About"
+      "about": "About",
+      "onlineDocs": "Online Documentation"
     }
   },
   "fieldHelp": {
@@ -476,5 +502,15 @@
   "commandPalette": {
     "helpCategory": "Help",
     "noMatching": "No matching commands"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "empty": "No notifications",
+    "clearAll": "Clear All",
+    "dismiss": "Dismiss",
+    "search": "Search notifications...",
+    "today": "Today",
+    "yesterday": "Yesterday",
+    "older": "Older"
   }
 }

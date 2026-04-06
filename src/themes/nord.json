@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "name": "Nord",
-  "author": "CrossTerm",
+  "author": "Abhishek Lal",
   "variant": "dark",
   "tokens": {
     "surface-primary": "#2e3440",

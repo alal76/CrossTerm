@@ -2,9 +2,9 @@
 name = "crossterm-app"
 version = "0.1.0"
 description = "CrossTerm - Cross-Platform Terminal Emulator & Remote Access Suite"
-authors = ["CrossTerm Contributors"]
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/crossterm/crossterm"
+authors = ["Abhishek Lal"]
+license = "AGPL-3.0-only"
+repository = "https://github.com/alal76/CrossTerm"
 edition = "2021"
 rust-version = "1.77.2"
 
@@ -60,6 +60,9 @@ portable-pty = "0.8"
 anyhow = "1.0"
 thiserror = "1.0"
 dirs = "5"
+
+# OS Credential Store
+keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
 
 # Clipboard
 arboard = "3"

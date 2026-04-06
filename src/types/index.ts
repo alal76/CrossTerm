@@ -294,3 +294,14 @@ export interface TourDefinition {
   id: string;
   steps: TourStep[];
 }
+
+// --- Snippets ---
+
+export interface Snippet {
+  id: string;
+  name: string;
+  command: string;
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+}

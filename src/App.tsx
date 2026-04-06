@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import clsx from "clsx";
+import { isRtlLocale } from "@/i18n";
 import {
   Terminal,
   Code2,
@@ -25,6 +26,8 @@ import {
   MoreVertical,
   Radio,
   KeyRound,
+  Bell,
+  ExternalLink,
 } from "lucide-react";
 import { useAppStore } from "@/stores/appStore";
 import { useSessionStore } from "@/stores/sessionStore";
@@ -50,6 +53,8 @@ import CredentialManager from "@/components/Vault/CredentialManager";
 import SettingsPanel from "@/components/Settings/SettingsPanel";
 import SessionEditor from "@/components/SessionTree/SessionEditor";
 import SftpBrowser from "@/components/SftpBrowser/SftpBrowser";
+import SnippetListPanel from "@/components/Snippets/SnippetListPanel";
+import NotificationHistoryPanel from "@/components/Notifications/NotificationHistoryPanel";
 
 const SESSION_TYPE_ICONS: Record<string, string> = {
   ssh: "⌨",
@@ -104,6 +109,8 @@ function TitleBar() {
   const profiles = useAppStore((s) => s.profiles);
   const theme = useAppStore((s) => s.theme);
   const setTheme = useAppStore((s) => s.setTheme);
+  const showNotificationHistory = useAppStore((s) => s.showNotificationHistory);
+  const setShowNotificationHistory = useAppStore((s) => s.setShowNotificationHistory);
 
   const activeProfile = profiles.find((p) => p.id === activeProfileId);
 
@@ -128,6 +135,14 @@ function TitleBar() {
         CrossTerm
       </span>
       <div className="flex-1" data-tauri-drag-region />
+      <button
+        onClick={() => setShowNotificationHistory(!showNotificationHistory)}
+        className="p-1.5 rounded hover:bg-surface-elevated text-text-secondary hover:text-text-primary transition-colors"
+        title={t("notifications.title")}
+        data-tooltip={t("notifications.title")}
+      >
+        <Bell size={14} />
+      </button>
       <button
         onClick={cycleTheme}
         className="p-1.5 rounded hover:bg-surface-elevated text-text-secondary hover:text-text-primary transition-colors"
@@ -229,6 +244,26 @@ function TabContextMenu({
     { key: "splitRight", icon: <SplitSquareHorizontal size={13} />, label: t("tabs.splitRight"), action: () => handleSplit(SplitDirection.Horizontal) },
     { key: "splitDown", icon: <SplitSquareVertical size={13} />, label: t("tabs.splitDown"), action: () => handleSplit(SplitDirection.Vertical) },
     { key: "sep2", divider: true as const },
+    {
+      key: "detach",
+      icon: <ExternalLink size={13} />,
+      label: t("tabs.detachTab"),
+      action: async () => {
+        const session = sessions.find((s) => s.id === tab.sessionId);
+        if (!session) return;
+        try {
+          await invoke("window_create_for_tab", {
+            tabId: tab.id,
+            sessionId: tab.sessionId,
+            title: tab.title ?? session.name,
+          });
+          closeTab(tab.id);
+        } catch (err) {
+          console.error("Failed to detach tab:", err);
+        }
+      },
+    },
+    { key: "sep3", divider: true as const },
     { key: "close", icon: <X size={13} />, label: t("tabs.closeTab"), action: () => closeTab(state.tabId) },
     { key: "closeOthers", icon: <X size={13} />, label: t("tabs.closeOthers"), action: handleCloseOthers },
     { key: "closeAll", icon: <X size={13} />, label: t("tabs.closeAll"), action: handleCloseAll, danger: true },
@@ -607,10 +642,7 @@ function Sidebar({
               />
             )}
             {sidebarMode === SidebarMode.Snippets && (
-              <EmptyPanel
-                icon={<Code2 size={32} className="text-text-disabled" />}
-                message={t("snippets.emptyState")}
-              />
+              <SnippetListPanel />
             )}
             {sidebarMode === SidebarMode.Tunnels && (
               <EmptyPanel
@@ -809,10 +841,7 @@ function BottomPanel() {
           <SftpBrowser />
         )}
         {bottomPanelMode === BottomPanelMode.Snippets && (
-          <EmptyPanel
-            icon={<Code2 size={24} className="text-text-disabled" />}
-            message={t("snippets.emptyState")}
-          />
+          <SnippetListPanel />
         )}
         {bottomPanelMode === BottomPanelMode.AuditLog && (
           <div className="text-text-disabled text-center py-4">
@@ -930,7 +959,7 @@ function BottomNav({
 // ─── App ───────────────────────────────────────────────────────
 
 export default function App() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const breakpoint = useBreakpoint();
   const theme = useAppStore((s) => s.theme);
   const resolvedTheme = useAppStore((s) => s.resolvedTheme);
@@ -951,6 +980,8 @@ export default function App() {
   const setActiveTab = useSessionStore((s) => s.setActiveTab);
   const closeTab = useSessionStore((s) => s.closeTab);
   const updateTabStatus = useSessionStore((s) => s.updateTabStatus);
+  const showNotificationHistory = useAppStore((s) => s.showNotificationHistory);
+  const setShowNotificationHistory = useAppStore((s) => s.setShowNotificationHistory);
   const [showQuickConnect, setShowQuickConnect] = useState(false);
   const [showCredentialManager, setShowCredentialManager] = useState(false);
   const [showSessionEditor, setShowSessionEditor] = useState(false);
@@ -961,6 +992,13 @@ export default function App() {
   const [showFeatureTour, setShowFeatureTour] = useState(false);
   const [activeTourId, setActiveTourId] = useState<string | undefined>(undefined);
   const [liveAnnouncement, setLiveAnnouncement] = useState("");
+
+  // ── RTL layout direction ──
+  useEffect(() => {
+    const dir = isRtlLocale(i18n.language) ? "rtl" : "ltr";
+    document.documentElement.dir = dir;
+    document.documentElement.lang = i18n.language;
+  }, [i18n.language]);
 
   // ── Task 3: Load settings from backend on startup ──
   useEffect(() => {
@@ -1216,6 +1254,11 @@ export default function App() {
             <FeatureTour
               tourId={activeTourId}
               onComplete={() => { setShowFeatureTour(false); setActiveTourId(undefined); }}
+            />
+          )}
+          {showNotificationHistory && (
+            <NotificationHistoryPanel
+              onClose={() => setShowNotificationHistory(false)}
             />
           )}
         </div>

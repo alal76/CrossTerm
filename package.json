@@ -2,7 +2,12 @@
   "name": "crossterm",
   "private": true,
   "version": "0.1.0",
-  "license": "MIT OR Apache-2.0",
+  "author": "Abhishek Lal",
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alal76/CrossTerm.git"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",

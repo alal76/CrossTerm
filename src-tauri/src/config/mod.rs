@@ -1089,6 +1089,45 @@ pub fn config_is_portable_mode() -> bool {
     is_portable_mode()
 }
 
+// ── BLD-05: Shell integration install ───────────────────────────────────
+
+#[tauri::command]
+pub fn shell_integration_install(shell: String) -> Result<String, ConfigError> {
+    let (config_file, script_name) = match shell.as_str() {
+        "bash" => ("~/.bashrc", "crossterm.bash"),
+        "zsh" => ("~/.zshrc", "crossterm.zsh"),
+        "fish" => ("~/.config/fish/config.fish", "crossterm.fish"),
+        other => {
+            return Err(ConfigError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("Unsupported shell: {other}"),
+            )));
+        }
+    };
+
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_default();
+
+    let script_path = exe_dir
+        .join("scripts")
+        .join("shell-integration")
+        .join(script_name);
+
+    let source_line = if shell == "fish" {
+        format!("source \"{}\"", script_path.display())
+    } else {
+        format!("source \"{}\"", script_path.display())
+    };
+
+    let instructions = format!(
+        "Add the following line to {config_file}:\n\n  {source_line}\n\nThen restart your shell or run:\n  {source_line}"
+    );
+
+    Ok(instructions)
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]

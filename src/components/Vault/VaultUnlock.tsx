@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import clsx from "clsx";
-import { Lock, Eye, EyeOff, ShieldCheck, Loader2 } from "lucide-react";
+import { Lock, Eye, EyeOff, ShieldCheck, Loader2, Fingerprint, KeyRound } from "lucide-react";
 import { useVaultStore } from "@/stores/vaultStore";
 
 export default function VaultUnlock() {
@@ -14,6 +14,9 @@ export default function VaultUnlock() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checkingVault, setCheckingVault] = useState(true);
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [fido2Available, setFido2Available] = useState(false);
+  const [isMac, setIsMac] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const unlockVault = useVaultStore((s) => s.unlockVault);
@@ -33,6 +36,26 @@ export default function VaultUnlock() {
       }
     }
     check();
+  }, []);
+
+  // Detect biometric and FIDO2 availability
+  useEffect(() => {
+    async function detectAuthMethods() {
+      try {
+        const bio = await invoke<boolean>("vault_biometric_available");
+        setBiometricAvailable(bio);
+      } catch {
+        setBiometricAvailable(false);
+      }
+      try {
+        const fido = await invoke<boolean>("vault_fido2_available");
+        setFido2Available(fido);
+      } catch {
+        setFido2Available(false);
+      }
+      setIsMac(navigator.userAgent.toUpperCase().includes("MAC"));
+    }
+    detectAuthMethods();
   }, []);
 
   useEffect(() => {
@@ -77,6 +100,33 @@ export default function VaultUnlock() {
       } finally {
         setLoading(false);
       }
+    }
+  }
+
+  async function handleBiometricUnlock() {
+    setError(null);
+    setLoading(true);
+    try {
+      await invoke("vault_unlock_biometric");
+      await unlockVault(""); // biometric bypasses password
+    } catch (e) {
+      setError(String(e) || t("vault.biometricUnavailable"));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleFido2Unlock() {
+    setError(null);
+    setLoading(true);
+    try {
+      await invoke("vault_fido2_auth_begin", { profileId: "" });
+      // In production: pass challenge to browser WebAuthn API, then call auth_complete
+      setError(t("vault.fido2Unavailable"));
+    } catch {
+      setError(t("vault.fido2Unavailable"));
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -174,6 +224,47 @@ export default function VaultUnlock() {
             {!loading && isNewVault && t("vault.createVault")}
             {!loading && !isNewVault && t("vault.unlock")}
           </button>
+
+          {!isNewVault && (biometricAvailable || fido2Available) && (
+            <div className="flex flex-col gap-2 mt-1">
+              {biometricAvailable && (
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={handleBiometricUnlock}
+                  className={clsx(
+                    "w-full py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2",
+                    "transition-colors duration-[var(--duration-short)]",
+                    "border border-border-default",
+                    loading
+                      ? "bg-interactive-disabled text-text-disabled cursor-not-allowed"
+                      : "bg-surface-secondary hover:bg-surface-tertiary text-text-primary"
+                  )}
+                >
+                  <Fingerprint size={16} />
+                  {isMac ? t("vault.useBiometric") : t("vault.useWindowsHello")}
+                </button>
+              )}
+              {fido2Available && (
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={handleFido2Unlock}
+                  className={clsx(
+                    "w-full py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2",
+                    "transition-colors duration-[var(--duration-short)]",
+                    "border border-border-default",
+                    loading
+                      ? "bg-interactive-disabled text-text-disabled cursor-not-allowed"
+                      : "bg-surface-secondary hover:bg-surface-tertiary text-text-primary"
+                  )}
+                >
+                  <KeyRound size={16} />
+                  {t("vault.useSecurityKey")}
+                </button>
+              )}
+            </div>
+          )}
         </form>
       </div>
     </div>

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "name": "CrossTerm Dark",
-  "author": "CrossTerm",
+  "author": "Abhishek Lal",
   "variant": "dark",
   "tokens": {
     "surface-primary": "#1a1b26",

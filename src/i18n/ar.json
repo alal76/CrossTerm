@@ -1,0 +1,86 @@
+{
+  "app": {
+    "name": "كروس تيرم",
+    "tagline": "محاكي طرفية وأداة الوصول عن بعد"
+  },
+  "sidebar": {
+    "sessions": "الجلسات",
+    "snippets": "القصاصات",
+    "tunnels": "الأنفاق",
+    "credentials": "مدير الاعتمادات",
+    "collapse": "طي الشريط الجانبي",
+    "expand": "توسيع الشريط الجانبي"
+  },
+  "tabs": {
+    "newTab": "علامة تبويب جديدة",
+    "closeTab": "إغلاق علامة التبويب",
+    "closeOthers": "إغلاق الأخرى",
+    "closeAll": "إغلاق الكل",
+    "pinTab": "تثبيت علامة التبويب",
+    "unpinTab": "إلغاء تثبيت علامة التبويب",
+    "duplicateTab": "تكرار علامة التبويب",
+    "splitRight": "تقسيم لليمين",
+    "splitDown": "تقسيم للأسفل"
+  },
+  "titleBar": {
+    "profile": "الملف الشخصي",
+    "switchProfile": "تبديل الملف الشخصي",
+    "settings": "الإعدادات",
+    "search": "بحث..."
+  },
+  "statusBar": {
+    "profile": "الملف الشخصي",
+    "encoding": "UTF-8",
+    "tunnels": "الأنفاق",
+    "noTunnels": "لا توجد أنفاق نشطة",
+    "dimensions": "{{cols}} × {{rows}}"
+  },
+  "emptyCanvas": {
+    "title": "مرحباً بك في كروس تيرم",
+    "hint": "اضغط {{shortcut}} لفتح جلسة جديدة",
+    "shortcut": "⌘T"
+  },
+  "status": {
+    "connected": "متصل",
+    "disconnected": "غير متصل",
+    "connecting": "جارٍ الاتصال...",
+    "idle": "خامل"
+  },
+  "themes": {
+    "title": "السمة",
+    "dark": "داكن",
+    "light": "فاتح",
+    "system": "النظام"
+  },
+  "actions": {
+    "save": "حفظ",
+    "cancel": "إلغاء",
+    "close": "إغلاق",
+    "create": "إنشاء",
+    "delete": "حذف",
+    "confirm": "تأكيد",
+    "copy": "نسخ",
+    "paste": "لصق",
+    "selectAll": "تحديد الكل",
+    "undo": "تراجع",
+    "redo": "إعادة",
+    "refresh": "تحديث"
+  },
+  "help": {
+    "title": "المساعدة",
+    "menu": {
+      "gettingStarted": "البدء",
+      "keyboardShortcuts": "اختصارات لوحة المفاتيح",
+      "troubleshooting": "استكشاف الأخطاء",
+      "reportIssue": "الإبلاغ عن مشكلة",
+      "about": "حول",
+      "onlineDocs": "التوثيق عبر الإنترنت"
+    }
+  },
+  "notifications": {
+    "title": "الإشعارات",
+    "empty": "لا توجد إشعارات",
+    "clearAll": "مسح الكل",
+    "dismiss": "رفض"
+  }
+}

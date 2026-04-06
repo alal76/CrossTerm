@@ -58,6 +58,15 @@ export default function HelpMenu({ onOpenHelp, onOpenShortcuts, onStartTour }: H
     },
     { id: "sep1", divider: true as const },
     {
+      id: "online-docs",
+      icon: <ExternalLink size={13} />,
+      label: t("help.menu.onlineDocs"),
+      action: () => {
+        setOpen(false);
+        window.open("https://aalmonstorth.github.io/CrossTerm/", "_blank", "noopener,noreferrer");
+      },
+    },
+    {
       id: "troubleshooting",
       icon: <AlertTriangle size={13} />,
       label: t("help.menu.troubleshooting"),

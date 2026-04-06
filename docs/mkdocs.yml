@@ -1,0 +1,62 @@
+site_name: CrossTerm Documentation
+site_description: "Cross-platform terminal emulator and remote access suite"
+site_url: https://aalmonstorth.github.io/CrossTerm/
+repo_url: https://github.com/AAlmonstorth/CrossTerm
+repo_name: AAlmonstorth/CrossTerm
+
+docs_dir: help
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: deep purple
+      accent: deep purple
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: deep purple
+      accent: deep purple
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - search.suggest
+    - search.highlight
+    - content.tabs.link
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - User Guide:
+    - SSH Connections: ssh-connections.md
+    - SFTP File Transfer: sftp-file-transfer.md
+    - Credential Vault: credential-vault.md
+  - Protocol References:
+    - SSH: ssh-protocol-reference.md
+    - RDP: rdp-protocol-reference.md
+    - VNC: vnc-protocol-reference.md
+    - Serial: serial-protocol-reference.md
+  - Customization: customization.md
+  - Keyboard Shortcuts: keyboard-shortcuts.md
+  - Security: security-guide.md
+  - Troubleshooting: troubleshooting.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - toc:
+      permalink: true
+  - attr_list
+  - md_in_html
+
+plugins:
+  - search

@@ -30,8 +30,10 @@ interface AppState {
   customThemeName: string | null;
   customThemeTokens: Partial<ThemeTokens> | null;
   customShortcuts: Record<string, { keys?: string; macKeys?: string }>;
+  showNotificationHistory: boolean;
   windowWidth: number;
   windowHeight: number;
+  setShowNotificationHistory: (show: boolean) => void;
   setSidebarMode: (mode: SidebarMode) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   toggleSidebar: () => void;
@@ -89,10 +91,12 @@ export const useAppStore = create<AppState>((set) => ({
   customThemeName: null,
   customThemeTokens: null,
   customShortcuts: {},
+  showNotificationHistory: false,
 
   windowWidth: window.innerWidth,
   windowHeight: window.innerHeight,
 
+  setShowNotificationHistory: (show) => set({ showNotificationHistory: show }),
   setBellStyle: (style) => set({ bellStyle: style }),
   setCursorStyle: (style) => set({ cursorStyle: style }),
   setCursorBlink: (blink) => set({ cursorBlink: blink }),

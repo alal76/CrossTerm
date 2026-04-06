@@ -1170,8 +1170,8 @@ On desktop platforms, install a shell integration script (similar to iTerm2 shel
 
 ## 19. Licensing & Legal
 
-- The core application should be licensed under **Apache 2.0** or **MIT** (dual license).
-- FreeRDP (Apache 2.0) and libvncclient (GPL-2.0) integration must respect their respective licenses. If libvncclient's GPL is problematic, use a permissive alternative or isolate it as a subprocess.
+- The core application is licensed under **AGPL-3.0-only**.
+- FreeRDP (Apache 2.0) and libvncclient (GPL-2.0) integration must respect their respective licenses; both are compatible with AGPL-3.0.
 - All third-party dependencies must be auditable via an SBOM (CycloneDX format) generated in CI.
 
 ---

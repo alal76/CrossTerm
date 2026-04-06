@@ -71,6 +71,7 @@ export default function TerminalView({ terminalId, isActive }: TerminalViewProps
   const broadcastMode = useTerminalStore((state) => state.broadcastMode);
   const updateTerminalDimensions = useTerminalStore((state) => state.updateTerminalDimensions);
   const updateTerminalStatus = useTerminalStore((state) => state.updateTerminalStatus);
+  const updateTerminalTitle = useTerminalStore((state) => state.updateTerminalTitle);
   const removeTerminal = useTerminalStore((state) => state.removeTerminal);
 
   const bellStyle = useAppStore((state) => state.bellStyle);
@@ -199,6 +200,32 @@ export default function TerminalView({ terminalId, isActive }: TerminalViewProps
       }
     });
 
+    // ── OSC handlers for shell integration ──
+    // OSC 7: Track CWD — file://hostname/path
+    if (term.parser?.registerOscHandler) {
+      term.parser.registerOscHandler(7, (data) => {
+        try {
+          const url = new URL(data);
+          const cwd = decodeURIComponent(url.pathname);
+          if (cwd) {
+            const parts = cwd.split("/").filter(Boolean);
+            const dirName = parts.length > 0 ? parts[parts.length - 1] : cwd;
+            updateTerminalTitle(terminalId, dirName);
+          }
+        } catch {
+          // Malformed OSC 7 payload — ignore
+        }
+        return true;
+      });
+
+      // OSC 7777: Command duration/exit tracking (custom CrossTerm extension)
+      term.parser.registerOscHandler(7777, (_data) => {
+        // Format: duration=N;exit=N
+        // Data is available for future status bar display; no action needed now.
+        return true;
+      });
+    }
+
     const resizeObserver = new ResizeObserver(() => {
       requestAnimationFrame(() => {
         handleResize();
@@ -218,7 +245,7 @@ export default function TerminalView({ terminalId, isActive }: TerminalViewProps
       searchAddonRef.current = null;
       removeTerminal(terminalId);
     };
-  }, [bellStyle, cursorBlink, cursorStyle, emitData, flashBell, handleResize, removeTerminal, terminalId, updateTerminalStatus]);
+  }, [bellStyle, cursorBlink, cursorStyle, emitData, flashBell, handleResize, removeTerminal, terminalId, updateTerminalStatus, updateTerminalTitle]);
 
   useEffect(() => {
     if (!isActive) {

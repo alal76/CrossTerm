@@ -1,0 +1,23 @@
+/* RTL Layout Support — CSS Logical Properties */
+/* Common overrides for directional awareness */
+
+[dir="rtl"] .sidebar-rail {
+  border-right: none;
+  border-left: 1px solid var(--border-subtle);
+}
+
+[dir="rtl"] .tab-close-btn {
+  margin-left: 0;
+  margin-right: auto;
+}
+
+/* Flip chevron icons in RTL */
+[dir="rtl"] .rtl-flip {
+  transform: scaleX(-1);
+}
+
+/* Ensure terminal content is always LTR (code is LTR regardless of UI direction) */
+.xterm {
+  direction: ltr;
+  unicode-bidi: isolate;
+}

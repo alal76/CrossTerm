@@ -1111,6 +1111,25 @@ pub async fn ssh_port_forward_add(
                                 let port = u16::from_be_bytes([buf[len], buf[len + 1]]);
                                 (domain, port)
                             }
+                            // ── IPv6 (SOCKS5 ATYP 0x04) ──
+                            0x04 => {
+                                // 16 bytes IPv6 address + 2 bytes port
+                                if reader.read_exact(&mut buf[..18]).await.is_err() {
+                                    return;
+                                }
+                                let addr = std::net::Ipv6Addr::new(
+                                    u16::from_be_bytes([buf[0], buf[1]]),
+                                    u16::from_be_bytes([buf[2], buf[3]]),
+                                    u16::from_be_bytes([buf[4], buf[5]]),
+                                    u16::from_be_bytes([buf[6], buf[7]]),
+                                    u16::from_be_bytes([buf[8], buf[9]]),
+                                    u16::from_be_bytes([buf[10], buf[11]]),
+                                    u16::from_be_bytes([buf[12], buf[13]]),
+                                    u16::from_be_bytes([buf[14], buf[15]]),
+                                );
+                                let port = u16::from_be_bytes([buf[16], buf[17]]);
+                                (format!("{}", addr), port)
+                            }
                             _ => return,
                         };
 
@@ -1580,6 +1599,72 @@ mod tests {
         let deserialized: JumpHost = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.host, "bastion.example.com");
         assert_eq!(deserialized.username, "jumpuser");
+    }
+
+    #[test]
+    fn test_socks5_ipv6_parsing() {
+        // Simulate the IPv6 address parsing logic from the SOCKS5 handler.
+        // 16 bytes of IPv6 address + 2 bytes of port (big-endian).
+
+        // Test 1: loopback address ::1, port 8080
+        let buf: [u8; 18] = [
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // first 8 bytes (4 groups of zeros)
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, // last 8 bytes (::1)
+            0x1F, 0x90, // port 8080
+        ];
+        let addr = std::net::Ipv6Addr::new(
+            u16::from_be_bytes([buf[0], buf[1]]),
+            u16::from_be_bytes([buf[2], buf[3]]),
+            u16::from_be_bytes([buf[4], buf[5]]),
+            u16::from_be_bytes([buf[6], buf[7]]),
+            u16::from_be_bytes([buf[8], buf[9]]),
+            u16::from_be_bytes([buf[10], buf[11]]),
+            u16::from_be_bytes([buf[12], buf[13]]),
+            u16::from_be_bytes([buf[14], buf[15]]),
+        );
+        let port = u16::from_be_bytes([buf[16], buf[17]]);
+        assert_eq!(format!("{}", addr), "::1");
+        assert_eq!(port, 8080);
+
+        // Test 2: 2001:db8::1, port 443
+        let buf2: [u8; 18] = [
+            0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+            0x01, 0xBB, // port 443
+        ];
+        let addr2 = std::net::Ipv6Addr::new(
+            u16::from_be_bytes([buf2[0], buf2[1]]),
+            u16::from_be_bytes([buf2[2], buf2[3]]),
+            u16::from_be_bytes([buf2[4], buf2[5]]),
+            u16::from_be_bytes([buf2[6], buf2[7]]),
+            u16::from_be_bytes([buf2[8], buf2[9]]),
+            u16::from_be_bytes([buf2[10], buf2[11]]),
+            u16::from_be_bytes([buf2[12], buf2[13]]),
+            u16::from_be_bytes([buf2[14], buf2[15]]),
+        );
+        let port2 = u16::from_be_bytes([buf2[16], buf2[17]]);
+        assert_eq!(format!("{}", addr2), "2001:db8::1");
+        assert_eq!(port2, 443);
+
+        // Test 3: fully specified address fe80::1:2:3:4, port 22
+        let buf3: [u8; 18] = [
+            0xfe, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x01, 0x00, 0x02, 0x00, 0x03, 0x00, 0x04,
+            0x00, 0x16, // port 22
+        ];
+        let addr3 = std::net::Ipv6Addr::new(
+            u16::from_be_bytes([buf3[0], buf3[1]]),
+            u16::from_be_bytes([buf3[2], buf3[3]]),
+            u16::from_be_bytes([buf3[4], buf3[5]]),
+            u16::from_be_bytes([buf3[6], buf3[7]]),
+            u16::from_be_bytes([buf3[8], buf3[9]]),
+            u16::from_be_bytes([buf3[10], buf3[11]]),
+            u16::from_be_bytes([buf3[12], buf3[13]]),
+            u16::from_be_bytes([buf3[14], buf3[15]]),
+        );
+        let port3 = u16::from_be_bytes([buf3[16], buf3[17]]);
+        assert_eq!(format!("{}", addr3), "fe80::1:2:3:4");
+        assert_eq!(port3, 22);
     }
 
     // ── Test helpers for integration tests ──────────────────────────────
