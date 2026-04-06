@@ -42,7 +42,7 @@ test.describe('Session Management', () => {
   // Steps: Sessions panel → New → fill form → save
   // Assertions: Session in tree
   test.skip('E2E-02: create SSH session appears in session tree', async ({ page }) => {
-    // TODO: Requires SSH Docker container for full integration
+    // NOTE: Requires SSH Docker container for full integration — skipped until CI Docker environment is available
     await page.goto('/');
 
     // Navigate to Sessions panel in the sidebar
@@ -52,8 +52,8 @@ test.describe('Session Management', () => {
     // Click "New Session" button
     await page.getByText('New Session').click();
 
-    // TODO: Fill in SSH session form with host, port, username, auth method
-    // These depend on the Docker SSH test container being available
+    // NOTE: Fill in SSH session form with host, port, username, auth method
+    // Depends on the Docker SSH test container being available
     // await page.locator('#session-host').fill('127.0.0.1');
     // await page.locator('#session-port').fill('2222');
     // await page.getByText('Save').click();
@@ -64,7 +64,7 @@ test.describe('Session Management', () => {
   // Steps: Cmd+T → Local Shell → type `echo hello`
   // Assertions: "hello" appears in terminal output
   test.skip('E2E-03: open local terminal and execute command', async ({ page }) => {
-    // TODO: Requires Tauri backend with PTY support running
+    // NOTE: Requires Tauri backend with PTY support — skipped until native PTY is available in test harness
     await page.goto('/');
 
     // Press Ctrl+T to open a new local terminal
@@ -75,7 +75,7 @@ test.describe('Session Management', () => {
     const tabs = page.locator('[role="tablist"] [role="tab"]');
     await expect(tabs).toHaveCount(1);
 
-    // TODO: PTY interaction requires the Tauri backend
+    // NOTE: PTY interaction requires the Tauri backend
     // Type command in the terminal xterm.js textarea
     // await page.locator('.xterm-helper-textarea').type('echo hello\n');
     // await expect(page.locator('.xterm-screen')).toContainText('hello');

@@ -14,6 +14,66 @@ interface MarkdownNode {
   lang?: string;
 }
 
+function parseCodeBlock(lines: string[], startIndex: number): { node: MarkdownNode; nextIndex: number } {
+  const lang = lines[startIndex].slice(3).trim();
+  const codeLines: string[] = [];
+  let i = startIndex + 1;
+  while (i < lines.length && !lines[i].startsWith("```")) {
+    codeLines.push(lines[i]);
+    i++;
+  }
+  i++; // skip closing ```
+  return { node: { type: "code", content: codeLines.join("\n"), lang }, nextIndex: i };
+}
+
+function parseTable(lines: string[], startIndex: number): { node: MarkdownNode; nextIndex: number } {
+  const tableRows: string[][] = [];
+  tableRows.push(
+    lines[startIndex].split("|").map((c) => c.trim()).filter(Boolean),
+  );
+  let i = startIndex + 2; // skip header + separator
+  while (i < lines.length && lines[i].includes("|") && lines[i].trim() !== "") {
+    tableRows.push(
+      lines[i].split("|").map((c) => c.trim()).filter(Boolean),
+    );
+    i++;
+  }
+  return { node: { type: "table", rows: tableRows }, nextIndex: i };
+}
+
+function parseList(lines: string[], startIndex: number, ordered: boolean): { node: MarkdownNode; nextIndex: number } {
+  const pattern = ordered ? /^\d+\.\s+/ : /^[-*+]\s+/;
+  const items: MarkdownNode[] = [];
+  let i = startIndex;
+  while (i < lines.length && pattern.test(lines[i])) {
+    items.push({ type: "list-item", content: lines[i].replace(pattern, "") });
+    i++;
+  }
+  return { node: { type: "list", ordered, children: items }, nextIndex: i };
+}
+
+function parseParagraph(lines: string[], startIndex: number): { node: MarkdownNode; nextIndex: number } {
+  const paraLines: string[] = [];
+  let i = startIndex;
+  while (
+    i < lines.length &&
+    lines[i].trim() !== "" &&
+    !lines[i].startsWith("#") &&
+    !lines[i].startsWith("```") &&
+    !/^[-*+]\s+/.test(lines[i]) &&
+    !/^\d+\.\s+/.test(lines[i]) &&
+    !/^(-{3,}|\*{3,}|_{3,})$/.test(lines[i].trim())
+  ) {
+    paraLines.push(lines[i]);
+    i++;
+  }
+  return { node: { type: "paragraph", content: paraLines.join(" ") }, nextIndex: i };
+}
+
+function isTableStart(line: string, nextLine: string | undefined): boolean {
+  return line.includes("|") && !!nextLine && /^\|?\s*[-:]+/.test(nextLine);
+}
+
 function parseMarkdown(source: string): MarkdownNode[] {
   const lines = source.split("\n");
   const nodes: MarkdownNode[] = [];
@@ -22,98 +82,55 @@ function parseMarkdown(source: string): MarkdownNode[] {
   while (i < lines.length) {
     const line = lines[i];
 
-    // Blank line
     if (line.trim() === "") {
       i++;
       continue;
     }
 
-    // Code block
     if (line.startsWith("```")) {
-      const lang = line.slice(3).trim();
-      const codeLines: string[] = [];
-      i++;
-      while (i < lines.length && !lines[i].startsWith("```")) {
-        codeLines.push(lines[i]);
-        i++;
-      }
-      i++; // skip closing ```
-      nodes.push({ type: "code", content: codeLines.join("\n"), lang });
+      const result = parseCodeBlock(lines, i);
+      nodes.push(result.node);
+      i = result.nextIndex;
       continue;
     }
 
-    // Heading
-    const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
+    const headingMatch = /^(#{1,6})\s+(.+)$/.exec(line);
     if (headingMatch) {
       nodes.push({ type: "heading", level: headingMatch[1].length, content: headingMatch[2] });
       i++;
       continue;
     }
 
-    // Horizontal rule
     if (/^(-{3,}|\*{3,}|_{3,})$/.test(line.trim())) {
       nodes.push({ type: "hr" });
       i++;
       continue;
     }
 
-    // Table
-    if (line.includes("|") && i + 1 < lines.length && /^\|?\s*[-:]+/.test(lines[i + 1])) {
-      const tableRows: string[][] = [];
-      // Header
-      tableRows.push(
-        line.split("|").map((c) => c.trim()).filter(Boolean),
-      );
-      i += 2; // skip header + separator
-      while (i < lines.length && lines[i].includes("|") && lines[i].trim() !== "") {
-        tableRows.push(
-          lines[i].split("|").map((c) => c.trim()).filter(Boolean),
-        );
-        i++;
-      }
-      nodes.push({ type: "table", rows: tableRows });
+    if (isTableStart(line, lines[i + 1])) {
+      const result = parseTable(lines, i);
+      nodes.push(result.node);
+      i = result.nextIndex;
       continue;
     }
 
-    // Unordered list
     if (/^[-*+]\s+/.test(line)) {
-      const items: MarkdownNode[] = [];
-      while (i < lines.length && /^[-*+]\s+/.test(lines[i])) {
-        items.push({ type: "list-item", content: lines[i].replace(/^[-*+]\s+/, "") });
-        i++;
-      }
-      nodes.push({ type: "list", ordered: false, children: items });
+      const result = parseList(lines, i, false);
+      nodes.push(result.node);
+      i = result.nextIndex;
       continue;
     }
 
-    // Ordered list
     if (/^\d+\.\s+/.test(line)) {
-      const items: MarkdownNode[] = [];
-      while (i < lines.length && /^\d+\.\s+/.test(lines[i])) {
-        items.push({ type: "list-item", content: lines[i].replace(/^\d+\.\s+/, "") });
-        i++;
-      }
-      nodes.push({ type: "list", ordered: true, children: items });
+      const result = parseList(lines, i, true);
+      nodes.push(result.node);
+      i = result.nextIndex;
       continue;
     }
 
-    // Paragraph (collect consecutive non-empty, non-special lines)
-    const paraLines: string[] = [];
-    while (
-      i < lines.length &&
-      lines[i].trim() !== "" &&
-      !lines[i].startsWith("#") &&
-      !lines[i].startsWith("```") &&
-      !/^[-*+]\s+/.test(lines[i]) &&
-      !/^\d+\.\s+/.test(lines[i]) &&
-      !/^(-{3,}|\*{3,}|_{3,})$/.test(lines[i].trim())
-    ) {
-      paraLines.push(lines[i]);
-      i++;
-    }
-    if (paraLines.length > 0) {
-      nodes.push({ type: "paragraph", content: paraLines.join(" ") });
-    }
+    const result = parseParagraph(lines, i);
+    nodes.push(result.node);
+    i = result.nextIndex;
   }
 
   return nodes;
@@ -194,7 +211,7 @@ function MarkdownBlock({ node }: { readonly node: MarkdownNode }) {
         return (
           <ol className="list-decimal list-inside mb-3 space-y-1">
             {node.children?.map((child, idx) => (
-              <li key={idx} className="text-sm text-text-secondary leading-relaxed">
+              <li key={`${child.content?.substring(0, 30) ?? ""}-${idx}`} className="text-sm text-text-secondary leading-relaxed">
                 {renderInline(child.content ?? "")}
               </li>
             ))}
@@ -204,7 +221,7 @@ function MarkdownBlock({ node }: { readonly node: MarkdownNode }) {
       return (
         <ul className="list-disc list-inside mb-3 space-y-1">
           {node.children?.map((child, idx) => (
-            <li key={idx} className="text-sm text-text-secondary leading-relaxed">
+            <li key={`${child.content?.substring(0, 30) ?? ""}-${idx}`} className="text-sm text-text-secondary leading-relaxed">
               {renderInline(child.content ?? "")}
             </li>
           ))}
@@ -220,7 +237,7 @@ function MarkdownBlock({ node }: { readonly node: MarkdownNode }) {
                 <thead>
                   <tr className="border-b border-border-default">
                     {node.rows[0].map((cell, ci) => (
-                      <th key={ci} className="text-left px-2 py-1.5 font-semibold text-text-primary">
+                      <th key={`${cell}-${ci}`} className="text-left px-2 py-1.5 font-semibold text-text-primary">
                         {renderInline(cell)}
                       </th>
                     ))}
@@ -228,9 +245,9 @@ function MarkdownBlock({ node }: { readonly node: MarkdownNode }) {
                 </thead>
                 <tbody>
                   {node.rows.slice(1).map((row, ri) => (
-                    <tr key={ri} className="border-b border-border-subtle">
+                    <tr key={`${row.join("-")}-${ri}`} className="border-b border-border-subtle">
                       {row.map((cell, ci) => (
-                        <td key={ci} className="px-2 py-1.5 text-text-secondary">
+                        <td key={`${cell}-${ci}`} className="px-2 py-1.5 text-text-secondary">
                           {renderInline(cell)}
                         </td>
                       ))}
@@ -257,7 +274,7 @@ export default function MarkdownRenderer({ content }: { readonly content: string
   return (
     <div className="markdown-content">
       {nodes.map((node, idx) => (
-        <MarkdownBlock key={idx} node={node} />
+        <MarkdownBlock key={`${node.type}-${idx}`} node={node} />
       ))}
     </div>
   );

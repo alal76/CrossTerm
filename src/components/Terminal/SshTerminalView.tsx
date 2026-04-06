@@ -139,18 +139,19 @@ export default function SshTerminalView({ connectionId, isActive }: SshTerminalV
 
     updateTerminalStatus(connectionId, ConnectionStatus.Connected);
 
-    // ResizeObserver for auto-fit
+    const doResize = () => {
+      try {
+        fitAddon.fit();
+        const { cols, rows } = term;
+        updateTerminalDimensions(connectionId, cols, rows);
+        invoke("ssh_resize", { connectionId, rows, cols }).catch(() => {});
+      } catch {
+        // ignore
+      }
+    };
+
     const resizeObserver = new ResizeObserver(() => {
-      requestAnimationFrame(() => {
-        try {
-          fitAddon.fit();
-          const { cols, rows } = term;
-          updateTerminalDimensions(connectionId, cols, rows);
-          invoke("ssh_resize", { connectionId, rows, cols }).catch(() => {});
-        } catch {
-          // ignore
-        }
-      });
+      requestAnimationFrame(doResize);
     });
     resizeObserver.observe(container);
 

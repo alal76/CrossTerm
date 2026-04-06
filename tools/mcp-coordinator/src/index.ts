@@ -9,7 +9,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PROJECT_ROOT = resolve(__dirname, "../..");
+const PROJECT_ROOT = resolve(__dirname, "../../..");
 const GAP_ANALYSIS_PATH = resolve(PROJECT_ROOT, "GAP-ANALYSIS.md");
 const STATE_PATH = resolve(__dirname, "../.coordinator-state.json");
 
@@ -330,6 +330,80 @@ function buildInitialState(): CoordinatorState {
       gapIds: [],
       status: "pending",
       files: [],
+    },
+    // ── Quality & SonarQube Fix Work Packages ──
+    {
+      id: "WP-QA-01",
+      name: "Config + Build + Import Fixes",
+      description:
+        "Fix tsconfig.json baseUrl deprecation, vite.config.ts node:path import, TerminalTab.tsx missing module import",
+      phase: 1,
+      gapIds: [],
+      status: "pending",
+      files: ["tsconfig.json", "vite.config.ts", "src/components/Terminal/TerminalTab.tsx"],
+    },
+    {
+      id: "WP-QA-02",
+      name: "Dialog/Modal Accessibility",
+      description:
+        "Convert role=dialog divs to <dialog> elements, remove role=presentation backdrops, fix non-interactive event listeners. Files: CommandPalette, QuickConnect, SessionEditor, CredentialManager, ShortcutOverlay, WhatsNewPanel",
+      phase: 1,
+      gapIds: [],
+      status: "pending",
+      files: [
+        "src/components/Shared/CommandPalette.tsx",
+        "src/components/Shared/QuickConnect.tsx",
+        "src/components/SessionTree/SessionEditor.tsx",
+        "src/components/Vault/CredentialManager.tsx",
+        "src/components/Help/ShortcutOverlay.tsx",
+        "src/components/Help/WhatsNewPanel.tsx",
+      ],
+    },
+    {
+      id: "WP-QA-03",
+      name: "Code Quality + Lint Fixes",
+      description:
+        "Readonly props (App.tsx, Toast.tsx, CommandPalette, QuickConnect), nested ternaries (App.tsx, CredentialManager), globalThis vs window, optional chaining, negated conditions, role=status to <output>, interactive element roles on TerminalView/SftpBrowser, SshTerminalView nesting depth, ShortcutOverlay push calls",
+      phase: 1,
+      gapIds: [],
+      status: "pending",
+      files: [
+        "src/App.tsx",
+        "src/components/Shared/Toast.tsx",
+        "src/components/Terminal/TerminalView.tsx",
+        "src/components/Terminal/SshTerminalView.tsx",
+        "src/components/SftpBrowser/SftpBrowser.tsx",
+        "src/components/Help/ShortcutOverlay.tsx",
+      ],
+    },
+    {
+      id: "WP-QA-04",
+      name: "Cognitive Complexity Refactors",
+      description:
+        "Reduce cognitive complexity: VaultUnlock.tsx (17→15), MarkdownRenderer.tsx parseMarkdown (37→15), scripts/validate-help.mjs main (38→15). Also fix array index keys and RegExp.exec in MarkdownRenderer",
+      phase: 1,
+      gapIds: [],
+      status: "pending",
+      files: [
+        "src/components/Vault/VaultUnlock.tsx",
+        "src/components/Help/MarkdownRenderer.tsx",
+        "scripts/validate-help.mjs",
+      ],
+    },
+    {
+      id: "WP-QA-05",
+      name: "Test File Cleanup",
+      description:
+        "Fix unused imports/vars in SettingsPanel.test.tsx (mockInvoke), SessionEditor.test.tsx (waitFor), SftpBrowser.test.tsx (userEvent, unnecessary assertions, String.raw). Fix E2E TODO comments in session-management.spec.ts",
+      phase: 1,
+      gapIds: [],
+      status: "pending",
+      files: [
+        "src/components/Settings/__tests__/SettingsPanel.test.tsx",
+        "src/components/SessionTree/__tests__/SessionEditor.test.tsx",
+        "src/components/SftpBrowser/__tests__/SftpBrowser.test.tsx",
+        "e2e/session-management.spec.ts",
+      ],
     },
   ];
 

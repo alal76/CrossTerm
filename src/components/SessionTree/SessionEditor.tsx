@@ -140,9 +140,9 @@ export default function SessionEditor({ session, onClose }: SessionEditorProps) 
   const needsHost = type !== SessionType.LocalShell && type !== SessionType.WSL;
 
   return (
-    <div
+    <dialog
+      open
       className="fixed inset-0 z-[8000] flex items-center justify-center"
-      role="dialog"
       aria-modal="true"
       aria-label={isEdit ? "Edit Session" : "New Session"}
     >
@@ -150,7 +150,7 @@ export default function SessionEditor({ session, onClose }: SessionEditorProps) 
         className="absolute inset-0 bg-surface-overlay/60 backdrop-blur-sm"
         onClick={onClose}
         onKeyDown={(e) => e.key === "Escape" && onClose()}
-        role="presentation"
+        aria-hidden="true"
       />
       <div
         className="relative w-full max-w-md max-h-[90vh] bg-surface-elevated border border-border-default rounded-xl shadow-[var(--shadow-3)] flex flex-col overflow-hidden"
@@ -296,7 +296,7 @@ export default function SessionEditor({ session, onClose }: SessionEditorProps) 
           </button>
         </div>
       </div>
-    </div>
+    </dialog>
   );
 }
 

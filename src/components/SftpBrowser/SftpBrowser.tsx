@@ -236,7 +236,7 @@ export default function SftpBrowser({ connectionId }: SftpBrowserProps) {
   }, [remotePath, selectedEntry, sessionId]);
 
   const handleExternalDrop = useCallback(
-    async (event: React.DragEvent<HTMLDivElement>) => {
+    async (event: React.DragEvent<HTMLElement>) => {
       event.preventDefault();
       setDragActive(false);
 
@@ -275,7 +275,7 @@ export default function SftpBrowser({ connectionId }: SftpBrowserProps) {
   );
 
   const handleLocalPaneDrop = useCallback(
-    async (e: React.DragEvent<HTMLDivElement>) => {
+    async (e: React.DragEvent<HTMLElement>) => {
       e.preventDefault();
       setLocalDropActive(false);
       const raw = e.dataTransfer.getData("application/x-sftp-file");
@@ -305,7 +305,7 @@ export default function SftpBrowser({ connectionId }: SftpBrowserProps) {
   );
 
   const handleRemotePaneDrop = useCallback(
-    async (e: React.DragEvent<HTMLDivElement>) => {
+    async (e: React.DragEvent<HTMLElement>) => {
       e.preventDefault();
       setRemoteDropActive(false);
       const raw = e.dataTransfer.getData("application/x-sftp-file");
@@ -336,7 +336,8 @@ export default function SftpBrowser({ connectionId }: SftpBrowserProps) {
 
   if (!connectionId) {
     return (
-      <div
+      <section
+        aria-label="File drop zone"
         className={clsx(
           "relative flex-1 flex flex-col border border-border-default rounded-lg overflow-hidden",
           dragActive ? "ring-2 ring-accent-primary ring-inset" : "",
@@ -370,13 +371,14 @@ export default function SftpBrowser({ connectionId }: SftpBrowserProps) {
           <p className="text-xs text-text-secondary mb-1">{t("sftp.notConnected")}</p>
           <p className="text-[10px] text-text-disabled">{t("sftp.connectToBrowse")}</p>
         </div>
-      </div>
+      </section>
     );
   }
 
   return (
     <div className="flex h-full gap-4 bg-surface-primary" data-help-article="sftp-file-transfer">
-      <div
+      <section
+        aria-label="Local file panel"
         className={clsx(
           "w-56 shrink-0 flex flex-col border rounded-lg overflow-hidden transition-colors",
           localDropActive
@@ -407,18 +409,19 @@ export default function SftpBrowser({ connectionId }: SftpBrowserProps) {
             disabled={!sessionId}
             className={clsx(
               "flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors duration-[var(--duration-short)]",
-              !sessionId
-                ? "bg-interactive-disabled text-text-disabled cursor-not-allowed"
-                : "bg-interactive-default hover:bg-interactive-hover text-text-primary",
+              sessionId
+                ? "bg-interactive-default hover:bg-interactive-hover text-text-primary"
+                : "bg-interactive-disabled text-text-disabled cursor-not-allowed",
             )}
           >
             <Upload size={13} />
             {t("sftp.chooseFiles")}
           </button>
         </div>
-      </div>
+      </section>
 
-      <div
+      <section
+        aria-label="Remote file panel"
         className={clsx(
           "flex-1 flex flex-col border rounded-lg overflow-hidden transition-colors",
           remoteDropActive
@@ -548,7 +551,7 @@ export default function SftpBrowser({ connectionId }: SftpBrowserProps) {
             })}
           </div>
         ) : null}
-      </div>
+      </section>
     </div>
   );
 }

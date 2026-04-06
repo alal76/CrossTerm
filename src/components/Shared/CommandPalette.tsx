@@ -45,7 +45,7 @@ export default function CommandPalette({
   onOpenHelp,
   onOpenShortcuts,
   onOpenHelpArticle,
-}: CommandPaletteProps) {
+}: Readonly<CommandPaletteProps>) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -270,13 +270,14 @@ export default function CommandPalette({
       className="fixed inset-0 z-[9000] flex justify-center pt-[10vh]"
       onClick={close}
       onKeyDown={(e) => e.key === "Escape" && close()}
-      role="presentation"
+      aria-hidden="true"
     >
       <div
         className="absolute inset-0 bg-surface-overlay/60 backdrop-blur-sm"
         style={{ transition: `opacity var(--duration-short) var(--ease-default)` }}
       />
-      <div
+      <dialog
+        open
         className="relative w-full max-w-lg bg-surface-elevated rounded-xl border border-border-default shadow-[var(--shadow-3)] overflow-hidden"
         style={{
           maxHeight: "400px",
@@ -284,7 +285,6 @@ export default function CommandPalette({
         }}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.key === "Escape" && close()}
-        role="dialog"
       >
         <div className="flex items-center gap-2 px-4 py-3 border-b border-border-subtle">
           <Command size={16} className="text-text-secondary shrink-0" />
@@ -333,7 +333,7 @@ export default function CommandPalette({
             ))
           )}
         </div>
-      </div>
+      </dialog>
     </div>
   );
 }

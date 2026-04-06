@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import "@/i18n";
 import SftpBrowser from "@/components/SftpBrowser/SftpBrowser";
@@ -87,7 +86,7 @@ describe("SftpBrowser", () => {
 
     // Now use breadcrumb: click the Home button to go back to root
     // The Home button is the first button inside the breadcrumb (contains Home SVG icon)
-    const homeBtn = document.querySelector(".flex.items-center.gap-0\\.5 button");
+    const homeBtn = document.querySelector(String.raw`.flex.items-center.gap-0\.5 button`);
     expect(homeBtn).toBeTruthy();
     fireEvent.click(homeBtn!);
 

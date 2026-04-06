@@ -149,11 +149,11 @@ export default function ShortcutOverlay({ open, onClose }: ShortcutOverlayProps)
   if (!open) return null;
 
   return (
-    <div
+    <dialog
+      open
       className="fixed inset-0 z-[9000] flex items-center justify-center"
       onClick={onClose}
       onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
-      role="dialog"
       aria-modal="true"
       aria-label={t("help.shortcutOverlay.title")}
     >
@@ -246,6 +246,6 @@ export default function ShortcutOverlay({ open, onClose }: ShortcutOverlayProps)
           ))}
         </div>
       </div>
-    </div>
+    </dialog>
   );
 }

@@ -53,7 +53,7 @@ export default function WhatsNewPanel() {
         className="absolute inset-0 bg-surface-overlay/60 backdrop-blur-sm"
         onClick={handleDismiss}
         onKeyDown={(e) => e.key === "Escape" && handleDismiss()}
-        role="presentation"
+        aria-hidden="true"
       />
       <div
         className="relative w-full max-w-lg max-h-[80vh] bg-surface-elevated border border-border-default rounded-xl shadow-[var(--shadow-3)] flex flex-col overflow-hidden"

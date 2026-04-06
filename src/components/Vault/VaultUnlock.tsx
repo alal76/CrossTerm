@@ -5,6 +5,36 @@ import clsx from "clsx";
 import { Lock, Eye, EyeOff, ShieldCheck, Loader2, Fingerprint, KeyRound } from "lucide-react";
 import { useVaultStore } from "@/stores/vaultStore";
 
+function validateNewVaultPassword(
+  password: string,
+  confirmPassword: string,
+  t: (key: string) => string,
+): string | null {
+  if (password.length < 8) return t("vault.passwordTooShort");
+  if (password !== confirmPassword) return t("vault.passwordMismatch");
+  return null;
+}
+
+async function detectAuthMethods(
+  setBiometricAvailable: (v: boolean) => void,
+  setFido2Available: (v: boolean) => void,
+  setIsMac: (v: boolean) => void,
+) {
+  try {
+    const bio = await invoke<boolean>("vault_biometric_available");
+    setBiometricAvailable(bio);
+  } catch {
+    setBiometricAvailable(false);
+  }
+  try {
+    const fido = await invoke<boolean>("vault_fido2_available");
+    setFido2Available(fido);
+  } catch {
+    setFido2Available(false);
+  }
+  setIsMac(navigator.userAgent.toUpperCase().includes("MAC"));
+}
+
 export default function VaultUnlock() {
   const { t } = useTranslation();
   const [password, setPassword] = useState("");
@@ -40,22 +70,7 @@ export default function VaultUnlock() {
 
   // Detect biometric and FIDO2 availability
   useEffect(() => {
-    async function detectAuthMethods() {
-      try {
-        const bio = await invoke<boolean>("vault_biometric_available");
-        setBiometricAvailable(bio);
-      } catch {
-        setBiometricAvailable(false);
-      }
-      try {
-        const fido = await invoke<boolean>("vault_fido2_available");
-        setFido2Available(fido);
-      } catch {
-        setFido2Available(false);
-      }
-      setIsMac(navigator.userAgent.toUpperCase().includes("MAC"));
-    }
-    detectAuthMethods();
+    detectAuthMethods(setBiometricAvailable, setFido2Available, setIsMac);
   }, []);
 
   useEffect(() => {
@@ -74,32 +89,23 @@ export default function VaultUnlock() {
     }
 
     if (isNewVault) {
-      if (password.length < 8) {
-        setError(t("vault.passwordTooShort"));
+      const validationError = validateNewVaultPassword(password, confirmPassword, t);
+      if (validationError) {
+        setError(validationError);
         return;
       }
-      if (password !== confirmPassword) {
-        setError(t("vault.passwordMismatch"));
-        return;
-      }
-      setLoading(true);
-      try {
+    }
+
+    setLoading(true);
+    try {
+      if (isNewVault) {
         await invoke("vault_create", { password });
-        await unlockVault(password);
-      } catch (e) {
-        setError(String(e));
-      } finally {
-        setLoading(false);
       }
-    } else {
-      setLoading(true);
-      try {
-        await unlockVault(password);
-      } catch (e) {
-        setError(String(e));
-      } finally {
-        setLoading(false);
-      }
+      await unlockVault(password);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
     }
   }
 

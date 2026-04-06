@@ -57,6 +57,81 @@ async function fileExists(filePath) {
   }
 }
 
+async function collectArticles(mdFiles, slugMap, articleContents) {
+  for (const file of mdFiles) {
+    const filePath = join(HELP_DIR, file);
+    const content = await readFile(filePath, "utf-8");
+    articleContents.set(file, content);
+
+    const frontmatter = parseFrontmatter(content);
+    if (!frontmatter) {
+      error(file, "Missing YAML frontmatter (must start with ---)");
+      continue;
+    }
+
+    for (const field of REQUIRED_FIELDS) {
+      if (!frontmatter[field]) {
+        error(file, `Missing required frontmatter field: "${field}"`);
+      }
+    }
+
+    if (frontmatter.slug) {
+      if (slugMap.has(frontmatter.slug)) {
+        error(file, `Duplicate slug "${frontmatter.slug}" (also in ${slugMap.get(frontmatter.slug)})`);
+      } else {
+        slugMap.set(frontmatter.slug, file);
+      }
+    }
+  }
+}
+
+function isExternalUrl(target) {
+  return target.startsWith("http://") || target.startsWith("https://") || target.startsWith("mailto:");
+}
+
+async function validateLink(file, target, slugMap) {
+  if (isExternalUrl(target)) {
+    return;
+  }
+
+  if (/\.(png|jpg|jpeg|gif|svg|webp)$/i.test(target)) {
+    const imgPath = resolve(HELP_DIR, target);
+    const exists = await fileExists(imgPath);
+    if (!exists) {
+      error(file, `Referenced image not found: "${target}"`);
+    }
+    return;
+  }
+
+  if (!target.includes("/") && !target.includes(".") && !target.startsWith("#")) {
+    if (!slugMap.has(target)) {
+      warn(file, `Internal link to unknown slug: "${target}"`);
+    }
+  }
+}
+
+async function validateLinks(articleContents, slugMap) {
+  for (const [file, content] of articleContents) {
+    const linkRegex = /\[([^\]]*)\]\(([^)]+)\)/g;
+    let match;
+    while ((match = linkRegex.exec(content)) !== null) {
+      await validateLink(file, match[2], slugMap);
+    }
+  }
+}
+
+function printSummary(fileCount) {
+  console.log(`\nScanned ${fileCount} files.`);
+  console.log(`  Errors: ${errorCount}`);
+  console.log(`  Warnings: ${warnCount}`);
+
+  if (errorCount > 0) {
+    process.exit(1);
+  }
+
+  console.log("\n✅ All help articles are valid.");
+}
+
 async function main() {
   console.log("Validating help articles in docs/help/\n");
 
@@ -75,82 +150,17 @@ async function main() {
     process.exit(1);
   }
 
-  // Collect all slugs for cross-reference validation
-  const slugMap = new Map(); // slug -> filename
-  const articleContents = new Map(); // filename -> content
+  const slugMap = new Map();
+  const articleContents = new Map();
 
-  for (const file of mdFiles) {
-    const filePath = join(HELP_DIR, file);
-    const content = await readFile(filePath, "utf-8");
-    articleContents.set(file, content);
-
-    const frontmatter = parseFrontmatter(content);
-    if (!frontmatter) {
-      error(file, "Missing YAML frontmatter (must start with ---)");
-      continue;
-    }
-
-    // Check required fields
-    for (const field of REQUIRED_FIELDS) {
-      if (!frontmatter[field]) {
-        error(file, `Missing required frontmatter field: "${field}"`);
-      }
-    }
-
-    if (frontmatter.slug) {
-      if (slugMap.has(frontmatter.slug)) {
-        error(file, `Duplicate slug "${frontmatter.slug}" (also in ${slugMap.get(frontmatter.slug)})`);
-      } else {
-        slugMap.set(frontmatter.slug, file);
-      }
-    }
-  }
-
-  // Check for broken internal links and missing images
-  for (const [file, content] of articleContents) {
-    // Find markdown links: [text](target)
-    const linkRegex = /\[([^\]]*)\]\(([^)]+)\)/g;
-    let match;
-    while ((match = linkRegex.exec(content)) !== null) {
-      const target = match[2];
-
-      // Skip external URLs
-      if (target.startsWith("http://") || target.startsWith("https://") || target.startsWith("mailto:")) {
-        continue;
-      }
-
-      // Check if it's an image reference
-      if (/\.(png|jpg|jpeg|gif|svg|webp)$/i.test(target)) {
-        const imgPath = resolve(HELP_DIR, target);
-        const exists = await fileExists(imgPath);
-        if (!exists) {
-          error(file, `Referenced image not found: "${target}"`);
-        }
-        continue;
-      }
-
-      // Check if it's a slug reference (no extension, no path separator)
-      if (!target.includes("/") && !target.includes(".") && !target.startsWith("#")) {
-        if (!slugMap.has(target)) {
-          warn(file, `Internal link to unknown slug: "${target}"`);
-        }
-      }
-    }
-  }
-
-  // Summary
-  console.log(`\nScanned ${mdFiles.length} files.`);
-  console.log(`  Errors: ${errorCount}`);
-  console.log(`  Warnings: ${warnCount}`);
-
-  if (errorCount > 0) {
-    process.exit(1);
-  }
-
-  console.log("\n✅ All help articles are valid.");
+  await collectArticles(mdFiles, slugMap, articleContents);
+  await validateLinks(articleContents, slugMap);
+  printSummary(mdFiles.length);
 }
 
-main().catch((err) => {
+try {
+  await main();
+} catch (err) {
   console.error("Unexpected error:", err);
   process.exit(1);
-});
+}

@@ -7,8 +7,6 @@ import SettingsPanel from "@/components/Settings/SettingsPanel";
 import { useAppStore } from "@/stores/appStore";
 import { ThemeVariant } from "@/types";
 
-const mockInvoke = vi.mocked(invoke);
-
 // Mock Tauri plugin-dialog and plugin-fs used by SettingsPanel
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn(),

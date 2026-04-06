@@ -534,6 +534,11 @@ function TabBar({
 
 // ── Region C: Sidebar ──────────────────────────────────────────
 
+function getSidebarWidth(collapsed: boolean, bp: string) {
+  if (collapsed) return "w-12";
+  return bp === "large" ? "w-72" : "w-60";
+}
+
 const SIDEBAR_MODES = [
   { mode: SidebarMode.Sessions, icon: FolderOpen, label: "sidebar.sessions" as const },
   { mode: SidebarMode.Snippets, icon: Code2, label: "sidebar.snippets" as const },
@@ -574,7 +579,7 @@ function Sidebar({
     <nav
       className={clsx(
         "flex shrink-0 h-full border-r border-border-subtle bg-surface-secondary transition-all",
-        sidebarCollapsed ? "w-12" : breakpoint === "large" ? "w-72" : "w-60"
+        getSidebarWidth(sidebarCollapsed, breakpoint)
       )}
       style={{ transitionDuration: "var(--duration-medium)", transitionTimingFunction: "var(--ease-default)" }}
     >
@@ -662,12 +667,12 @@ function SessionsPanel({
   favorites: _favorites,
   onSelect,
   onNewSession,
-}: {
+}: Readonly<{
   sessions: import("@/types").Session[];
   favorites: string[];
   onSelect: (session: import("@/types").Session) => void;
   onNewSession?: () => void;
-}) {
+}>) {
   const { t } = useTranslation();
 
   if (sessions.length === 0) {
@@ -705,7 +710,7 @@ function SessionsPanel({
   );
 }
 
-function EmptyPanel({ icon, message }: { icon: React.ReactNode; message: string }) {
+function EmptyPanel({ icon, message }: Readonly<{ icon: React.ReactNode; message: string }>) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 py-8 text-center">
       {icon}
@@ -892,11 +897,13 @@ function StatusBar({
   }
 
   return (
-    <footer className="flex items-center h-7 px-3 bg-surface-primary border-t border-border-subtle text-[11px] text-text-secondary no-select shrink-0 gap-4" role="status">
-      <span className="flex items-center gap-1">
-        <User size={11} />
-        {activeProfile?.name ?? t("statusBar.profile")}
-      </span>
+    <footer className="flex items-center h-7 px-3 bg-surface-primary border-t border-border-subtle text-[11px] text-text-secondary no-select shrink-0 gap-4">
+      <output>
+        <span className="flex items-center gap-1">
+          <User size={11} />
+          {activeProfile?.name ?? t("statusBar.profile")}
+        </span>
+      </output>
       {activeTab && (
         <>
           <span className="flex items-center gap-1">

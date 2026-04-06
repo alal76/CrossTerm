@@ -57,10 +57,10 @@ export function useToast() {
 function ToastCard({
   item,
   onDismiss,
-}: {
+}: Readonly<{
   item: ToastItem;
   onDismiss: (id: string) => void;
-}) {
+}>) {
   const [progress, setProgress] = useState(100);
   const [exiting, setExiting] = useState(false);
 
@@ -125,7 +125,7 @@ function ToastCard({
 
 // ── Provider ──
 
-export function ToastProvider({ children }: { children: React.ReactNode }) {
+export function ToastProvider({ children }: Readonly<{ children: React.ReactNode }>) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
   const dismiss = useCallback((id: string) => {

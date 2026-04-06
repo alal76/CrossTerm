@@ -87,7 +87,7 @@ export default function TerminalView({ terminalId, isActive }: TerminalViewProps
 
   const flashBell = useCallback(() => {
     setBellFlash(true);
-    window.setTimeout(() => setBellFlash(false), 180);
+    globalThis.setTimeout(() => setBellFlash(false), 180);
   }, []);
 
   const emitData = useCallback(
@@ -270,7 +270,7 @@ export default function TerminalView({ terminalId, isActive }: TerminalViewProps
         return;
       }
       const text = event.clipboardData?.getData("text/plain");
-      if (text && text.includes("\n")) {
+      if (text?.includes("\n")) {
         event.preventDefault();
         handlePasteWithConfirmation(text);
       }
@@ -440,6 +440,8 @@ export default function TerminalView({ terminalId, isActive }: TerminalViewProps
 
       <div
         ref={containerRef}
+        role="application"
+        aria-label="Terminal"
         className="w-full h-full bg-[var(--terminal-bg)]"
         style={{ padding: "4px 0 0 4px" }}
         onContextMenu={handleContextMenu}
