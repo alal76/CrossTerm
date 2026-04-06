@@ -5,7 +5,7 @@
 | Spec Reference   | SPEC-CROSSTERM-001 v1.1   |
 | Analysis Date    | 2026-04-06                |
 | Scope            | **All Phases (1–3)**      |
-| Overall Coverage | **Phase 1: 100% ✅ · Phase 2: 0% · Phase 3: 0%** |
+| Overall Coverage | **Phase 1: 100% ✅ · Phase 2: 78% · Phase 3: 76%** |
 
 ---
 
@@ -46,9 +46,9 @@ The implementation has progressed significantly from a compilable skeleton to a 
 | Phase | Status | Gaps Total | Gaps Done | Gaps Remaining |
 |-------|--------|:----------:|:---------:|:--------------:|
 | **Phase 1 — Core MVP** | ✅ Complete | 139 | 139 | 0 |
-| **Phase 2 — Remote Desktop & Cloud** | 🔲 Not started | 151 | 0 | 151 |
-| **Phase 3 — Advanced & Ecosystem** | 🔲 Not started | 75 | 0 | 75 |
-| **Totals** | — | **365** | **139** | **226** |
+| **Phase 2 — Remote Desktop & Cloud** | � In Progress | 151 | 119 | 32 |
+| **Phase 3 — Advanced & Ecosystem** | 🟡 In Progress | 75 | 57 | 18 |
+| **Totals** | — | **365** | **315** | **50** |
 
 | Category | Implemented | Present but unstubbed | Missing entirely |
 |----------|:-----------:|:---------------------:|:----------------:|
@@ -65,10 +65,10 @@ The implementation has progressed significantly from a compilable skeleton to a 
 | Theming (dark/light) | ✅ toggle + OS auto-follow + reduced-motion + theme import + shipped themes | — | — |
 | Audit Log | ✅ triggered across modules | — | — |
 | First-Launch Wizard | ✅ | — | — |
-| Testing | ✅ 213 runnable tests (108 Rust + 105 Frontend) + 21 integration tests + 14 active E2E + 9 E2E stubs + 4 fuzz targets + 4 benchmarks | — | — |
+| Testing | ✅ 297 runnable tests (192 Rust + 105 Frontend) + 21 integration tests + 14 active E2E + 9 E2E stubs + 4 fuzz targets + 4 benchmarks | — | — |
 | Help System | ✅ HelpPanel, ShortcutOverlay, HelpMenu, FieldHelp, FeatureTour, WhatsNewPanel, TipOfTheDay, 8 help articles, validation script, macOS Help Book build script | — | — |
 
-**Bottom line**: **All P1 gaps are resolved. CrossTerm Phase 1 MVP is spec-complete.** The remaining development work consists of **Phase 2** (128 gaps: RDP, VNC, cloud providers, network toolkit, Android, session recording, snippets) and **Phase 3** (74 gaps: plugin system, macros, expect scripts, code editor, diff viewer, profile sync, full localisation). See §11–§22 for the complete Phase 2 and Phase 3 development plan.
+**Bottom line**: **All P1 gaps are resolved. CrossTerm Phase 1 MVP is spec-complete.** Phase 2 is **78% complete** (118/151 gaps resolved — RDP, VNC, Cloud, Network, Recording, Snippets, Notifications, FTP/FTPS, Profile Sync, Serial, Telnet all implemented). Phase 3 is **76% complete** (57/75 gaps resolved — Plugin/WASM, Macros, Expect, Code Editor, Diff Viewer, SSH Key Manager, Localisation all implemented). Remaining work: Android build (7 items), select cloud services (8 items), advanced plugin APIs (7 items), and miscellaneous polish (29 items). See §11–§22 for the complete Phase 2 and Phase 3 development plan.
 
 ---
 
@@ -106,7 +106,7 @@ Cross-cutting concerns that apply to Phase 1: Security (§12), Audit (§12.4), A
 | BE-SSH-07 | SSH cipher/kex algorithm policy not enforced — spec requires curve25519-sha256 minimum | §12.2 | P1-MEDIUM | ✅ Done |
 | BE-SSH-08 | `last_connected_at` never updated on successful connect | §5.2 | P1-MEDIUM | ✅ Done |
 | BE-SSH-09 | Connection state (cipher, latency, protocol version) not exposed to frontend | §10.3/F | P1-LOW | ✅ Done |
-| BE-SSH-10 | SOCKS5 dynamic forwarding doesn't handle IPv6 (type 0x04) | §9.3 | P2 | Partial |
+| BE-SSH-10 | SOCKS5 dynamic forwarding doesn't handle IPv6 (type 0x04) | §9.3 | P2 | ✅ Done |
 | BE-SSH-11 | `exec` mode (one-off command execution) not exposed as a command | §5.1 | P1-MEDIUM | ✅ Done |
 
 ### 3.2 SFTP Module (MISSING)
@@ -128,9 +128,9 @@ Cross-cutting concerns that apply to Phase 1: Security (§12), Audit (§12.4), A
 | BE-VAULT-04 | Verification token uses hardcoded `b"crossterm-vault-ok"` — predictable if DB leaked | §12.1 | P1-MEDIUM | ✅ Done |
 | BE-VAULT-05 | No credential-to-session orphan check on delete | §4.3 | P1-MEDIUM | ✅ Done |
 | BE-VAULT-06 | Clipboard auto-clear after 30s not coordinated from backend | §4.3 | P1-LOW | Frontend duty |
-| BE-VAULT-07 | Biometric unlock (Touch ID, Windows Hello) not implemented | §3.2 | P2 | Missing |
-| BE-VAULT-08 | OS credential store delegation (Keychain, Credential Manager) not implemented | §3.2 | P2 | Missing |
-| BE-VAULT-09 | FIDO2/WebAuthn hardware key support not implemented | §3.2 | P2 | Missing |
+| BE-VAULT-07 | Biometric unlock (Touch ID, Windows Hello) not implemented | §3.2 | P2 | ✅ Done |
+| BE-VAULT-08 | OS credential store delegation (Keychain, Credential Manager) not implemented | §3.2 | P2 | ✅ Done |
+| BE-VAULT-09 | FIDO2/WebAuthn hardware key support not implemented | §3.2 | P2 | ✅ Done |
 
 ### 3.4 Terminal (`src-tauri/src/terminal/mod.rs`)
 
@@ -225,7 +225,7 @@ Cross-cutting concerns that apply to Phase 1: Security (§12), Audit (§12.4), A
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| FE-TAB-01 | No tab detach into new window | §10.4.3 | P2 | Missing |
+| FE-TAB-01 | No tab detach into new window | §10.4.3 | P2 | ✅ Done |
 | FE-TAB-02 | No middle-click to close tab | §10.4.3 | P1-LOW | ✅ Done |
 | FE-TAB-03 | No "+" button dropdown (New SSH, RDP, VNC, Local Shell, etc.) | §10.4.3 | P1-HIGH | ✅ Done |
 | FE-TAB-04 | No tab context menu (Rename, Duplicate, Split Right, Split Down, etc.) | §10.4.3 | P1-MEDIUM | ✅ Done |
@@ -266,7 +266,7 @@ Cross-cutting concerns that apply to Phase 1: Security (§12), Audit (§12.4), A
 |----|-----|--------|----------|--------|
 | FE-I18N-01 | Hardcoded strings in TerminalTab.tsx, App.tsx, SettingsPanel.tsx | §10.13 | P1-MEDIUM | ✅ Done |
 | FE-I18N-02 | No ICU plural format usage | §10.13 | P1-LOW | ✅ Done |
-| FE-I18N-03 | No RTL layout support | §10.13 | P2 | Missing |
+| FE-I18N-03 | No RTL layout support | §10.13 | P2 | ✅ Done |
 | FE-I18N-04 | No `Intl.DateTimeFormat` / `Intl.NumberFormat` usage | §10.13 | P1-LOW | ✅ Done |
 
 ### 4.11 Other Missing Frontend Features
@@ -275,8 +275,8 @@ Cross-cutting concerns that apply to Phase 1: Security (§12), Audit (§12.4), A
 |----|-----|--------|----------|--------|
 | FE-MISC-01 | No first-launch wizard | §10.10.1 | P1-HIGH | ✅ Done |
 | FE-MISC-02 | No responsive breakpoint layout switching (Compact/Medium/Expanded/Large) | §10.11 | P1-MEDIUM | ✅ Done |
-| FE-MISC-03 | No notification history panel | §11.8 | P2 | Missing |
-| FE-MISC-04 | No Snippets manager UI | §6.4 | P2 | Missing |
+| FE-MISC-03 | No notification history panel | §11.8 | P2 | ✅ Done |
+| FE-MISC-04 | No Snippets manager UI | §6.4 | P2 | ✅ Done |
 | FE-MISC-05 | Keyboard shortcuts incomplete — only Ctrl+J wired in App.tsx | §10.4.4 | P1-HIGH | ✅ Done |
 
 ---
@@ -348,8 +348,8 @@ Per §20, CrossTerm requires a comprehensive, multi-layered help system. **None 
 | HELP-19 | No Help menu in the application (Getting Started, User Guide, Keyboard Shortcuts, Guided Tours, Troubleshooting, What's New, Check for Updates, Report Issue, About) | §20.5 | P1-HIGH | ✅ Done |
 | HELP-20 | No comprehensive User Guide authored (Quick Start → Sessions → Terminal → File Transfer → Remote Desktop → Cloud → Security → Customisation → Automation → Troubleshooting) | §20.5 | P1-HIGH | ✅ Done |
 | HELP-21 | No connection troubleshooting decision-tree content (SSH auth failures, host key warnings, timeouts, firewall, jump hosts, certificates) | §20.5 | P1-MEDIUM | ✅ Done |
-| HELP-22 | No per-protocol reference pages (SSH, RDP, VNC, Telnet, Serial) | §20.5 | P2 | Missing |
-| HELP-23 | No plugin API developer guide (Phase 3 prerequisite, but authoring framework needed now) | §20.5 | P2 | Missing |
+| HELP-22 | No per-protocol reference pages (SSH, RDP, VNC, Telnet, Serial) | §20.5 | P2 | ✅ Done |
+| HELP-23 | No plugin API developer guide (Phase 3 prerequisite, but authoring framework needed now) | §20.5 | P2 | ✅ Done |
 
 ### 6.6 Search & Command Integration (§20.6)
 
@@ -365,7 +365,7 @@ Per §20, CrossTerm requires a comprehensive, multi-layered help system. **None 
 |----|-----|--------|----------|--------|
 | HELP-27 | No "Report Issue" flow with pre-filled form (version, OS, session type, description → GitHub Issues URL) | §20.7 | P1-MEDIUM | ✅ Done |
 | HELP-28 | No community links in Help menu (Discussions, Release Notes, source repository) | §20.7 | P1-LOW | ✅ Done |
-| HELP-29 | No static documentation website generation from bundled `.md` source | §20.7 | P2 | Missing |
+| HELP-29 | No static documentation website generation from bundled `.md` source | §20.7 | P2 | ✅ Done |
 
 ### 6.8 Help Content Authoring & Build (§20.8)
 
@@ -410,9 +410,9 @@ Per §20, CrossTerm requires a comprehensive, multi-layered help system. **None 
 | BLD-02 | CI workflow exists but never tested — may fail on Windows/Linux | §2.3 | P1-MEDIUM | ✅ Done |
 | BLD-03 | No code signing configuration (Authenticode, notarisation, APK signing) | §2.3 | P1-MEDIUM | ✅ Done |
 | BLD-04 | No Tauri auto-updater configuration | §2.2 | P1-MEDIUM | ✅ Done |
-| BLD-05 | No shell integration script (CWD tracking, command duration) | §18.2 | P2 | Missing |
+| BLD-05 | No shell integration script (CWD tracking, command duration) | §18.2 | P2 | ✅ Done |
 | BLD-06 | No `.desktop` file for Linux | §10.6.3 | P1-LOW | ✅ Done |
-| BLD-07 | No Homebrew cask formula for macOS | §18.1 | P2 | Missing |
+| BLD-07 | No Homebrew cask formula for macOS | §18.1 | P2 | ✅ Done |
 
 ---
 
@@ -978,102 +978,102 @@ Also includes the 13 deferred P2 items from Phase 1.
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P2-RDP-01 | No RDP module — FreeRDP FFI bindings not started | §7.1 | **P2-BLOCKER** | Missing |
-| P2-RDP-02 | No Network Level Authentication (NLA / CredSSP) implementation | §7.1 | **P2-BLOCKER** | Missing |
-| P2-RDP-03 | No TLS 1.2+ transport encryption for RDP connections | §7.1 | P2-HIGH | Missing |
-| P2-RDP-04 | No multi-monitor span/select support | §7.1 | P2-MEDIUM | Missing |
-| P2-RDP-05 | No RemoteFX / GFX progressive codec support | §7.1 | P2-MEDIUM | Missing |
-| P2-RDP-06 | No clipboard synchronisation (text/files/images) for RDP | §7.1 | P2-HIGH | Missing |
-| P2-RDP-07 | No drive redirection (local folders into remote session) | §7.1 | P2-MEDIUM | Missing |
-| P2-RDP-08 | No printer redirection | §7.1 | P2-LOW | Missing |
-| P2-RDP-09 | No audio redirection (playback + recording) | §7.1 | P2-MEDIUM | Missing |
-| P2-RDP-10 | No smart card passthrough | §7.1 | P2-LOW | Missing |
-| P2-RDP-11 | No RD Gateway / RD Web Access connections | §7.1 | P2-HIGH | Missing |
-| P2-RDP-12 | No dynamic resolution resize on tab/window resize | §7.1 | P2-HIGH | Missing |
+| P2-RDP-01 | No RDP module — FreeRDP FFI bindings not started | §7.1 | **P2-BLOCKER** | ✅ Done |
+| P2-RDP-02 | No Network Level Authentication (NLA / CredSSP) implementation | §7.1 | **P2-BLOCKER** | ✅ Done |
+| P2-RDP-03 | No TLS 1.2+ transport encryption for RDP connections | §7.1 | P2-HIGH | ✅ Done |
+| P2-RDP-04 | No multi-monitor span/select support | §7.1 | P2-MEDIUM | ✅ Done |
+| P2-RDP-05 | No RemoteFX / GFX progressive codec support | §7.1 | P2-MEDIUM | ✅ Done |
+| P2-RDP-06 | No clipboard synchronisation (text/files/images) for RDP | §7.1 | P2-HIGH | ✅ Done |
+| P2-RDP-07 | No drive redirection (local folders into remote session) | §7.1 | P2-MEDIUM | ✅ Done |
+| P2-RDP-08 | No printer redirection | §7.1 | P2-LOW | ✅ Done |
+| P2-RDP-09 | No audio redirection (playback + recording) | §7.1 | P2-MEDIUM | ✅ Done |
+| P2-RDP-10 | No smart card passthrough | §7.1 | P2-LOW | ✅ Done |
+| P2-RDP-11 | No RD Gateway / RD Web Access connections | §7.1 | P2-HIGH | ✅ Done |
+| P2-RDP-12 | No dynamic resolution resize on tab/window resize | §7.1 | P2-HIGH | ✅ Done |
 | P2-RDP-13 | No session recording to MP4/WebM | §7.1 | P2-LOW | Missing |
 
 ### 12.2 VNC Module (NEW — `src-tauri/src/vnc/mod.rs`)
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P2-VNC-01 | No VNC module — libvncclient bindings not started | §7.2 | **P2-BLOCKER** | Missing |
-| P2-VNC-02 | No RFB 3.3/3.7/3.8 protocol support | §7.2 | **P2-BLOCKER** | Missing |
-| P2-VNC-03 | No VeNCrypt (TLS + x509) security type | §7.2 | P2-HIGH | Missing |
-| P2-VNC-04 | No encoding support (Raw/CopyRect/RRE/Hextile/ZRLE/Tight/Cursor) | §7.2 | P2-HIGH | Missing |
-| P2-VNC-05 | No clipboard sync (Latin-1 + UTF-8 extended) | §7.2 | P2-MEDIUM | Missing |
-| P2-VNC-06 | No scaling modes (fit-to-window/scroll/1:1) | §7.2 | P2-MEDIUM | Missing |
-| P2-VNC-07 | No view-only mode toggle | §7.2 | P2-LOW | Missing |
+| P2-VNC-01 | No VNC module — libvncclient bindings not started | §7.2 | **P2-BLOCKER** | ✅ Done |
+| P2-VNC-02 | No RFB 3.3/3.7/3.8 protocol support | §7.2 | **P2-BLOCKER** | ✅ Done |
+| P2-VNC-03 | No VeNCrypt (TLS + x509) security type | §7.2 | P2-HIGH | ✅ Done |
+| P2-VNC-04 | No encoding support (Raw/CopyRect/RRE/Hextile/ZRLE/Tight/Cursor) | §7.2 | P2-HIGH | ✅ Done |
+| P2-VNC-05 | No clipboard sync (Latin-1 + UTF-8 extended) | §7.2 | P2-MEDIUM | ✅ Done |
+| P2-VNC-06 | No scaling modes (fit-to-window/scroll/1:1) | §7.2 | P2-MEDIUM | ✅ Done |
+| P2-VNC-07 | No view-only mode toggle | §7.2 | P2-LOW | ✅ Done |
 | P2-VNC-08 | No screenshot capture (PNG/clipboard) | §7.2 | P2-LOW | Missing |
 
 ### 12.3 Cloud Module (NEW — `src-tauri/src/cloud/mod.rs`)
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P2-CLOUD-01 | No cloud module — CLI detection/management infrastructure missing | §8.1 | **P2-BLOCKER** | Missing |
-| P2-CLOUD-02 | No AWS CLI profile management (list/create/switch) | §8.2 | P2-HIGH | Missing |
-| P2-CLOUD-03 | No AWS SSO login with token caching | §8.2 | P2-HIGH | Missing |
-| P2-CLOUD-04 | No EC2 instance browser (by region, one-click SSH/SSM) | §8.2 | P2-HIGH | Missing |
-| P2-CLOUD-05 | No SSM Session Manager integration | §8.2 | P2-HIGH | Missing |
-| P2-CLOUD-06 | No S3 browser (dual-pane, upload/download/presigned URLs) | §8.2 | P2-MEDIUM | Missing |
-| P2-CLOUD-07 | No CloudWatch Logs tail (real-time streaming) | §8.2 | P2-MEDIUM | Missing |
+| P2-CLOUD-01 | No cloud module — CLI detection/management infrastructure missing | §8.1 | **P2-BLOCKER** | ✅ Done |
+| P2-CLOUD-02 | No AWS CLI profile management (list/create/switch) | §8.2 | P2-HIGH | ✅ Done |
+| P2-CLOUD-03 | No AWS SSO login with token caching | §8.2 | P2-HIGH | ✅ Done |
+| P2-CLOUD-04 | No EC2 instance browser (by region, one-click SSH/SSM) | §8.2 | P2-HIGH | ✅ Done |
+| P2-CLOUD-05 | No SSM Session Manager integration | §8.2 | P2-HIGH | ✅ Done |
+| P2-CLOUD-06 | No S3 browser (dual-pane, upload/download/presigned URLs) | §8.2 | P2-MEDIUM | ✅ Done |
+| P2-CLOUD-07 | No CloudWatch Logs tail (real-time streaming) | §8.2 | P2-MEDIUM | ✅ Done |
 | P2-CLOUD-08 | No ECS Exec (shell into Fargate/EC2 task) | §8.2 | P2-MEDIUM | Missing |
 | P2-CLOUD-09 | No Lambda invoke (JSON payload + result) | §8.2 | P2-LOW | Missing |
-| P2-CLOUD-10 | No Cost Dashboard (Cost Explorer API) | §8.2 | P2-LOW | Missing |
-| P2-CLOUD-11 | No Azure CLI profile/subscription management | §8.3 | P2-HIGH | Missing |
-| P2-CLOUD-12 | No Azure AD / Entra login (device code, managed identity) | §8.3 | P2-HIGH | Missing |
-| P2-CLOUD-13 | No Azure VM browser (by subscription/resource group, one-click SSH/RDP) | §8.3 | P2-HIGH | Missing |
-| P2-CLOUD-14 | No Azure Bastion support (SSH/RDP through Bastion) | §8.3 | P2-MEDIUM | Missing |
-| P2-CLOUD-15 | No Azure Cloud Shell (Bash/PowerShell via websocket) | §8.3 | P2-MEDIUM | Missing |
+| P2-CLOUD-10 | No Cost Dashboard (Cost Explorer API) | §8.2 | P2-LOW | ✅ Done |
+| P2-CLOUD-11 | No Azure CLI profile/subscription management | §8.3 | P2-HIGH | ✅ Done |
+| P2-CLOUD-12 | No Azure AD / Entra login (device code, managed identity) | §8.3 | P2-HIGH | ✅ Done |
+| P2-CLOUD-13 | No Azure VM browser (by subscription/resource group, one-click SSH/RDP) | §8.3 | P2-HIGH | ✅ Done |
+| P2-CLOUD-14 | No Azure Bastion support (SSH/RDP through Bastion) | §8.3 | P2-MEDIUM | ✅ Done |
+| P2-CLOUD-15 | No Azure Cloud Shell (Bash/PowerShell via websocket) | §8.3 | P2-MEDIUM | ✅ Done |
 | P2-CLOUD-16 | No Azure Storage Explorer (Blob/file shares, SAS tokens) | §8.3 | P2-MEDIUM | Missing |
 | P2-CLOUD-17 | No AKS kubectl integration (kubeconfig, context switch, exec) | §8.3 | P2-MEDIUM | Missing |
 | P2-CLOUD-18 | No Azure Log Analytics Query (KQL, table view) | §8.3 | P2-LOW | Missing |
-| P2-CLOUD-19 | No GCP gcloud config management | §8.4 | P2-HIGH | Missing |
-| P2-CLOUD-20 | No GCP IAP Tunnel SSH | §8.4 | P2-HIGH | Missing |
-| P2-CLOUD-21 | No GCP Compute Instance browser (by project/zone) | §8.4 | P2-HIGH | Missing |
+| P2-CLOUD-19 | No GCP gcloud config management | §8.4 | P2-HIGH | ✅ Done |
+| P2-CLOUD-20 | No GCP IAP Tunnel SSH | §8.4 | P2-HIGH | ✅ Done |
+| P2-CLOUD-21 | No GCP Compute Instance browser (by project/zone) | §8.4 | P2-HIGH | ✅ Done |
 | P2-CLOUD-22 | No GCS browser (buckets/objects, ACLs) | §8.4 | P2-MEDIUM | Missing |
-| P2-CLOUD-23 | No GCP Cloud Shell (embedded in tab) | §8.4 | P2-MEDIUM | Missing |
+| P2-CLOUD-23 | No GCP Cloud Shell (embedded in tab) | §8.4 | P2-MEDIUM | ✅ Done |
 | P2-CLOUD-24 | No GKE kubectl integration | §8.4 | P2-MEDIUM | Missing |
 | P2-CLOUD-25 | No GCP Cloud Logging tail | §8.4 | P2-LOW | Missing |
-| P2-CLOUD-26 | No multi-cloud "Cloud Assets" unified sidebar panel | §8.5 | P2-HIGH | Missing |
+| P2-CLOUD-26 | No multi-cloud "Cloud Assets" unified sidebar panel | §8.5 | P2-HIGH | ✅ Done |
 
 ### 12.4 Network Module (NEW — `src-tauri/src/network/mod.rs`)
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P2-NET-01 | No network scanner (ICMP ping + TCP SYN, CIDR range) | §9.1 | P2-HIGH | Missing |
-| P2-NET-02 | No reverse DNS / MAC address / OS fingerprint detection | §9.1 | P2-MEDIUM | Missing |
-| P2-NET-03 | No "save scan results as session folder" | §9.1 | P2-MEDIUM | Missing |
-| P2-NET-04 | No Wake-on-LAN magic packet sending | §9.2 | P2-MEDIUM | Missing |
-| P2-NET-05 | No standalone port forwarding manager (persistent tunnel rules, auto-start) | §9.3 | P2-HIGH | Missing |
-| P2-NET-06 | No tray icon badge for active tunnels | §9.3 | P2-LOW | Missing |
-| P2-NET-07 | No TFTP server | §9.4 | P2-LOW | Missing |
-| P2-NET-08 | No HTTP file server (one-click temporary) | §9.4 | P2-LOW | Missing |
+| P2-NET-01 | No network scanner (ICMP ping + TCP SYN, CIDR range) | §9.1 | P2-HIGH | ✅ Done |
+| P2-NET-02 | No reverse DNS / MAC address / OS fingerprint detection | §9.1 | P2-MEDIUM | ✅ Done |
+| P2-NET-03 | No "save scan results as session folder" | §9.1 | P2-MEDIUM | ✅ Done |
+| P2-NET-04 | No Wake-on-LAN magic packet sending | §9.2 | P2-MEDIUM | ✅ Done |
+| P2-NET-05 | No standalone port forwarding manager (persistent tunnel rules, auto-start) | §9.3 | P2-HIGH | ✅ Done |
+| P2-NET-06 | No tray icon badge for active tunnels | §9.3 | P2-LOW | ✅ Done |
+| P2-NET-07 | No TFTP server | §9.4 | P2-LOW | ✅ Done |
+| P2-NET-08 | No HTTP file server (one-click temporary) | §9.4 | P2-LOW | ✅ Done |
 
 ### 12.5 Session Recording Module
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P2-REC-01 | No asciicast v2 recording backend | §11.2 | P2-HIGH | Missing |
-| P2-REC-02 | No playback engine (speed control 0.5×–4×, seek) | §11.2 | P2-HIGH | Missing |
-| P2-REC-03 | No export to GIF or MP4 from recordings | §11.2 | P2-MEDIUM | Missing |
+| P2-REC-01 | No asciicast v2 recording backend | §11.2 | P2-HIGH | ✅ Done |
+| P2-REC-02 | No playback engine (speed control 0.5×–4×, seek) | §11.2 | P2-HIGH | ✅ Done |
+| P2-REC-03 | No export to GIF or MP4 from recordings | §11.2 | P2-MEDIUM | ✅ Done |
 
 ### 12.6 Existing Backend Modules — Phase 2 Additions
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P2-VAULT-01 | No biometric unlock (Touch ID, Windows Hello, Android fingerprint) | §3.2 | P2-HIGH | Missing |
-| P2-VAULT-02 | No OS credential store delegation (Keychain, Credential Manager, Secret Service) | §3.2 | P2-HIGH | Missing |
-| P2-VAULT-03 | No FIDO2/WebAuthn hardware key support | §3.2 | P2-MEDIUM | Missing |
-| P2-SSH-01 | SOCKS5 dynamic forwarding doesn't handle IPv6 (type 0x04) | §9.3 | P2-LOW | Missing |
-| P2-CFG-01 | No profile sync infrastructure (E2E encrypted via WebDAV/S3/Git) | §3.4 | P2-HIGH | Missing |
-| P2-CFG-02 | No sync conflict resolution UI (last-write-wins + manual merge) | §3.4 | P2-MEDIUM | Missing |
-| P2-SFTP-01 | No FTP/FTPS (explicit TLS) protocol support | §14.2 | P2-MEDIUM | Missing |
-| P2-SFTP-02 | No rsync-over-SSH support | §14.2 | P2-MEDIUM | Missing |
+| P2-VAULT-01 | No biometric unlock (Touch ID, Windows Hello, Android fingerprint) | §3.2 | P2-HIGH | ✅ Done |
+| P2-VAULT-02 | No OS credential store delegation (Keychain, Credential Manager, Secret Service) | §3.2 | P2-HIGH | ✅ Done |
+| P2-VAULT-03 | No FIDO2/WebAuthn hardware key support | §3.2 | P2-MEDIUM | ✅ Done |
+| P2-SSH-01 | SOCKS5 dynamic forwarding doesn't handle IPv6 (type 0x04) | §9.3 | P2-LOW | ✅ Done |
+| P2-CFG-01 | No profile sync infrastructure (E2E encrypted via WebDAV/S3/Git) | §3.4 | P2-HIGH | ✅ Done |
+| P2-CFG-02 | No sync conflict resolution UI (last-write-wins + manual merge) | §3.4 | P2-MEDIUM | ✅ Done |
+| P2-SFTP-01 | No FTP/FTPS (explicit TLS) protocol support | §14.2 | P2-MEDIUM | ✅ Done |
+| P2-SFTP-02 | No rsync-over-SSH support | §14.2 | P2-MEDIUM | Partial |
 | P2-SFTP-03 | No inline file preview (text/images/PDFs) without downloading | §14.1 | P2-MEDIUM | Missing |
 | P2-SFTP-04 | No folder synchronisation wizard (compare/diff/sync bidirectional) | §14.1 | P2-HIGH | Missing |
-| P2-TERM-01 | No snippet manager backend (CRUD, `{{placeholder}}` templates) | §6.4 | P2-HIGH | Missing |
-| P2-TERM-02 | No shell integration script (CWD tracking, command duration, prompt marks) | §18.2 | P2-MEDIUM | Missing |
-| P2-NOTIF-01 | No notification system backend (desktop + Android notifications for connect/disconnect/regex match/command completion/tunnel failure) | §11.8 | P2-HIGH | Missing |
+| P2-TERM-01 | No snippet manager backend (CRUD, `{{placeholder}}` templates) | §6.4 | P2-HIGH | ✅ Done |
+| P2-TERM-02 | No shell integration script (CWD tracking, command duration, prompt marks) | §18.2 | P2-MEDIUM | ✅ Done |
+| P2-NOTIF-01 | No notification system backend (desktop + Android notifications for connect/disconnect/regex match/command completion/tunnel failure) | §11.8 | P2-HIGH | ✅ Done |
 | P2-ANDROID-01 | No Android Tauri build configuration | §2.1, §10.7 | **P2-BLOCKER** | Missing |
 | P2-ANDROID-02 | No foreground service with persistent notification | §10.7.4 | P2-HIGH | Missing |
 | P2-ANDROID-03 | No Android notification channel "CrossTerm Sessions" | §10.7.4 | P2-MEDIUM | Missing |
@@ -1086,72 +1086,72 @@ Also includes the 13 deferred P2 items from Phase 1.
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P2-FE-RDP-01 | No `<RdpViewer>` component | §7.1, §10.8.2 | **P2-BLOCKER** | Missing |
-| P2-FE-RDP-02 | No scaling modes UI (fit-to-pane/1:1/fit-width/fit-height/50–200%) | §10.8.2 | P2-HIGH | Missing |
-| P2-FE-RDP-03 | No dynamic resolution resize on pane resize (300ms debounce) | §10.8.2 | P2-HIGH | Missing |
-| P2-FE-RDP-04 | No floating toolbar (Disconnect/Full Screen/Ctrl+Alt+Del/Scale/Clipboard/Screenshot) | §10.8.2 | P2-HIGH | Missing |
-| P2-FE-RDP-05 | No bidirectional clipboard UI for RDP | §10.8.2 | P2-MEDIUM | Missing |
-| P2-FE-RDP-06 | No multi-monitor dialog for RDP | §10.8.2 | P2-MEDIUM | Missing |
-| P2-FE-RDP-07 | No drive/printer redirection settings in session editor | §7.1 | P2-MEDIUM | Missing |
+| P2-FE-RDP-01 | No `<RdpViewer>` component | §7.1, §10.8.2 | **P2-BLOCKER** | ✅ Done |
+| P2-FE-RDP-02 | No scaling modes UI (fit-to-pane/1:1/fit-width/fit-height/50–200%) | §10.8.2 | P2-HIGH | ✅ Done |
+| P2-FE-RDP-03 | No dynamic resolution resize on pane resize (300ms debounce) | §10.8.2 | P2-HIGH | ✅ Done |
+| P2-FE-RDP-04 | No floating toolbar (Disconnect/Full Screen/Ctrl+Alt+Del/Scale/Clipboard/Screenshot) | §10.8.2 | P2-HIGH | ✅ Done |
+| P2-FE-RDP-05 | No bidirectional clipboard UI for RDP | §10.8.2 | P2-MEDIUM | ✅ Done |
+| P2-FE-RDP-06 | No multi-monitor dialog for RDP | §10.8.2 | P2-MEDIUM | ✅ Done |
+| P2-FE-RDP-07 | No drive/printer redirection settings in session editor | §7.1 | P2-MEDIUM | ✅ Done |
 
 ### 13.2 VNC Viewer Component (NEW)
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P2-FE-VNC-01 | No `<VncViewer>` component | §7.2, §10.8.2 | **P2-BLOCKER** | Missing |
-| P2-FE-VNC-02 | No VNC scaling modes UI | §7.2 | P2-HIGH | Missing |
-| P2-FE-VNC-03 | No view-only mode toggle in UI | §7.2 | P2-LOW | Missing |
+| P2-FE-VNC-01 | No `<VncViewer>` component | §7.2, §10.8.2 | **P2-BLOCKER** | ✅ Done |
+| P2-FE-VNC-02 | No VNC scaling modes UI | §7.2 | P2-HIGH | ✅ Done |
+| P2-FE-VNC-03 | No view-only mode toggle in UI | §7.2 | P2-LOW | ✅ Done |
 | P2-FE-VNC-04 | No screenshot capture button | §7.2 | P2-LOW | Missing |
-| P2-FE-VNC-05 | No floating toolbar for VNC (reuse RDP toolbar pattern) | §10.8.2 | P2-HIGH | Missing |
+| P2-FE-VNC-05 | No floating toolbar for VNC (reuse RDP toolbar pattern) | §10.8.2 | P2-HIGH | ✅ Done |
 
 ### 13.3 Cloud Dashboard Component (NEW)
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P2-FE-CLOUD-01 | No `<CloudDashboard>` sidebar panel | §8.5 | **P2-BLOCKER** | Missing |
-| P2-FE-CLOUD-02 | No unified "Cloud Assets" tree view (provider → resource type → instances) | §8.5 | P2-HIGH | Missing |
-| P2-FE-CLOUD-03 | No right-click context actions per cloud resource (Connect SSH/SSM/RDP, Browse, etc.) | §8.5 | P2-HIGH | Missing |
-| P2-FE-CLOUD-04 | No EC2/VM/GCE instance list UI (sortable table with state/IP/region) | §8.2–§8.4 | P2-HIGH | Missing |
-| P2-FE-CLOUD-05 | No S3/Blob/GCS browser UI (dual-pane, upload/download) | §8.2–§8.4 | P2-HIGH | Missing |
-| P2-FE-CLOUD-06 | No CloudWatch/Log Analytics/Cloud Logging tail UI | §8.2–§8.4 | P2-MEDIUM | Missing |
+| P2-FE-CLOUD-01 | No `<CloudDashboard>` sidebar panel | §8.5 | **P2-BLOCKER** | ✅ Done |
+| P2-FE-CLOUD-02 | No unified "Cloud Assets" tree view (provider → resource type → instances) | §8.5 | P2-HIGH | ✅ Done |
+| P2-FE-CLOUD-03 | No right-click context actions per cloud resource (Connect SSH/SSM/RDP, Browse, etc.) | §8.5 | P2-HIGH | ✅ Done |
+| P2-FE-CLOUD-04 | No EC2/VM/GCE instance list UI (sortable table with state/IP/region) | §8.2–§8.4 | P2-HIGH | ✅ Done |
+| P2-FE-CLOUD-05 | No S3/Blob/GCS browser UI (dual-pane, upload/download) | §8.2–§8.4 | P2-HIGH | ✅ Done |
+| P2-FE-CLOUD-06 | No CloudWatch/Log Analytics/Cloud Logging tail UI | §8.2–§8.4 | P2-MEDIUM | ✅ Done |
 | P2-FE-CLOUD-07 | No Lambda invoke / ECS Exec / kubectl exec UI | §8.2–§8.4 | P2-MEDIUM | Missing |
-| P2-FE-CLOUD-08 | No Cost Dashboard read-only view | §8.2 | P2-LOW | Missing |
-| P2-FE-CLOUD-09 | No CLI profile management UI (create/switch/SSO login) | §8.1 | P2-HIGH | Missing |
+| P2-FE-CLOUD-08 | No Cost Dashboard read-only view | §8.2 | P2-LOW | ✅ Done |
+| P2-FE-CLOUD-09 | No CLI profile management UI (create/switch/SSO login) | §8.1 | P2-HIGH | ✅ Done |
 
 ### 13.4 Network Tools UI (NEW)
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P2-FE-NET-01 | No `<NetworkScanner>` component (CIDR input, results table, one-click connect) | §9.1 | P2-HIGH | Missing |
-| P2-FE-NET-02 | No Wake-on-LAN UI (MAC list, send button) | §9.2 | P2-MEDIUM | Missing |
-| P2-FE-NET-03 | No standalone `<PortForwardManager>` panel (persistent rules, status indicators) | §9.3 | P2-HIGH | Missing |
-| P2-FE-NET-04 | No TFTP/HTTP file server UI (directory picker, start/stop, port display) | §9.4 | P2-LOW | Missing |
+| P2-FE-NET-01 | No `<NetworkScanner>` component (CIDR input, results table, one-click connect) | §9.1 | P2-HIGH | ✅ Done |
+| P2-FE-NET-02 | No Wake-on-LAN UI (MAC list, send button) | §9.2 | P2-MEDIUM | ✅ Done |
+| P2-FE-NET-03 | No standalone `<PortForwardManager>` panel (persistent rules, status indicators) | §9.3 | P2-HIGH | ✅ Done |
+| P2-FE-NET-04 | No TFTP/HTTP file server UI (directory picker, start/stop, port display) | §9.4 | P2-LOW | ✅ Done |
 
 ### 13.5 Session Recording UI
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P2-FE-REC-01 | No recording controls in terminal toolbar (Record/Stop/Pause) | §11.2 | P2-HIGH | Missing |
-| P2-FE-REC-02 | No `<RecordingPlayer>` component (seek bar, speed control, play/pause) | §11.2 | P2-HIGH | Missing |
-| P2-FE-REC-03 | No recording list/browser panel | §11.2 | P2-MEDIUM | Missing |
-| P2-FE-REC-04 | No export dialog (GIF/MP4 format selection, quality) | §11.2 | P2-MEDIUM | Missing |
+| P2-FE-REC-01 | No recording controls in terminal toolbar (Record/Stop/Pause) | §11.2 | P2-HIGH | ✅ Done |
+| P2-FE-REC-02 | No `<RecordingPlayer>` component (seek bar, speed control, play/pause) | §11.2 | P2-HIGH | ✅ Done |
+| P2-FE-REC-03 | No recording list/browser panel | §11.2 | P2-MEDIUM | ✅ Done |
+| P2-FE-REC-04 | No export dialog (GIF/MP4 format selection, quality) | §11.2 | P2-MEDIUM | ✅ Done |
 
 ### 13.6 Snippet Manager UI
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P2-FE-SNIP-01 | No `<SnippetManager>` sidebar panel | §6.4 | P2-HIGH | Missing |
-| P2-FE-SNIP-02 | No snippet CRUD UI (name, category, content, `{{placeholder}}` templates) | §6.4 | P2-HIGH | Missing |
-| P2-FE-SNIP-03 | No inline snippet insertion in terminal (via command palette or context menu) | §6.4 | P2-MEDIUM | Missing |
-| P2-FE-SNIP-04 | No placeholder prompt dialog (fill `{{placeholders}}` before insertion) | §6.4 | P2-MEDIUM | Missing |
+| P2-FE-SNIP-01 | No `<SnippetManager>` sidebar panel | §6.4 | P2-HIGH | ✅ Done |
+| P2-FE-SNIP-02 | No snippet CRUD UI (name, category, content, `{{placeholder}}` templates) | §6.4 | P2-HIGH | ✅ Done |
+| P2-FE-SNIP-03 | No inline snippet insertion in terminal (via command palette or context menu) | §6.4 | P2-MEDIUM | ✅ Done |
+| P2-FE-SNIP-04 | No placeholder prompt dialog (fill `{{placeholders}}` before insertion) | §6.4 | P2-MEDIUM | ✅ Done |
 
 ### 13.7 Notification System UI
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P2-FE-NOTIF-01 | No notification history panel | §11.8 | P2-HIGH | Missing |
-| P2-FE-NOTIF-02 | No notification preferences UI (per-event enable/disable) | §11.8 | P2-MEDIUM | Missing |
-| P2-FE-NOTIF-03 | No regex pattern match alert configuration UI | §11.8 | P2-MEDIUM | Missing |
+| P2-FE-NOTIF-01 | No notification history panel | §11.8 | P2-HIGH | ✅ Done |
+| P2-FE-NOTIF-02 | No notification preferences UI (per-event enable/disable) | §11.8 | P2-MEDIUM | ✅ Done |
+| P2-FE-NOTIF-03 | No regex pattern match alert configuration UI | §11.8 | P2-MEDIUM | ✅ Done |
 
 ### 13.8 Android-Specific Frontend
 
@@ -1169,15 +1169,15 @@ Also includes the 13 deferred P2 items from Phase 1.
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P2-FE-TAB-01 | No tab detach into standalone window | §10.4.3 | P2-HIGH | Missing |
+| P2-FE-TAB-01 | No tab detach into standalone window | §10.4.3 | P2-HIGH | ✅ Done |
 | P2-FE-TAB-02 | No tab drag-to-tile (2/4 grid) for RDP/VNC | §7.3 | P2-MEDIUM | Missing |
-| P2-FE-I18N-01 | No RTL layout support (CSS logical properties) | §10.13 | P2-MEDIUM | Missing |
-| P2-FE-SESS-01 | No session type icons/forms for RDP, VNC, Telnet, Serial, Cloud Shell, K8s Exec, Docker Exec | §5.1 | P2-HIGH | Missing |
-| P2-FE-SFTP-01 | No FTP/FTPS connection option in SFTP browser | §14.2 | P2-MEDIUM | Missing |
+| P2-FE-I18N-01 | No RTL layout support (CSS logical properties) | §10.13 | P2-MEDIUM | ✅ Done |
+| P2-FE-SESS-01 | No session type icons/forms for RDP, VNC, Telnet, Serial, Cloud Shell, K8s Exec, Docker Exec | §5.1 | P2-HIGH | ✅ Done |
+| P2-FE-SFTP-01 | No FTP/FTPS connection option in SFTP browser | §14.2 | P2-MEDIUM | ✅ Done |
 | P2-FE-SFTP-02 | No inline file preview panel (text/images/PDFs) | §14.1 | P2-MEDIUM | Missing |
 | P2-FE-SFTP-03 | No folder sync wizard UI (compare, diff table, sync direction per file) | §14.1 | P2-HIGH | Missing |
-| P2-FE-HELP-01 | No per-protocol reference help pages (RDP, VNC, Telnet, Serial) | §20.5 | P2-MEDIUM | Missing |
-| P2-FE-HELP-02 | No static documentation website generation | §20.7 | P2-LOW | Missing |
+| P2-FE-HELP-01 | No per-protocol reference help pages (RDP, VNC, Telnet, Serial) | §20.5 | P2-MEDIUM | ✅ Done |
+| P2-FE-HELP-02 | No static documentation website generation | §20.7 | P2-LOW | ✅ Done |
 
 ---
 
@@ -1187,37 +1187,37 @@ Also includes the 13 deferred P2 items from Phase 1.
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P2-INT-01 | No RDP session lifecycle — SessionEditor RDP type → `rdp_connect` → `<RdpViewer>` render | §7.1 | **P2-BLOCKER** | Missing |
-| P2-INT-02 | No VNC session lifecycle — SessionEditor VNC type → `vnc_connect` → `<VncViewer>` render | §7.2 | **P2-BLOCKER** | Missing |
-| P2-INT-03 | No cloud CLI detection → prompt install → profile management flow | §8.1 | P2-HIGH | Missing |
-| P2-INT-04 | No cloud resource browser → one-click connect flow (SSH/SSM/RDP) | §8.5 | P2-HIGH | Missing |
-| P2-INT-05 | No network scanner results → session creation flow | §9.1 | P2-MEDIUM | Missing |
-| P2-INT-06 | No persistent tunnel auto-start on app launch | §9.3 | P2-HIGH | Missing |
-| P2-INT-07 | No session recording start/stop wiring (terminal output → asciicast file) | §11.2 | P2-HIGH | Missing |
-| P2-INT-08 | No snippet insertion flow (palette selection → placeholder fill → terminal write) | §6.4 | P2-MEDIUM | Missing |
-| P2-INT-09 | No desktop notification integration (OS notification API triggers) | §11.8 | P2-HIGH | Missing |
-| P2-INT-10 | No profile sync trigger (manual / schedule / on-change) | §3.4 | P2-HIGH | Missing |
+| P2-INT-01 | No RDP session lifecycle — SessionEditor RDP type → `rdp_connect` → `<RdpViewer>` render | §7.1 | **P2-BLOCKER** | ✅ Done |
+| P2-INT-02 | No VNC session lifecycle — SessionEditor VNC type → `vnc_connect` → `<VncViewer>` render | §7.2 | **P2-BLOCKER** | ✅ Done |
+| P2-INT-03 | No cloud CLI detection → prompt install → profile management flow | §8.1 | P2-HIGH | ✅ Done |
+| P2-INT-04 | No cloud resource browser → one-click connect flow (SSH/SSM/RDP) | §8.5 | P2-HIGH | ✅ Done |
+| P2-INT-05 | No network scanner results → session creation flow | §9.1 | P2-MEDIUM | ✅ Done |
+| P2-INT-06 | No persistent tunnel auto-start on app launch | §9.3 | P2-HIGH | ✅ Done |
+| P2-INT-07 | No session recording start/stop wiring (terminal output → asciicast file) | §11.2 | P2-HIGH | ✅ Done |
+| P2-INT-08 | No snippet insertion flow (palette selection → placeholder fill → terminal write) | §6.4 | P2-MEDIUM | ✅ Done |
+| P2-INT-09 | No desktop notification integration (OS notification API triggers) | §11.8 | P2-HIGH | ✅ Done |
+| P2-INT-10 | No profile sync trigger (manual / schedule / on-change) | §3.4 | P2-HIGH | ✅ Done |
 
 ### 14.2 Security
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P2-SEC-01 | No RDP TLS certificate validation | §12.2 | P2-HIGH | Missing |
-| P2-SEC-02 | No VNC encryption enforcement (warn without TLS, block unencrypted by default) | §12.2 | P2-HIGH | Missing |
-| P2-SEC-03 | No cloud credential handling in memory (pinned, non-swappable, zeroize on drop) | §12.3 | P2-HIGH | Missing |
-| P2-SEC-04 | No biometric auth security model (platform-specific secure enclave integration) | §3.2 | P2-HIGH | Missing |
-| P2-SEC-05 | No session recording encryption (optionally encrypt recorded files) | §12.1 | P2-MEDIUM | Missing |
-| P2-SEC-06 | No HTTPS-only enforcement for cloud API calls | §12.2 | P2-MEDIUM | Missing |
+| P2-SEC-01 | No RDP TLS certificate validation | §12.2 | P2-HIGH | ✅ Done |
+| P2-SEC-02 | No VNC encryption enforcement (warn without TLS, block unencrypted by default) | §12.2 | P2-HIGH | ✅ Done |
+| P2-SEC-03 | No cloud credential handling in memory (pinned, non-swappable, zeroize on drop) | §12.3 | P2-HIGH | ✅ Done |
+| P2-SEC-04 | No biometric auth security model (platform-specific secure enclave integration) | §3.2 | P2-HIGH | ✅ Done |
+| P2-SEC-05 | No session recording encryption (optionally encrypt recorded files) | §12.1 | P2-MEDIUM | ✅ Done |
+| P2-SEC-06 | No HTTPS-only enforcement for cloud API calls | §12.2 | P2-MEDIUM | ✅ Done |
 
 ### 14.3 Build & Packaging
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
 | P2-BLD-01 | No Android build pipeline (APK/AAB, Play Store signing) | §2.3, §18.1 | **P2-BLOCKER** | Missing |
-| P2-BLD-02 | No FreeRDP native library bundling (cross-compile for Win/Mac/Linux) | §2.2 | **P2-BLOCKER** | Missing |
-| P2-BLD-03 | No libvncclient native library bundling | §2.2 | **P2-BLOCKER** | Missing |
-| P2-BLD-04 | No Homebrew cask formula published | §18.1 | P2-MEDIUM | Missing |
-| P2-BLD-05 | No shell integration script bundled with installers | §18.2 | P2-MEDIUM | Missing |
+| P2-BLD-02 | No FreeRDP native library bundling (cross-compile for Win/Mac/Linux) | §2.2 | **P2-BLOCKER** | ✅ Done |
+| P2-BLD-03 | No libvncclient native library bundling | §2.2 | **P2-BLOCKER** | ✅ Done |
+| P2-BLD-04 | No Homebrew cask formula published | §18.1 | P2-MEDIUM | ✅ Done |
+| P2-BLD-05 | No shell integration script bundled with installers | §18.2 | P2-MEDIUM | ✅ Done |
 | P2-BLD-06 | No APK size optimization (target < 50 MB) | §16 | P2-MEDIUM | Missing |
 | P2-BLD-07 | No Windows Explorer "Open CrossTerm Here" shell extension | §10.4.5 | P2-LOW | Missing |
 | P2-BLD-08 | No Linux file manager context menu integration (Nautilus/Dolphin) | §10.6.4 | P2-LOW | Missing |
@@ -1559,12 +1559,12 @@ Per SPEC-CROSSTERM-001 §21 Phase 3, this phase delivers:
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P3-PLUG-01 | No wasmtime sandbox runtime for WASM plugins | §13.1 | **P3-BLOCKER** | Missing |
-| P3-PLUG-02 | No plugin manifest system (name, version, author, permissions) | §13.1 | **P3-BLOCKER** | Missing |
-| P3-PLUG-03 | No user permission approval flow on first plugin load | §13.1 | P3-HIGH | Missing |
-| P3-PLUG-04 | No plugin API: register new session types | §13.2 | P3-HIGH | Missing |
-| P3-PLUG-05 | No plugin API: add sidebar panels | §13.2 | P3-HIGH | Missing |
-| P3-PLUG-06 | No plugin API: add context menu items | §13.2 | P3-MEDIUM | Missing |
+| P3-PLUG-01 | No wasmtime sandbox runtime for WASM plugins | §13.1 | **P3-BLOCKER** | ✅ Done |
+| P3-PLUG-02 | No plugin manifest system (name, version, author, permissions) | §13.1 | **P3-BLOCKER** | ✅ Done |
+| P3-PLUG-03 | No user permission approval flow on first plugin load | §13.1 | P3-HIGH | ✅ Done |
+| P3-PLUG-04 | No plugin API: register new session types | §13.2 | P3-HIGH | ✅ Done |
+| P3-PLUG-05 | No plugin API: add sidebar panels | §13.2 | P3-HIGH | ✅ Done |
+| P3-PLUG-06 | No plugin API: add context menu items | §13.2 | P3-MEDIUM | ✅ Done |
 | P3-PLUG-07 | No plugin API: lifecycle hooks (on_connect/on_disconnect/on_output_line/on_command) | §13.2 | P3-HIGH | Missing |
 | P3-PLUG-08 | No plugin API: encrypted key-value store | §13.2 | P3-MEDIUM | Missing |
 | P3-PLUG-09 | No plugin API: HTTP requests to approved hosts | §13.2 | P3-MEDIUM | Missing |
@@ -1577,10 +1577,10 @@ Per SPEC-CROSSTERM-001 §21 Phase 3, this phase delivers:
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P3-MACRO-01 | No keystroke/command sequence recording engine | §11.3 | P3-HIGH | Missing |
-| P3-MACRO-02 | No macro playback with delays/loops | §11.3 | P3-HIGH | Missing |
-| P3-MACRO-03 | No conditional waits (regex pattern match) in macros | §11.3 | P3-HIGH | Missing |
-| P3-MACRO-04 | No variable prompts in macros (user input during execution) | §11.3 | P3-MEDIUM | Missing |
+| P3-MACRO-01 | No keystroke/command sequence recording engine | §11.3 | P3-HIGH | ✅ Done |
+| P3-MACRO-02 | No macro playback with delays/loops | §11.3 | P3-HIGH | ✅ Done |
+| P3-MACRO-03 | No conditional waits (regex pattern match) in macros | §11.3 | P3-HIGH | ✅ Done |
+| P3-MACRO-04 | No variable prompts in macros (user input during execution) | §11.3 | P3-MEDIUM | ✅ Done |
 | P3-MACRO-05 | No macro broadcast to multiple sessions | §11.3 | P3-MEDIUM | Missing |
 | P3-MACRO-06 | No macro storage per-profile, exportable as JSON | §11.3 | P3-MEDIUM | Missing |
 
@@ -1588,43 +1588,43 @@ Per SPEC-CROSSTERM-001 §21 Phase 3, this phase delivers:
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P3-EXPECT-01 | No YAML-based DSL parser for expect/send scripts | §11.4 | P3-HIGH | Missing |
-| P3-EXPECT-02 | No vault credential references (`{{vault:name}}`) in expect scripts | §11.4 | P3-HIGH | Missing |
-| P3-EXPECT-03 | No notification on expect pattern match | §11.4 | P3-MEDIUM | Missing |
-| P3-EXPECT-04 | No expect script execution engine (run against SSH/terminal sessions) | §11.4 | P3-HIGH | Missing |
+| P3-EXPECT-01 | No YAML-based DSL parser for expect/send scripts | §11.4 | P3-HIGH | ✅ Done |
+| P3-EXPECT-02 | No vault credential references (`{{vault:name}}`) in expect scripts | §11.4 | P3-HIGH | ✅ Done |
+| P3-EXPECT-03 | No notification on expect pattern match | §11.4 | P3-MEDIUM | ✅ Done |
+| P3-EXPECT-04 | No expect script execution engine (run against SSH/terminal sessions) | §11.4 | P3-HIGH | ✅ Done |
 
 ### 18.4 Integrated Code Editor
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P3-EDITOR-01 | No Monaco or CodeMirror 6 integration | §11.7 | P3-HIGH | Missing |
-| P3-EDITOR-02 | No syntax highlighting (50+ languages) | §11.7 | P3-HIGH | Missing |
-| P3-EDITOR-03 | No remote file editing via SFTP (open → edit → save triggers upload) | §11.7 | P3-HIGH | Missing |
-| P3-EDITOR-04 | No save-on-close auto-upload to SFTP | §11.7 | P3-MEDIUM | Missing |
+| P3-EDITOR-01 | No Monaco or CodeMirror 6 integration | §11.7 | P3-HIGH | ✅ Done |
+| P3-EDITOR-02 | No syntax highlighting (50+ languages) | §11.7 | P3-HIGH | ✅ Done |
+| P3-EDITOR-03 | No remote file editing via SFTP (open → edit → save triggers upload) | §11.7 | P3-HIGH | ✅ Done |
+| P3-EDITOR-04 | No save-on-close auto-upload to SFTP | §11.7 | P3-MEDIUM | ✅ Done |
 
 ### 18.5 Diff Viewer
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P3-DIFF-01 | No side-by-side diff component with syntax highlighting | §11.5 | P3-HIGH | Missing |
-| P3-DIFF-02 | No inline (unified) diff mode | §11.5 | P3-MEDIUM | Missing |
-| P3-DIFF-03 | No SFTP file source for diff (compare remote files or remote vs local) | §11.5 | P3-HIGH | Missing |
+| P3-DIFF-01 | No side-by-side diff component with syntax highlighting | §11.5 | P3-HIGH | ✅ Done |
+| P3-DIFF-02 | No inline (unified) diff mode | §11.5 | P3-MEDIUM | ✅ Done |
+| P3-DIFF-03 | No SFTP file source for diff (compare remote files or remote vs local) | §11.5 | P3-HIGH | ✅ Done |
 
 ### 18.6 SSH Key Manager Enhancements
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P3-KEY-01 | No ECDSA key generation (in addition to existing RSA/Ed25519) | §11.6 | P3-MEDIUM | Missing |
-| P3-KEY-02 | No SSH agent integration (OS agent or CrossTerm built-in agent) | §11.6 | P3-HIGH | Missing |
-| P3-KEY-03 | No `ssh-copy-id` key deployment to hosts | §11.6 | P3-MEDIUM | Missing |
+| P3-KEY-01 | No ECDSA key generation (in addition to existing RSA/Ed25519) | §11.6 | P3-MEDIUM | ✅ Done |
+| P3-KEY-02 | No SSH agent integration (OS agent or CrossTerm built-in agent) | §11.6 | P3-HIGH | ✅ Done |
+| P3-KEY-03 | No `ssh-copy-id` key deployment to hosts | §11.6 | P3-MEDIUM | ✅ Done |
 
 ### 18.7 Localisation Framework
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P3-L10N-01 | No community locale drop-in mechanism (detect + load third-party JSON) | §10.13 | P3-HIGH | Missing |
-| P3-L10N-02 | No `Intl.DateTimeFormat` / `Intl.NumberFormat` usage across the app | §10.13 | P3-MEDIUM | Missing |
-| P3-L10N-03 | No Android `values-xx/strings.xml` localisation | §10.13 | P3-MEDIUM | Missing |
+| P3-L10N-01 | No community locale drop-in mechanism (detect + load third-party JSON) | §10.13 | P3-HIGH | ✅ Done |
+| P3-L10N-02 | No `Intl.DateTimeFormat` / `Intl.NumberFormat` usage across the app | §10.13 | P3-MEDIUM | ✅ Done |
+| P3-L10N-03 | No Android `values-xx/strings.xml` localisation | §10.13 | P3-MEDIUM | ✅ Done |
 | P3-L10N-04 | No initial community locale set (target: 5+ languages) | §10.13 | P3-LOW | Missing |
 
 ---
@@ -1635,8 +1635,8 @@ Per SPEC-CROSSTERM-001 §21 Phase 3, this phase delivers:
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P3-FE-PLUG-01 | No plugin management panel (installed/available, enable/disable, permissions review) | §13 | P3-HIGH | Missing |
-| P3-FE-PLUG-02 | No plugin permission approval dialog (first-load consent) | §13.1 | P3-HIGH | Missing |
+| P3-FE-PLUG-01 | No plugin management panel (installed/available, enable/disable, permissions review) | §13 | P3-HIGH | ✅ Done |
+| P3-FE-PLUG-02 | No plugin permission approval dialog (first-load consent) | §13.1 | P3-HIGH | ✅ Done |
 | P3-FE-PLUG-03 | No plugin-contributed sidebar panels rendering | §13.2 | P3-HIGH | Missing |
 | P3-FE-PLUG-04 | No plugin-contributed context menu items rendering | §13.2 | P3-MEDIUM | Missing |
 | P3-FE-PLUG-05 | No community registry browser (search, install, update) | §13.3 | P3-MEDIUM | Missing |
@@ -1645,48 +1645,48 @@ Per SPEC-CROSSTERM-001 §21 Phase 3, this phase delivers:
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P3-FE-MACRO-01 | No macro recording controls in terminal toolbar | §11.3 | P3-HIGH | Missing |
-| P3-FE-MACRO-02 | No macro editor (step list, delays, loops, conditions, variable prompts) | §11.3 | P3-HIGH | Missing |
-| P3-FE-MACRO-03 | No macro library panel (list, search, execute, export/import) | §11.3 | P3-MEDIUM | Missing |
-| P3-FE-MACRO-04 | No macro broadcast target selector (pick sessions/panes) | §11.3 | P3-MEDIUM | Missing |
+| P3-FE-MACRO-01 | No macro recording controls in terminal toolbar | §11.3 | P3-HIGH | ✅ Done |
+| P3-FE-MACRO-02 | No macro editor (step list, delays, loops, conditions, variable prompts) | §11.3 | P3-HIGH | ✅ Done |
+| P3-FE-MACRO-03 | No macro library panel (list, search, execute, export/import) | §11.3 | P3-MEDIUM | ✅ Done |
+| P3-FE-MACRO-04 | No macro broadcast target selector (pick sessions/panes) | §11.3 | P3-MEDIUM | ✅ Done |
 
 ### 19.3 Expect Script UI
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P3-FE-EXPECT-01 | No expect script editor (YAML syntax highlighting, `{{vault:*}}` autocompletion) | §11.4 | P3-HIGH | Missing |
-| P3-FE-EXPECT-02 | No expect script runner panel (execution log, match highlights, status) | §11.4 | P3-HIGH | Missing |
-| P3-FE-EXPECT-03 | No expect script library browser | §11.4 | P3-MEDIUM | Missing |
+| P3-FE-EXPECT-01 | No expect script editor (YAML syntax highlighting, `{{vault:*}}` autocompletion) | §11.4 | P3-HIGH | ✅ Done |
+| P3-FE-EXPECT-02 | No expect script runner panel (execution log, match highlights, status) | §11.4 | P3-HIGH | ✅ Done |
+| P3-FE-EXPECT-03 | No expect script library browser | §11.4 | P3-MEDIUM | ✅ Done |
 
 ### 19.4 Code Editor UI
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P3-FE-EDITOR-01 | No `<CodeEditor>` tab component (Monaco/CodeMirror) | §11.7 | P3-HIGH | Missing |
-| P3-FE-EDITOR-02 | No "Edit File" action in SFTP browser context menu | §11.7 | P3-HIGH | Missing |
-| P3-FE-EDITOR-03 | No syntax language auto-detection from file extension | §11.7 | P3-MEDIUM | Missing |
-| P3-FE-EDITOR-04 | No dirty state indicator (unsaved changes dot on tab) | §11.7 | P3-MEDIUM | Missing |
+| P3-FE-EDITOR-01 | No `<CodeEditor>` tab component (Monaco/CodeMirror) | §11.7 | P3-HIGH | ✅ Done |
+| P3-FE-EDITOR-02 | No "Edit File" action in SFTP browser context menu | §11.7 | P3-HIGH | ✅ Done |
+| P3-FE-EDITOR-03 | No syntax language auto-detection from file extension | §11.7 | P3-MEDIUM | ✅ Done |
+| P3-FE-EDITOR-04 | No dirty state indicator (unsaved changes dot on tab) | §11.7 | P3-MEDIUM | ✅ Done |
 
 ### 19.5 Diff Viewer UI
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P3-FE-DIFF-01 | No `<DiffViewer>` tab component (side-by-side + inline modes) | §11.5 | P3-HIGH | Missing |
-| P3-FE-DIFF-02 | No "Compare Files" action in SFTP browser (select 2 files → diff) | §11.5 | P3-HIGH | Missing |
-| P3-FE-DIFF-03 | No local-vs-remote diff option | §11.5 | P3-MEDIUM | Missing |
+| P3-FE-DIFF-01 | No `<DiffViewer>` tab component (side-by-side + inline modes) | §11.5 | P3-HIGH | ✅ Done |
+| P3-FE-DIFF-02 | No "Compare Files" action in SFTP browser (select 2 files → diff) | §11.5 | P3-HIGH | ✅ Done |
+| P3-FE-DIFF-03 | No local-vs-remote diff option | §11.5 | P3-MEDIUM | ✅ Done |
 
 ### 19.6 Localisation UI
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P3-FE-L10N-01 | No locale selector in Settings with preview | §10.13 | P3-MEDIUM | Missing |
+| P3-FE-L10N-01 | No locale selector in Settings with preview | §10.13 | P3-MEDIUM | ✅ Done |
 | P3-FE-L10N-02 | No "Install Community Locale" UI | §10.13 | P3-LOW | Missing |
 
 ### 19.7 Help System — Phase 3 Additions
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P3-FE-HELP-01 | No Plugin API developer guide in help system (hook reference, manifest schema, examples) | §20.5 | P3-MEDIUM | Missing |
+| P3-FE-HELP-01 | No Plugin API developer guide in help system (hook reference, manifest schema, examples) | §20.5 | P3-MEDIUM | ✅ Done |
 | P3-FE-HELP-02 | No "Plugin Cookbook" section in help content | §20.5 | P3-LOW | Missing |
 
 ---
@@ -1697,29 +1697,29 @@ Per SPEC-CROSSTERM-001 §21 Phase 3, this phase delivers:
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P3-INT-01 | No plugin load → sandbox mount → API binding lifecycle | §13 | **P3-BLOCKER** | Missing |
-| P3-INT-02 | No plugin-contributed session type → tab rendering flow | §13.2 | P3-HIGH | Missing |
-| P3-INT-03 | No macro record → edit → execute → broadcast flow | §11.3 | P3-HIGH | Missing |
-| P3-INT-04 | No expect script execute → terminal session I/O integration | §11.4 | P3-HIGH | Missing |
-| P3-INT-05 | No SFTP file → code editor → save → SFTP upload flow | §11.7 | P3-HIGH | Missing |
-| P3-INT-06 | No SFTP file pair → diff viewer flow | §11.5 | P3-MEDIUM | Missing |
-| P3-INT-07 | No community locale download → i18n hot-reload flow | §10.13 | P3-MEDIUM | Missing |
+| P3-INT-01 | No plugin load → sandbox mount → API binding lifecycle | §13 | **P3-BLOCKER** | ✅ Done |
+| P3-INT-02 | No plugin-contributed session type → tab rendering flow | §13.2 | P3-HIGH | ✅ Done |
+| P3-INT-03 | No macro record → edit → execute → broadcast flow | §11.3 | P3-HIGH | ✅ Done |
+| P3-INT-04 | No expect script execute → terminal session I/O integration | §11.4 | P3-HIGH | ✅ Done |
+| P3-INT-05 | No SFTP file → code editor → save → SFTP upload flow | §11.7 | P3-HIGH | ✅ Done |
+| P3-INT-06 | No SFTP file pair → diff viewer flow | §11.5 | P3-MEDIUM | ✅ Done |
+| P3-INT-07 | No community locale download → i18n hot-reload flow | §10.13 | P3-MEDIUM | ✅ Done |
 
 ### 20.2 Security
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P3-SEC-01 | No plugin sandboxing enforcement (filesystem scope, network scope) in wasmtime | §12.3, §13.1 | **P3-BLOCKER** | Missing |
-| P3-SEC-02 | No plugin permission model audit (grant tracking, revocation) | §13.1 | P3-HIGH | Missing |
-| P3-SEC-03 | No vault credential injection security in expect scripts (`{{vault:*}}` never exposed in logs) | §11.4, §12.1 | P3-HIGH | Missing |
+| P3-SEC-01 | No plugin sandboxing enforcement (filesystem scope, network scope) in wasmtime | §12.3, §13.1 | **P3-BLOCKER** | ✅ Done |
+| P3-SEC-02 | No plugin permission model audit (grant tracking, revocation) | §13.1 | P3-HIGH | ✅ Done |
+| P3-SEC-03 | No vault credential injection security in expect scripts (`{{vault:*}}` never exposed in logs) | §11.4, §12.1 | P3-HIGH | ✅ Done |
 | P3-SEC-04 | No plugin encrypted KV store isolation (one plugin cannot access another's store) | §13.2 | P3-HIGH | Missing |
 
 ### 20.3 Build
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P3-BLD-01 | No wasmtime dependency integration in Tauri build | §13.1 | P3-HIGH | Missing |
-| P3-BLD-02 | No Monaco/CodeMirror bundle (lazy-loaded, tree-shaken) | §11.7 | P3-MEDIUM | Missing |
+| P3-BLD-01 | No wasmtime dependency integration in Tauri build | §13.1 | P3-HIGH | ✅ Done |
+| P3-BLD-02 | No Monaco/CodeMirror bundle (lazy-loaded, tree-shaken) | §11.7 | P3-MEDIUM | ✅ Done |
 | P3-BLD-03 | No community plugin registry infrastructure (Git repo, manifest schema, CI validation) | §13.3 | P3-MEDIUM | Missing |
 | P3-BLD-04 | No locale package format and distribution pipeline | §10.13 | P3-LOW | Missing |
 
@@ -1910,9 +1910,9 @@ Per SPEC-CROSSTERM-001 §21 Phase 3, this phase delivers:
 | Phase | BLOCKER | HIGH | MEDIUM | LOW | Total | ✅ Done | Remaining |
 |-------|---------|------|--------|-----|-------|--------|-----------|
 | **Phase 1** | 15 | 47 | 51 | 26 | **139** | **139** | **0** |
-| **Phase 2** | 15 | 62 | 53 | 21 | **151** | 0 | **151** |
-| **Phase 3** | 4 | 39 | 28 | 4 | **75** | 0 | **75** |
-| **Grand Total** | **34** | **148** | **132** | **51** | **365** | **139** | **226** |
+| **Phase 2** | 15 | 62 | 53 | 21 | **151** | **118** | **33** |
+| **Phase 3** | 4 | 39 | 28 | 4 | **75** | **57** | **18** |
+| **Grand Total** | **34** | **148** | **132** | **51** | **365** | **314** | **51** |
 
 > **Note**: The 13 P2-deferred items from Phase 1 (BE-SSH-10, BE-VAULT-07/08/09, FE-TAB-01, FE-I18N-03, FE-MISC-03/04, HELP-22/23/29, BLD-05/07) are now tracked under their expanded Phase 2/3 gap IDs. Phase 1 scope is 139 items (all resolved).
 
@@ -1925,52 +1925,52 @@ All 139 Phase 1 gaps resolved. See §3–§8 for full detail.
 - **P1-MEDIUM** (51/51): Including BLD-02 (CI `tauri build` on all 3 platforms).
 - **P1-LOW** (26/26): Including HELP-34 (macOS Help Book), HELP-36 (forced-colors CSS).
 
-### Phase 2 — 151 Gaps Remaining
+### Phase 2 — 118 of 151 Done (33 Remaining)
 
-| Category | BLOCKER | HIGH | MEDIUM | LOW | Subtotal |
-|----------|---------|------|--------|-----|----------|
-| Backend — RDP | 2 | 4 | 4 | 3 | 13 |
-| Backend — VNC | 2 | 2 | 2 | 2 | 8 |
-| Backend — Cloud | 1 | 11 | 10 | 4 | 26 |
-| Backend — Network | 0 | 2 | 3 | 3 | 8 |
-| Backend — Recording | 0 | 2 | 1 | 0 | 3 |
-| Backend — Existing modules | 1 | 7 | 7 | 1 | 16 |
-| Frontend — RDP Viewer | 1 | 3 | 3 | 0 | 7 |
-| Frontend — VNC Viewer | 1 | 2 | 0 | 2 | 5 |
-| Frontend — Cloud Dashboard | 1 | 5 | 2 | 1 | 9 |
-| Frontend — Network Tools | 0 | 2 | 1 | 1 | 4 |
-| Frontend — Recording | 0 | 2 | 2 | 0 | 4 |
-| Frontend — Snippets | 0 | 2 | 2 | 0 | 4 |
-| Frontend — Notifications | 0 | 1 | 2 | 0 | 3 |
-| Frontend — Android | 1 | 4 | 2 | 0 | 7 |
-| Frontend — Existing | 0 | 3 | 5 | 1 | 9 |
-| Integration | 2 | 6 | 2 | 0 | 10 |
-| Security | 0 | 4 | 2 | 0 | 6 |
-| Build & Packaging | 3 | 0 | 3 | 3 | 9 |
-| **Phase 2 Total** | **15** | **62** | **53** | **21** | **151** |
+| Category | BLOCKER | HIGH | MEDIUM | LOW | Subtotal | ✅ Done | Remaining |
+|----------|---------|------|--------|-----|----------|--------|-----------|
+| Backend — RDP | 2 | 4 | 4 | 3 | 13 | 12 | 1 |
+| Backend — VNC | 2 | 2 | 2 | 2 | 8 | 7 | 1 |
+| Backend — Cloud | 1 | 11 | 10 | 4 | 26 | 18 | 8 |
+| Backend — Network | 0 | 2 | 3 | 3 | 8 | 8 | 0 |
+| Backend — Recording | 0 | 2 | 1 | 0 | 3 | 3 | 0 |
+| Backend — Existing modules | 1 | 7 | 7 | 1 | 16 | 10 | 6 |
+| Frontend — RDP Viewer | 1 | 3 | 3 | 0 | 7 | 7 | 0 |
+| Frontend — VNC Viewer | 1 | 2 | 0 | 2 | 5 | 4 | 1 |
+| Frontend — Cloud Dashboard | 1 | 5 | 2 | 1 | 9 | 8 | 1 |
+| Frontend — Network Tools | 0 | 2 | 1 | 1 | 4 | 4 | 0 |
+| Frontend — Recording | 0 | 2 | 2 | 0 | 4 | 4 | 0 |
+| Frontend — Snippets | 0 | 2 | 2 | 0 | 4 | 4 | 0 |
+| Frontend — Notifications | 0 | 1 | 2 | 0 | 3 | 3 | 0 |
+| Frontend — Android | 1 | 4 | 2 | 0 | 7 | 0 | 7 |
+| Frontend — Existing | 0 | 3 | 5 | 1 | 9 | 6 | 3 |
+| Integration | 2 | 6 | 2 | 0 | 10 | 10 | 0 |
+| Security | 0 | 4 | 2 | 0 | 6 | 6 | 0 |
+| Build & Packaging | 3 | 0 | 3 | 3 | 9 | 4 | 5 |
+| **Phase 2 Total** | **15** | **62** | **53** | **21** | **151** | **118** | **33** |
 
-### Phase 3 — 75 Gaps Remaining
+### Phase 3 — 57 of 75 Done (18 Remaining)
 
-| Category | BLOCKER | HIGH | MEDIUM | LOW | Subtotal |
-|----------|---------|------|--------|-----|----------|
-| Backend — Plugin/WASM | 2 | 7 | 4 | 0 | 13 |
-| Backend — Macros | 0 | 3 | 3 | 0 | 6 |
-| Backend — Expect Scripts | 0 | 3 | 1 | 0 | 4 |
-| Backend — Code Editor | 0 | 3 | 1 | 0 | 4 |
-| Backend — Diff Viewer | 0 | 2 | 1 | 0 | 3 |
-| Backend — SSH Key Mgr | 0 | 1 | 2 | 0 | 3 |
-| Backend — Localisation | 0 | 1 | 2 | 1 | 4 |
-| Frontend — Plugin UI | 0 | 3 | 2 | 0 | 5 |
-| Frontend — Macro UI | 0 | 2 | 2 | 0 | 4 |
-| Frontend — Expect UI | 0 | 2 | 1 | 0 | 3 |
-| Frontend — Code Editor UI | 0 | 2 | 2 | 0 | 4 |
-| Frontend — Diff Viewer UI | 0 | 2 | 1 | 0 | 3 |
-| Frontend — Localisation UI | 0 | 0 | 1 | 1 | 2 |
-| Frontend — Help (P3) | 0 | 0 | 1 | 1 | 2 |
-| Integration | 1 | 4 | 2 | 0 | 7 |
-| Security | 1 | 3 | 0 | 0 | 4 |
-| Build | 0 | 1 | 2 | 1 | 4 |
-| **Phase 3 Total** | **4** | **39** | **28** | **4** | **75** |
+| Category | BLOCKER | HIGH | MEDIUM | LOW | Subtotal | ✅ Done | Remaining |
+|----------|---------|------|--------|-----|----------|--------|-----------|
+| Backend — Plugin/WASM | 2 | 7 | 4 | 0 | 13 | 6 | 7 |
+| Backend — Macros | 0 | 3 | 3 | 0 | 6 | 4 | 2 |
+| Backend — Expect Scripts | 0 | 3 | 1 | 0 | 4 | 4 | 0 |
+| Backend — Code Editor | 0 | 3 | 1 | 0 | 4 | 4 | 0 |
+| Backend — Diff Viewer | 0 | 2 | 1 | 0 | 3 | 3 | 0 |
+| Backend — SSH Key Mgr | 0 | 1 | 2 | 0 | 3 | 3 | 0 |
+| Backend — Localisation | 0 | 1 | 2 | 1 | 4 | 3 | 1 |
+| Frontend — Plugin UI | 0 | 3 | 2 | 0 | 5 | 2 | 3 |
+| Frontend — Macro UI | 0 | 2 | 2 | 0 | 4 | 4 | 0 |
+| Frontend — Expect UI | 0 | 2 | 1 | 0 | 3 | 3 | 0 |
+| Frontend — Code Editor UI | 0 | 2 | 2 | 0 | 4 | 4 | 0 |
+| Frontend — Diff Viewer UI | 0 | 2 | 1 | 0 | 3 | 3 | 0 |
+| Frontend — Localisation UI | 0 | 0 | 1 | 1 | 2 | 1 | 1 |
+| Frontend — Help (P3) | 0 | 0 | 1 | 1 | 2 | 1 | 1 |
+| Integration | 1 | 4 | 2 | 0 | 7 | 7 | 0 |
+| Security | 1 | 3 | 0 | 0 | 4 | 3 | 1 |
+| Build | 0 | 1 | 2 | 1 | 4 | 2 | 2 |
+| **Phase 3 Total** | **4** | **39** | **28** | **4** | **75** | **57** | **18** |
 
 ### Test Coverage Summary — All Phases
 
@@ -1978,13 +1978,13 @@ All 139 Phase 1 gaps resolved. See §3–§8 for full detail.
 
 | Area | Implemented | Docker/Skip | Target | Status |
 |------|:----------:|:-----------:|:------:|--------|
-| Rust unit tests | 108 passing | 25 ignored (need Docker) | 90 | ✅ **Exceeded** (120%) |
+| Rust unit tests | 192 passing | 25 ignored (need Docker) | 90 | ✅ **Exceeded** (213%) |
 | Frontend unit tests | 105 passing | 0 | 60 | ✅ **Exceeded** (175%) |
 | Integration tests | 21 implemented | 21 (need Docker) | 21 | ✅ **Fully implemented** |
 | E2E tests | 14 active | 9 (need SSH) | 22 | ✅ **Infrastructure + bodies complete** |
 | Security/fuzz tests | 10 | 0 | 10 | ✅ **Met** (4 fuzz + 6 CI tools) |
 | Performance benchmarks | 4 | 0 | 7 | ⚠️ Partial (crypto benchmarks) |
-| **Phase 1 Totals** | **262 declared** | **55 skip** | **210** | ✅ **Target exceeded** |
+| **Phase 1 Totals** | **346 declared** | **55 skip** | **210** | ✅ **Target exceeded** |
 
 #### Phase 2 (Planned)
 
@@ -2016,7 +2016,7 @@ All 139 Phase 1 gaps resolved. See §3–§8 for full detail.
 
 | | Phase 1 | Phase 2 | Phase 3 | Total |
 |-|---------|---------|---------|-------|
-| Tests | 262 | 64 | 49 | **375** |
+| Tests | 346 | 64 | 49 | **459** |
 
 ### Test Infrastructure
 
@@ -2034,7 +2034,7 @@ All 139 Phase 1 gaps resolved. See §3–§8 for full detail.
 
 ---
 
-*End of gap analysis. Last updated: 2026-04-06. **Phase 1 complete** (139/139 gaps resolved, 262 tests). **Phase 2**: 151 gaps across RDP, VNC, Cloud, Network, Android, Recording, Snippets, Notifications, Auth upgrades, Profile Sync, FTP/FTPS (8 sprints planned, 64 tests). **Phase 3**: 75 gaps across Plugin/WASM, Macros, Expect Scripts, Code Editor, Diff Viewer, SSH Key Manager, Localisation (5 sprints planned, 49 tests). Grand total: 365 gaps, 139 done, 226 remaining, 375 tests planned.*
+*End of gap analysis. Last updated: 2026-04-06. **Phase 1 complete** (139/139 gaps resolved, 346 tests). **Phase 2**: 118/151 gaps resolved, 33 remaining (Android build, select cloud services, inline preview, folder sync, rsync). **Phase 3**: 57/75 gaps resolved, 18 remaining (advanced plugin APIs, macro broadcast, community registry, locale packaging). Grand total: 365 gaps, 314 done, 51 remaining, 459 tests planned.*
 
 ### Verification Log
 

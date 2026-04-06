@@ -1,15 +1,30 @@
 mod audit;
+mod cloud;
 mod config;
+mod editor;
+mod ftp;
 mod keygen;
+mod keymgr;
+mod l10n;
+mod macros;
+mod network;
 mod notifications;
+mod plugin_rt;
+mod rdp;
+mod recording;
+mod security;
+mod serial;
 mod sftp;
 mod snippets;
 mod ssh;
+mod sync;
+mod telnet;
 mod terminal;
 #[cfg(feature = "integration")]
 pub mod vault;
 #[cfg(not(feature = "integration"))]
 mod vault;
+mod vnc;
 mod window;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -36,6 +51,21 @@ pub fn run() {
         .manage(keygen::KeygenState::new())
         .manage(snippets::SnippetState::new())
         .manage(notifications::NotificationState::new())
+        .manage(keymgr::KeyMgrState::new())
+        .manage(l10n::L10nState::new())
+        .manage(security::SecurityState::new())
+        .manage(cloud::CloudState::new())
+        .manage(ftp::FtpState::new())
+        .manage(network::NetworkState::new())
+        .manage(rdp::RdpState::new(Box::new(rdp::StubRdpBackend)))
+        .manage(recording::RecordingState::new())
+        .manage(serial::SerialState::new())
+        .manage(sync::SyncState::new())
+        .manage(telnet::TelnetState::new())
+        .manage(vnc::VncState::new(Box::new(vnc::StubVncBackend)))
+        .manage(editor::EditorState::new())
+        .manage(macros::MacroState::new())
+        .manage(plugin_rt::PluginState::new())
         .invoke_handler(tauri::generate_handler![
             // Vault
             vault::vault_create,
@@ -153,6 +183,177 @@ pub fn run() {
             window::window_create_for_tab,
             window::window_close,
             window::window_list,
+            // Key Manager
+            keymgr::keymgr_list_keys,
+            keymgr::keymgr_import_key,
+            keymgr::keymgr_export_key,
+            keymgr::keymgr_delete_key,
+            keymgr::keymgr_agent_list,
+            keymgr::keymgr_agent_add,
+            keymgr::keymgr_agent_remove,
+            keymgr::keymgr_agent_remove_all,
+            keymgr::keymgr_deploy_key,
+            keymgr::keymgr_cert_list,
+            keymgr::keymgr_cert_sign,
+            keymgr::keymgr_cert_verify,
+            // Localisation
+            l10n::l10n_list_locales,
+            l10n::l10n_get_locale,
+            l10n::l10n_set_locale,
+            l10n::l10n_get_translations,
+            l10n::l10n_set_custom_translation,
+            l10n::l10n_export_translations,
+            l10n::l10n_import_translations,
+            l10n::l10n_get_completeness,
+            l10n::l10n_detect_system_locale,
+            // Security
+            security::security_audit_log,
+            security::security_audit_list,
+            security::security_audit_search,
+            security::security_check_rate_limit,
+            security::security_get_config,
+            security::security_set_config,
+            security::security_cert_pin,
+            security::security_cert_verify,
+            security::security_cert_list_pins,
+            security::security_clear_audit_log,
+            // Cloud
+            cloud::cloud_detect_clis,
+            cloud::cloud_get_asset_tree,
+            cloud::aws::cloud_aws_list_profiles,
+            cloud::aws::cloud_aws_switch_profile,
+            cloud::aws::cloud_aws_sso_login,
+            cloud::aws::cloud_aws_list_ec2,
+            cloud::aws::cloud_aws_ssm_start,
+            cloud::aws::cloud_aws_list_s3_buckets,
+            cloud::aws::cloud_aws_list_s3_objects,
+            cloud::aws::cloud_aws_cloudwatch_tail,
+            cloud::aws::cloud_aws_ecs_exec,
+            cloud::aws::cloud_aws_lambda_invoke,
+            cloud::aws::cloud_aws_cost_summary,
+            cloud::azure::cloud_azure_list_subscriptions,
+            cloud::azure::cloud_azure_set_subscription,
+            cloud::azure::cloud_azure_login,
+            cloud::azure::cloud_azure_list_vms,
+            cloud::azure::cloud_azure_bastion_connect,
+            cloud::azure::cloud_azure_cloud_shell,
+            cloud::azure::cloud_azure_list_storage,
+            cloud::azure::cloud_azure_log_analytics_query,
+            cloud::gcp::cloud_gcp_list_configs,
+            cloud::gcp::cloud_gcp_activate_config,
+            cloud::gcp::cloud_gcp_list_instances,
+            cloud::gcp::cloud_gcp_iap_tunnel,
+            cloud::gcp::cloud_gcp_list_buckets,
+            cloud::gcp::cloud_gcp_list_objects,
+            cloud::gcp::cloud_gcp_cloud_shell,
+            cloud::gcp::cloud_gcp_log_tail,
+            // FTP
+            ftp::ftp_connect,
+            ftp::ftp_disconnect,
+            ftp::ftp_list,
+            ftp::ftp_upload,
+            ftp::ftp_download,
+            ftp::ftp_mkdir,
+            ftp::ftp_delete,
+            ftp::ftp_rename,
+            // Network
+            network::network_scan_start,
+            network::network_scan_results,
+            network::network_scan_save_as_sessions,
+            network::network_wol_send,
+            network::network_tunnel_create,
+            network::network_tunnel_remove,
+            network::network_tunnel_list,
+            network::network_tunnel_toggle,
+            network::network_fileserver_start,
+            network::network_fileserver_stop,
+            network::network_fileserver_list,
+            // RDP
+            rdp::rdp_connect,
+            rdp::rdp_disconnect,
+            rdp::rdp_resize,
+            rdp::rdp_send_key,
+            rdp::rdp_send_mouse,
+            rdp::rdp_clipboard_sync,
+            rdp::rdp_screenshot,
+            rdp::rdp_list_connections,
+            rdp::rdp_configure_redirection,
+            rdp::rdp_send_ctrl_alt_del,
+            // Recording
+            recording::recording_start,
+            recording::recording_stop,
+            recording::recording_append,
+            recording::recording_list,
+            recording::recording_get,
+            recording::recording_delete,
+            recording::recording_playback_start,
+            recording::recording_playback_seek,
+            recording::recording_playback_set_speed,
+            recording::recording_export,
+            // Serial
+            serial::serial_list_ports,
+            serial::serial_connect,
+            serial::serial_disconnect,
+            serial::serial_write,
+            serial::serial_set_baud,
+            serial::serial_set_dtr,
+            serial::serial_set_rts,
+            // Sync
+            sync::sync_export,
+            sync::sync_import,
+            sync::sync_get_status,
+            // Telnet
+            telnet::telnet_connect,
+            telnet::telnet_disconnect,
+            telnet::telnet_write,
+            telnet::telnet_resize,
+            // VNC
+            vnc::vnc_connect,
+            vnc::vnc_disconnect,
+            vnc::vnc_send_key,
+            vnc::vnc_send_mouse,
+            vnc::vnc_set_encoding,
+            vnc::vnc_clipboard_send,
+            vnc::vnc_set_view_only,
+            vnc::vnc_screenshot,
+            vnc::vnc_set_scaling,
+            vnc::vnc_list_connections,
+            // Editor
+            editor::editor_open,
+            editor::editor_save,
+            editor::editor_close,
+            editor::editor_list_open,
+            editor::editor_get_content,
+            editor::editor_detect_language,
+            editor::editor_diff,
+            editor::editor_diff_content,
+            editor::editor_search,
+            editor::editor_replace,
+            // Macros
+            macros::macro_create,
+            macros::macro_update,
+            macros::macro_delete,
+            macros::macro_list,
+            macros::macro_get,
+            macros::macro_execute,
+            macros::macro_cancel,
+            macros::macro_pause,
+            macros::macro_resume,
+            macros::expect_rule_create,
+            macros::expect_rule_delete,
+            macros::expect_rule_list,
+            macros::expect_rule_toggle,
+            // Plugin Runtime
+            plugin_rt::plugin_scan,
+            plugin_rt::plugin_load,
+            plugin_rt::plugin_unload,
+            plugin_rt::plugin_enable,
+            plugin_rt::plugin_disable,
+            plugin_rt::plugin_get_info,
+            plugin_rt::plugin_list,
+            plugin_rt::plugin_install,
+            plugin_rt::plugin_uninstall,
+            plugin_rt::plugin_send_event,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

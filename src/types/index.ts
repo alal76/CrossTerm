@@ -565,3 +565,204 @@ export interface TelnetConfig {
   port: number;
   terminal_type: string;
 }
+
+// --- Plugin Types ---
+
+export interface PluginManifest {
+  id: string;
+  name: string;
+  version: string;
+  author: string;
+  description: string;
+  permissions: PluginPermission[];
+  entry_point: string;
+  api_version: string;
+}
+
+export type PluginPermission = 'network' | 'file_system' | 'terminal' | 'clipboard' | 'notifications' | 'settings';
+
+export interface PluginInfo {
+  manifest: PluginManifest;
+  enabled: boolean;
+  loaded: boolean;
+  load_time_ms?: number;
+  error?: string;
+}
+
+// --- Macro Types ---
+
+export type MacroStepType = 'send' | 'expect' | 'wait' | 'set_variable' | 'conditional' | 'loop';
+
+export interface MacroStep {
+  type: MacroStepType;
+  data?: string;
+  pattern?: string;
+  timeout_ms?: number;
+  duration_ms?: number;
+  name?: string;
+  value?: string;
+  from_capture?: string;
+  condition?: string;
+  then_steps?: MacroStep[];
+  else_steps?: MacroStep[];
+  count?: number;
+  steps?: MacroStep[];
+}
+
+export interface MacroInfo {
+  id: string;
+  name: string;
+  description?: string;
+  steps: MacroStep[];
+  created_at: string;
+  updated_at: string;
+  tags: string[];
+}
+
+export type MacroExecutionStatus = 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
+
+export interface MacroExecution {
+  id: string;
+  macro_id: string;
+  session_id: string;
+  status: MacroExecutionStatus;
+  current_step: number;
+  total_steps: number;
+  variables: Record<string, string>;
+  started_at: string;
+  completed_at?: string;
+  error?: string;
+}
+
+export type ExpectActionType = 'send_text' | 'run_macro' | 'notify' | 'callback';
+
+export interface ExpectRule {
+  id: string;
+  name: string;
+  pattern: string;
+  action: { type: ExpectActionType; text?: string; macro_id?: string; message?: string; event_name?: string };
+  enabled: boolean;
+}
+
+// --- Editor Types ---
+
+export interface EditorFile {
+  id: string;
+  path: string;
+  content: string;
+  encoding: string;
+  language?: string;
+  modified: boolean;
+  line_count: number;
+  size_bytes: number;
+}
+
+export interface DiffResult {
+  left_path: string;
+  right_path: string;
+  hunks: DiffHunk[];
+  stats: DiffStats;
+}
+
+export interface DiffHunk {
+  left_start: number;
+  left_count: number;
+  right_start: number;
+  right_count: number;
+  lines: DiffLine[];
+}
+
+export interface DiffLine {
+  line_type: 'context' | 'added' | 'removed';
+  content: string;
+  left_line?: number;
+  right_line?: number;
+}
+
+export interface DiffStats {
+  additions: number;
+  deletions: number;
+  modifications: number;
+}
+
+export interface SearchMatch {
+  line: number;
+  column: number;
+  length: number;
+  text: string;
+}
+
+// --- SSH Key Manager Types ---
+
+export interface SshKeyInfo {
+  id: string;
+  name: string;
+  key_type: string;
+  fingerprint: string;
+  public_key: string;
+  private_key_path: string;
+  comment?: string;
+  created_at: string;
+  last_used?: string;
+  tags: string[];
+}
+
+export interface AgentKey {
+  fingerprint: string;
+  key_type: string;
+  comment?: string;
+  lifetime?: number;
+}
+
+export interface CertificateInfo {
+  id: string;
+  key_id: string;
+  serial: number;
+  cert_type: "user" | "host";
+  valid_after: string;
+  valid_before: string;
+  principals: string[];
+  extensions: string[];
+}
+
+// --- Localisation Types ---
+
+export interface LocaleInfo {
+  code: string;
+  name: string;
+  native_name: string;
+  rtl: boolean;
+  completeness: number;
+}
+
+// --- Security Types ---
+
+export interface AuditEntry {
+  id: string;
+  timestamp: string;
+  user: string;
+  action: string;
+  resource: string;
+  details?: string;
+  ip_address?: string;
+  success: boolean;
+}
+
+export interface SecurityConfig {
+  vault_timeout_secs: number;
+  clipboard_clear_secs: number;
+  audit_enabled: boolean;
+  rate_limit: {
+    max_attempts: number;
+    window_secs: number;
+    lockout_secs: number;
+  };
+}
+
+export interface CertFingerprint {
+  sha256: string;
+  valid_from: string;
+  valid_until: string;
+  subject: string;
+  pinned: boolean;
+}

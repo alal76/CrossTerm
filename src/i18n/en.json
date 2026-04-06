@@ -666,5 +666,77 @@
     "port": "Port",
     "terminalType": "Terminal Type",
     "notConnected": "Not connected to any telnet host."
+  },
+  "plugin": {
+    "manager": "Plugin Manager",
+    "install": "Install Plugin",
+    "uninstall": "Uninstall",
+    "enable": "Enable",
+    "disable": "Disable",
+    "permissions": "Permissions",
+    "noPlugins": "No plugins installed. Install a plugin to extend CrossTerm."
+  },
+  "macro": {
+    "editor": "Macro Editor",
+    "create": "New Macro",
+    "run": "Run",
+    "stop": "Stop",
+    "pause": "Pause",
+    "resume": "Resume",
+    "steps": "Steps",
+    "variables": "Variables",
+    "expect": "Expect Rules",
+    "addStep": "Add Step",
+    "addRule": "Add Rule",
+    "noMacros": "No macros yet. Create a macro to automate terminal tasks."
+  },
+  "editor": {
+    "open": "Open File",
+    "save": "Save",
+    "close": "Close",
+    "search": "Search",
+    "replace": "Replace",
+    "replaceAll": "Replace All",
+    "diff": "Compare Files",
+    "additions": "additions",
+    "deletions": "deletions",
+    "noFiles": "No files open. Open a file to start editing."
+  },
+  "keymgr": {
+    "title": "SSH Key Manager",
+    "import": "Import Key",
+    "export": "Export Key",
+    "delete": "Delete Key",
+    "deploy": "Deploy to Host",
+    "agent": "SSH Agent",
+    "addToAgent": "Add to Agent",
+    "removeFromAgent": "Remove from Agent",
+    "certificates": "Certificates",
+    "signCert": "Sign Certificate",
+    "noKeys": "No SSH keys found. Import or generate a key to get started."
+  },
+  "l10n": {
+    "language": "Language",
+    "completeness": "Translation completeness",
+    "contribute": "Help translate CrossTerm",
+    "rtl": "Right-to-left"
+  },
+  "security": {
+    "settings": "Security Settings",
+    "vaultTimeout": "Vault Timeout",
+    "clipboardClear": "Auto-clear Clipboard",
+    "auditLog": "Audit Log",
+    "rateLimit": "Rate Limiting",
+    "certPins": "Certificate Pins",
+    "clearLog": "Clear Audit Log"
+  },
+  "audit": {
+    "timestamp": "Timestamp",
+    "action": "Action",
+    "resource": "Resource",
+    "details": "Details",
+    "success": "Success",
+    "export": "Export Log",
+    "noEntries": "No audit entries yet."
   }
 }
