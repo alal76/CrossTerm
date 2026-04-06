@@ -1,0 +1,11 @@
+/Users/alal/Code/CrossTerm/src-tauri/fuzz/target/debug/deps/tauri_plugin_fs-86ee153499f258ea.d: /Users/alal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-fs-2.5.0/src/lib.rs /Users/alal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-fs-2.5.0/src/commands.rs /Users/alal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-fs-2.5.0/src/config.rs /Users/alal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-fs-2.5.0/src/desktop.rs /Users/alal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-fs-2.5.0/src/error.rs /Users/alal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-fs-2.5.0/src/file_path.rs /Users/alal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-fs-2.5.0/src/scope.rs
+
+/Users/alal/Code/CrossTerm/src-tauri/fuzz/target/debug/deps/libtauri_plugin_fs-86ee153499f258ea.rmeta: /Users/alal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-fs-2.5.0/src/lib.rs /Users/alal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-fs-2.5.0/src/commands.rs /Users/alal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-fs-2.5.0/src/config.rs /Users/alal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-fs-2.5.0/src/desktop.rs /Users/alal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-fs-2.5.0/src/error.rs /Users/alal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-fs-2.5.0/src/file_path.rs /Users/alal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-fs-2.5.0/src/scope.rs
+
+/Users/alal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-fs-2.5.0/src/lib.rs:
+/Users/alal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-fs-2.5.0/src/commands.rs:
+/Users/alal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-fs-2.5.0/src/config.rs:
+/Users/alal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-fs-2.5.0/src/desktop.rs:
+/Users/alal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-fs-2.5.0/src/error.rs:
+/Users/alal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-fs-2.5.0/src/file_path.rs:
+/Users/alal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-fs-2.5.0/src/scope.rs:

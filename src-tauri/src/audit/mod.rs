@@ -345,4 +345,56 @@ mod tests {
         let json = serde_json::to_string(&AuditEventType::TerminalCreate).unwrap();
         assert_eq!(json, "\"terminal_create\"");
     }
+
+    // ── UT-A-06: Concurrent append ──────────────────────────────────
+
+    #[test]
+    fn test_concurrent_append() {
+        // UT-A-06
+        let tmp = TempDir::new().unwrap();
+        let audit_path = tmp.path().join("audit.jsonl");
+        let path = audit_path.clone();
+
+        // Spawn 10 threads, each appending one event
+        let handles: Vec<_> = (0..10)
+            .map(|i| {
+                let p = path.clone();
+                std::thread::spawn(move || {
+                    let event = AuditEvent {
+                        timestamp: chrono::Utc::now(),
+                        event_type: AuditEventType::SettingsUpdate,
+                        details: format!("concurrent_event_{}", i),
+                    };
+                    let mut line = serde_json::to_string(&event).unwrap();
+                    line.push('\n');
+                    let mut file = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&p)
+                        .unwrap();
+                    file.write_all(line.as_bytes()).unwrap();
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().expect("Thread panicked");
+        }
+
+        // Read all events back
+        let loaded = read_events_from_file(&audit_path);
+        assert_eq!(loaded.len(), 10, "Expected 10 events from concurrent appends, got {}", loaded.len());
+
+        // Verify no corruption: every event deserializes and has correct type
+        for event in &loaded {
+            assert_eq!(event.event_type, AuditEventType::SettingsUpdate);
+            assert!(event.details.starts_with("concurrent_event_"));
+        }
+
+        // Verify all 10 distinct events are present
+        let mut indices: Vec<String> = loaded.iter().map(|e| e.details.clone()).collect();
+        indices.sort();
+        indices.dedup();
+        assert_eq!(indices.len(), 10, "All 10 events should be distinct");
+    }
 }

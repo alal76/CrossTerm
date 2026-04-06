@@ -1,0 +1,48 @@
+# Sample SSH config for CrossTerm import testing
+# This file simulates a typical ~/.ssh/config
+
+Host dev-server
+    HostName 192.168.1.100
+    User developer
+    Port 22
+    IdentityFile ~/.ssh/id_ed25519
+    ForwardAgent yes
+
+Host staging
+    HostName staging.example.com
+    User deploy
+    Port 2222
+    IdentityFile ~/.ssh/staging_key
+    StrictHostKeyChecking accept-new
+
+Host production
+    HostName prod.example.com
+    User deploy
+    Port 22
+    IdentityFile ~/.ssh/prod_key
+    ProxyJump bastion
+
+Host bastion
+    HostName bastion.example.com
+    User jumpuser
+    Port 22
+    IdentityFile ~/.ssh/bastion_key
+
+Host *.internal.example.com
+    User admin
+    ProxyJump bastion
+    ForwardAgent no
+
+Host test-docker
+    HostName localhost
+    User testuser
+    Port 2222
+    StrictHostKeyChecking no
+    UserKnownHostsFile /dev/null
+
+Host test-jump
+    HostName localhost
+    User testuser
+    Port 2223
+    StrictHostKeyChecking no
+    UserKnownHostsFile /dev/null

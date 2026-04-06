@@ -39,6 +39,7 @@
     "shortDescription": "Cross-Platform Terminal Emulator & Remote Access Suite",
     "longDescription": "CrossTerm is a cross-platform terminal emulator and remote access suite that consolidates SSH, SFTP, and local shell management into a single application.",
     "createUpdaterArtifacts": "v1Compatible",
+    "resources": ["resources/CrossTerm.help/Contents/Info.plist", "resources/CrossTerm.help/Contents/Resources/en.lproj/*"],
     "windows": {
       "certificateThumbprint": null,
       "digestAlgorithm": "sha256",

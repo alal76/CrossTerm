@@ -569,74 +569,383 @@ mod tests {
         assert!(json.contains("term-1"));
     }
 
-    // ── Integration tests requiring AppHandle ───────────────────────
+    // ── Test helper: create PTY session without AppHandle ──────────
+
+    /// Creates a PTY session directly in the TerminalManager, bypassing
+    /// `create()` which requires an AppHandle for event emission.
+    /// Returns the TerminalInfo and a shared buffer that captures all
+    /// PTY output (replacing Tauri event emission).
+    fn create_test_session(
+        manager: &TerminalManager,
+        shell: Option<String>,
+        cols: Option<u16>,
+        rows: Option<u16>,
+        cwd: Option<String>,
+        env: Option<HashMap<String, String>>,
+    ) -> Result<(TerminalInfo, Arc<Mutex<Vec<u8>>>), TerminalError> {
+        let cols = cols.unwrap_or(80);
+        let rows = rows.unwrap_or(24);
+        let pty_system = native_pty_system();
+        let pair = pty_system
+            .openpty(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| TerminalError::Pty(e.to_string()))?;
+
+        let shell_path = shell.unwrap_or_else(default_shell);
+        let mut cmd = CommandBuilder::new(&shell_path);
+        if let Some(dir) = cwd {
+            cmd.cwd(dir);
+        }
+        if let Some(env_vars) = env {
+            for (k, v) in env_vars {
+                cmd.env(k, v);
+            }
+        }
+
+        pair.slave
+            .spawn_command(cmd)
+            .map_err(|e| TerminalError::Pty(e.to_string()))?;
+        drop(pair.slave);
+
+        let id = Uuid::new_v4().to_string();
+        let info = TerminalInfo {
+            id: id.clone(),
+            shell: shell_path,
+            cols,
+            rows,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        };
+
+        let master_write: Arc<Mutex<Box<dyn Write + Send>>> = Arc::new(Mutex::new(
+            pair.master
+                .take_writer()
+                .map_err(|e| TerminalError::Pty(e.to_string()))?,
+        ));
+
+        let mut reader = pair
+            .master
+            .try_clone_reader()
+            .map_err(|e| TerminalError::Pty(e.to_string()))?;
+
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let shutdown_clone = shutdown.clone();
+        let log_file: Arc<Mutex<Option<std::fs::File>>> = Arc::new(Mutex::new(None));
+        let log_file_for_reader = log_file.clone();
+
+        let output_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+        let output_buf_clone = output_buf.clone();
+
+        let reader_handle = std::thread::spawn(move || {
+            let mut buf = [0u8; 4096];
+            loop {
+                if shutdown_clone.load(Ordering::Relaxed) {
+                    break;
+                }
+                match reader.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        if let Ok(mut out) = output_buf_clone.lock() {
+                            out.extend_from_slice(&buf[..n]);
+                        }
+                        if let Ok(mut guard) = log_file_for_reader.lock() {
+                            if let Some(ref mut f) = *guard {
+                                let _ = f.write_all(&buf[..n]);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        if shutdown_clone.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        break;
+                    }
+                }
+            }
+        });
+
+        let session = PtySession {
+            info: info.clone(),
+            master_write,
+            master_pty: pair.master,
+            shutdown,
+            reader_handle: Some(reader_handle),
+            log_file,
+            binary_mode: false,
+        };
+
+        manager.sessions.lock().unwrap().insert(id, session);
+        Ok((info, output_buf))
+    }
+
+    /// Helper: read captured output as a UTF-8 string.
+    fn read_output(buf: &Arc<Mutex<Vec<u8>>>) -> String {
+        let data = buf.lock().unwrap();
+        String::from_utf8_lossy(&data).to_string()
+    }
+
+    // ── PTY-backed tests (bypassing AppHandle) ──────────────────────
 
     #[test]
-    #[ignore = "Requires Tauri AppHandle for event emission — run as integration test"]
     fn test_terminal_create() {
         // UT-T-01: Create a local terminal. Assert terminal ID is returned
         // and listed in terminal_list.
+        let manager = TerminalManager::new();
+        let (info, _output) = create_test_session(&manager, None, None, None, None, None)
+            .expect("Failed to create test terminal");
+
+        assert!(!info.id.is_empty(), "Terminal ID should be non-empty");
+        assert_eq!(info.cols, 80);
+        assert_eq!(info.rows, 24);
+
+        let list = manager.list();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, info.id);
+
+        manager.close(&info.id).expect("Failed to close terminal");
     }
 
     #[test]
-    #[ignore = "Requires Tauri AppHandle for event emission — run as integration test"]
     fn test_terminal_write_read() {
         // UT-T-02: Create terminal, write `echo hello\n`, capture output.
         // Assert "hello" appears in output.
+        let manager = TerminalManager::new();
+        let (info, output) = create_test_session(&manager, None, None, None, None, None)
+            .expect("Failed to create test terminal");
+
+        manager
+            .write(&info.id, b"echo hello\n")
+            .expect("Failed to write to terminal");
+
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        let text = read_output(&output);
+        assert!(
+            text.contains("hello"),
+            "Output should contain 'hello', got: {:?}",
+            text
+        );
+
+        manager.close(&info.id).expect("Failed to close terminal");
     }
 
     #[test]
-    #[ignore = "Requires Tauri AppHandle for event emission — run as integration test"]
     fn test_terminal_resize() {
         // UT-T-03: Create terminal, resize to 120×40. Assert no error.
+        let manager = TerminalManager::new();
+        let (info, _output) = create_test_session(&manager, None, None, None, None, None)
+            .expect("Failed to create test terminal");
+
+        manager
+            .resize(&info.id, 120, 40)
+            .expect("Resize to 120x40 should succeed");
+
+        // Verify info still accessible (session not corrupted)
+        let list = manager.list();
+        assert_eq!(list.len(), 1);
+
+        manager.close(&info.id).expect("Failed to close terminal");
     }
 
     #[test]
-    #[ignore = "Requires Tauri AppHandle for event emission — run as integration test"]
     fn test_terminal_close() {
         // UT-T-04: Create terminal, close it. Assert removed from terminal_list.
+        let manager = TerminalManager::new();
+        let (info, _output) = create_test_session(&manager, None, None, None, None, None)
+            .expect("Failed to create test terminal");
+
+        assert_eq!(manager.list().len(), 1);
+
+        manager.close(&info.id).expect("Failed to close terminal");
+
+        assert_eq!(manager.list().len(), 0, "Terminal should be removed after close");
+
+        // Closing again should return NotFound
+        let err = manager.close(&info.id).unwrap_err();
+        assert!(matches!(err, TerminalError::NotFound(_)));
     }
 
     #[test]
-    #[ignore = "Requires Tauri AppHandle for event emission — run as integration test"]
     fn test_multiple_terminals() {
         // UT-T-05: Create 5 terminals. Verify all listed. Close 2. Verify 3 remain.
+        let manager = TerminalManager::new();
+        let mut ids = Vec::new();
+
+        for _ in 0..5 {
+            let (info, _output) = create_test_session(&manager, None, None, None, None, None)
+                .expect("Failed to create test terminal");
+            ids.push(info.id);
+        }
+
+        assert_eq!(manager.list().len(), 5, "Should have 5 terminals");
+
+        manager.close(&ids[0]).expect("Failed to close terminal 0");
+        manager.close(&ids[2]).expect("Failed to close terminal 2");
+
+        let remaining = manager.list();
+        assert_eq!(remaining.len(), 3, "Should have 3 terminals after closing 2");
+
+        // Verify the correct terminals remain
+        let remaining_ids: Vec<String> = remaining.iter().map(|t| t.id.clone()).collect();
+        assert!(!remaining_ids.contains(&ids[0]));
+        assert!(remaining_ids.contains(&ids[1]));
+        assert!(!remaining_ids.contains(&ids[2]));
+        assert!(remaining_ids.contains(&ids[3]));
+        assert!(remaining_ids.contains(&ids[4]));
+
+        // Clean up
+        for id in &[&ids[1], &ids[3], &ids[4]] {
+            manager.close(id).expect("Failed to close remaining terminal");
+        }
     }
 
     #[test]
-    #[ignore = "Requires Tauri AppHandle for event emission — run as integration test"]
     fn test_custom_shell() {
-        // UT-T-06: Create terminal with /bin/sh (or cmd.exe on Windows).
-        // Verify shell spawned.
+        // UT-T-06: Create terminal with /bin/sh. Verify shell spawned.
+        let manager = TerminalManager::new();
+        let (info, _output) = create_test_session(
+            &manager,
+            Some("/bin/sh".to_string()),
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect("Failed to create terminal with /bin/sh");
+
+        assert_eq!(info.shell, "/bin/sh");
+        assert_eq!(manager.list().len(), 1);
+
+        // Verify the shell is functional by writing a command
+        manager
+            .write(&info.id, b"echo ok\n")
+            .expect("Failed to write to /bin/sh terminal");
+        std::thread::sleep(std::time::Duration::from_millis(300));
+
+        manager.close(&info.id).expect("Failed to close terminal");
     }
 
     #[test]
-    #[ignore = "Requires Tauri AppHandle for event emission — run as integration test"]
     fn test_custom_env() {
         // UT-T-07: Create terminal with FOO=bar in environment.
         // Write `echo $FOO\n`. Assert "bar" in output.
+        let manager = TerminalManager::new();
+        let mut env_vars = HashMap::new();
+        env_vars.insert("FOO".to_string(), "bar".to_string());
+
+        let (info, output) = create_test_session(
+            &manager,
+            None,
+            None,
+            None,
+            None,
+            Some(env_vars),
+        )
+        .expect("Failed to create terminal with custom env");
+
+        manager
+            .write(&info.id, b"echo $FOO\n")
+            .expect("Failed to write to terminal");
+
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        let text = read_output(&output);
+        assert!(
+            text.contains("bar"),
+            "Output should contain 'bar' from FOO env var, got: {:?}",
+            text
+        );
+
+        manager.close(&info.id).expect("Failed to close terminal");
     }
 
     #[test]
-    #[ignore = "Requires Tauri AppHandle for event emission — run as integration test"]
     fn test_custom_cwd() {
         // UT-T-08: Create terminal with cwd=/tmp. Write `pwd\n`.
-        // Assert "/tmp" in output.
+        // Assert "/tmp" or "/private/tmp" in output (macOS resolves /tmp → /private/tmp).
+        let manager = TerminalManager::new();
+        let (info, output) = create_test_session(
+            &manager,
+            None,
+            None,
+            None,
+            Some("/tmp".to_string()),
+            None,
+        )
+        .expect("Failed to create terminal with custom cwd");
+
+        manager
+            .write(&info.id, b"pwd\n")
+            .expect("Failed to write to terminal");
+
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        let text = read_output(&output);
+        assert!(
+            text.contains("/tmp") || text.contains("/private/tmp"),
+            "Output should contain '/tmp' or '/private/tmp', got: {:?}",
+            text
+        );
+
+        manager.close(&info.id).expect("Failed to close terminal");
     }
 
     #[test]
-    #[ignore = "Requires Tauri AppHandle for event emission — run as integration test"]
+    #[ignore = "UT-T-09: Requires Tauri AppHandle to verify terminal:exit event emission. \
+                The PTY exit itself works (tested via close), but the event delivery \
+                channel is only available through Tauri's runtime."]
     fn test_terminal_exit_event() {
-        // UT-T-09: Create terminal, write `exit\n`. Assert
-        // `terminal:exit` event is emitted.
+        // UT-T-09: This test specifically validates that a `terminal:exit` event
+        // is emitted to the frontend when the shell process exits.
+        // The event is emitted inside the reader thread via `app_handle.emit()`,
+        // which requires a real Tauri AppHandle. Unit-test PTY sessions created
+        // by `create_test_session` have no event bus — they capture output to a
+        // buffer instead. To fully test this, use `tauri::test::mock_builder()`
+        // or run as an integration test with a real Tauri app context.
     }
 
     // ── BE-TERM-05: Session logging ─────────────────────────────────
 
     #[test]
-    #[ignore = "Requires Tauri AppHandle for event emission — run as integration test"]
     fn test_start_stop_logging() {
         // Create terminal, start logging to a temp file, write data,
         // stop logging. Verify log file contains output.
+        let manager = TerminalManager::new();
+        let (info, _output) = create_test_session(&manager, None, None, None, None, None)
+            .expect("Failed to create test terminal");
+
+        let tmp_dir = std::env::temp_dir();
+        let log_path = tmp_dir.join(format!("crossterm-test-log-{}.txt", info.id));
+        let log_path_str = log_path.to_str().unwrap().to_string();
+
+        manager
+            .start_logging(&info.id, &log_path_str)
+            .expect("Failed to start logging");
+
+        manager
+            .write(&info.id, b"echo logtest123\n")
+            .expect("Failed to write to terminal");
+
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        manager
+            .stop_logging(&info.id)
+            .expect("Failed to stop logging");
+
+        // Read the log file and verify it captured output
+        let log_contents = std::fs::read_to_string(&log_path)
+            .expect("Failed to read log file");
+        assert!(
+            log_contents.contains("logtest123"),
+            "Log file should contain 'logtest123', got: {:?}",
+            log_contents
+        );
+
+        // Clean up
+        let _ = std::fs::remove_file(&log_path);
+        manager.close(&info.id).expect("Failed to close terminal");
     }
 }

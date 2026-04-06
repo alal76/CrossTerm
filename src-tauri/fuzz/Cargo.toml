@@ -1,0 +1,34 @@
+[package]
+name = "crossterm-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+crossterm-app = { path = ".." }
+serde_json = "1"
+ssh-key = { version = "0.6", features = ["ed25519", "rsa", "p256", "std"] }
+
+[[bin]]
+name = "fuzz_vault_unlock"
+path = "fuzz_targets/fuzz_vault_unlock.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_credential_data"
+path = "fuzz_targets/fuzz_credential_data.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_session_json"
+path = "fuzz_targets/fuzz_session_json.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_ssh_auth"
+path = "fuzz_targets/fuzz_ssh_auth.rs"
+doc = false

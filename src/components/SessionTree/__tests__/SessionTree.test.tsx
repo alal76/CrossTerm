@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@/i18n";
 import SessionTree from "@/components/SessionTree/SessionTree";
@@ -93,5 +93,45 @@ describe("SessionTree", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("New Session")).toBeInTheDocument();
     expect(screen.getByText("Import")).toBeInTheDocument();
+  });
+
+  it("FT-C-03: right-click shows context menu", async () => {
+    useSessionStore.setState({
+      sessions: [
+        makeSession({ id: "s1", name: "Ctx Server", group: "default" }),
+      ],
+    });
+
+    render(<SessionTree />);
+
+    const sessionBtn = screen.getByText("Ctx Server");
+    // Fire a contextmenu event (right-click)
+    fireEvent.contextMenu(sessionBtn, { clientX: 100, clientY: 200 });
+
+    // Context menu items for a session should appear
+    expect(screen.getByText("Connect")).toBeInTheDocument();
+    expect(screen.getByText("Edit")).toBeInTheDocument();
+    expect(screen.getByText("Duplicate")).toBeInTheDocument();
+    expect(screen.getByText("Delete")).toBeInTheDocument();
+  });
+
+  it("FT-C-04: click session calls onSessionSelect", async () => {
+    const onSessionSelect = vi.fn();
+
+    useSessionStore.setState({
+      sessions: [
+        makeSession({ id: "s1", name: "Clickable Server", group: "default" }),
+      ],
+    });
+
+    render(<SessionTree onSessionSelect={onSessionSelect} />);
+
+    const sessionBtn = screen.getByText("Clickable Server");
+    await userEvent.click(sessionBtn);
+
+    expect(onSessionSelect).toHaveBeenCalledOnce();
+    expect(onSessionSelect).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "s1", name: "Clickable Server" })
+    );
   });
 });

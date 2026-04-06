@@ -1,0 +1,63 @@
+version: "3.8"
+
+services:
+  openssh-server:
+    image: linuxserver/openssh-server:latest
+    container_name: crossterm-test-ssh
+    hostname: crossterm-test-ssh
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+      - PASSWORD_ACCESS=true
+      - USER_PASSWORD=testpass123
+      - USER_NAME=testuser
+      - SUDO_ACCESS=true
+    ports:
+      - "2222:2222"
+    volumes:
+      - ./fixtures/ssh-keys/test_ed25519.pub:/config/.ssh/authorized_keys:ro
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 2222 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  openssh-jump:
+    image: linuxserver/openssh-server:latest
+    container_name: crossterm-test-jump
+    hostname: crossterm-test-jump
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+      - PASSWORD_ACCESS=true
+      - USER_PASSWORD=testpass123
+      - USER_NAME=testuser
+      - SUDO_ACCESS=true
+    ports:
+      - "2223:2222"
+    volumes:
+      - ./fixtures/ssh-keys/test_ed25519.pub:/config/.ssh/authorized_keys:ro
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 2222 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  nginx:
+    image: nginx:alpine
+    container_name: crossterm-test-nginx
+    hostname: crossterm-test-nginx
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:80/ || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+networks:
+  default:
+    name: crossterm-test-net

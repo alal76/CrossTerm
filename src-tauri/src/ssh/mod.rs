@@ -1582,14 +1582,80 @@ mod tests {
         assert_eq!(deserialized.username, "jumpuser");
     }
 
+    // ── Test helpers for integration tests ──────────────────────────────
+
+    const TEST_SSH_HOST: &str = "127.0.0.1";
+    const TEST_SSH_PORT: u16 = 2222;
+    const TEST_JUMP_PORT: u16 = 2223;
+    const TEST_USER: &str = "testuser";
+    const TEST_PASS: &str = "testpass123";
+
+    struct TestHandler;
+
+    #[async_trait]
+    impl client::Handler for TestHandler {
+        type Error = russh::Error;
+
+        async fn check_server_key(
+            &mut self,
+            _server_public_key: &PublicKey,
+        ) -> Result<bool, Self::Error> {
+            Ok(true) // Accept all host keys in tests
+        }
+    }
+
+    async fn test_connect(
+        host: &str,
+        port: u16,
+        user: &str,
+        pass: &str,
+    ) -> client::Handle<TestHandler> {
+        let config = Arc::new(client::Config::default());
+        let handler = TestHandler;
+        let addr = format!("{}:{}", host, port);
+        let mut handle = client::connect(config, &addr, handler).await.unwrap();
+        let authenticated = handle.authenticate_password(user, pass).await.unwrap();
+        assert!(authenticated, "password auth should succeed");
+        handle
+    }
+
+    async fn test_exec(handle: &client::Handle<TestHandler>, cmd: &str) -> String {
+        let channel = handle.channel_open_session().await.unwrap();
+        channel.exec(true, cmd.as_bytes()).await.unwrap();
+        let mut output = Vec::new();
+        let mut ch = channel;
+        loop {
+            match ch.wait().await {
+                Some(ChannelMsg::Data { data }) => output.extend_from_slice(&data),
+                Some(ChannelMsg::ExtendedData { data, .. }) => output.extend_from_slice(&data),
+                Some(ChannelMsg::ExitStatus { .. })
+                | Some(ChannelMsg::Eof)
+                | Some(ChannelMsg::Close) => break,
+                None => break,
+                _ => {}
+            }
+        }
+        String::from_utf8_lossy(&output).trim().to_string()
+    }
+
     // ── Integration tests requiring a real SSH server ───────────────────
 
     #[tokio::test]
-    #[ignore = "Requires a running SSH server — use `docker run -d -p 2222:22 lscr.io/linuxserver/openssh-server` then run with --ignored"]
+    #[ignore = "Requires Docker: docker compose -f tests/docker-compose.yml up -d"]
     async fn test_ssh_connect_password_auth() {
-        // Would test: connect to localhost:2222 with password auth,
-        // verify connection_id is returned and state has the connection.
+        // IT: connect to localhost:2222 with password auth, verify handle works
+        let handle = test_connect(TEST_SSH_HOST, TEST_SSH_PORT, TEST_USER, TEST_PASS).await;
+        let channel = handle
+            .channel_open_session()
+            .await
+            .expect("should open session channel on authenticated connection");
+        channel.close().await.unwrap();
+        let _ = handle
+            .disconnect(Disconnect::ByApplication, "", "en")
+            .await;
     }
+
+    #[test]
     fn test_agent_forward_error() {
         let err = SshError::AgentForward("socket closed".into());
         assert_eq!(
@@ -1627,69 +1693,232 @@ mod tests {
     // ── Integration tests for Jump Host (BE-SSH-01) ─────────────────────
 
     #[tokio::test]
-    #[ignore = "Requires two SSH servers. Setup:\n\
-        docker network create ssh-test\n\
-        docker run -d --name target --network ssh-test -e PASSWORD_ACCESS=true \
-        -e USER_PASSWORD=test -e USER_NAME=test lscr.io/linuxserver/openssh-server\n\
-        docker run -d --name bastion --network ssh-test -p 2222:2222 -e PASSWORD_ACCESS=true \
-        -e USER_PASSWORD=jump -e USER_NAME=jump lscr.io/linuxserver/openssh-server\n\
-        Then run: cargo test -- --ignored test_ssh_connect_via_jump_host"]
+    #[ignore = "Requires Docker: docker compose -f tests/docker-compose.yml up -d"]
     async fn test_ssh_connect_via_jump_host() {
-        // Would test: connect to 'target' host through 'bastion' jump host,
-        // verify the connection is established and shell output is received.
+        // IT: connect to target (crossterm-test-ssh:2222) through jump host (localhost:2223)
+        let jump_handle =
+            test_connect(TEST_SSH_HOST, TEST_JUMP_PORT, TEST_USER, TEST_PASS).await;
+
+        // Open direct-tcpip tunnel through jump host to the target container
+        let channel = jump_handle
+            .channel_open_direct_tcpip("crossterm-test-ssh", 2222, "127.0.0.1", 0)
+            .await
+            .expect("should open direct-tcpip channel to target via jump host");
+
+        let stream = channel.into_stream();
+        let config = Arc::new(client::Config::default());
+        let mut target_handle = client::connect_stream(config, stream, TestHandler)
+            .await
+            .expect("SSH handshake through jump tunnel should succeed");
+
+        let authenticated = target_handle
+            .authenticate_password(TEST_USER, TEST_PASS)
+            .await
+            .expect("target auth should not error");
+        assert!(authenticated, "target password auth should succeed");
+
+        // Verify we can execute a command on the target
+        let output = test_exec(&target_handle, "whoami").await;
+        assert_eq!(output, TEST_USER);
+
+        let _ = target_handle
+            .disconnect(Disconnect::ByApplication, "", "en")
+            .await;
+        let _ = jump_handle
+            .disconnect(Disconnect::ByApplication, "", "en")
+            .await;
     }
 
     #[tokio::test]
-    #[ignore = "Requires two SSH servers — see test_ssh_connect_via_jump_host for Docker setup"]
+    #[ignore = "Requires Docker: docker compose -f tests/docker-compose.yml up -d"]
     async fn test_ssh_jump_host_cleanup_on_disconnect() {
-        // Would test: connect via jump host, then disconnect.
-        // Verify both the target connection and jump host connection are cleaned up.
+        // IT: connect via jump host, disconnect both, verify handles are dropped
+        let jump_handle =
+            test_connect(TEST_SSH_HOST, TEST_JUMP_PORT, TEST_USER, TEST_PASS).await;
+
+        let channel = jump_handle
+            .channel_open_direct_tcpip("crossterm-test-ssh", 2222, "127.0.0.1", 0)
+            .await
+            .expect("should open tunnel");
+
+        let config = Arc::new(client::Config::default());
+        let mut target_handle =
+            client::connect_stream(config, channel.into_stream(), TestHandler)
+                .await
+                .unwrap();
+        let auth = target_handle
+            .authenticate_password(TEST_USER, TEST_PASS)
+            .await
+            .unwrap();
+        assert!(auth);
+
+        // Disconnect target first, then jump host
+        let _ = target_handle
+            .disconnect(Disconnect::ByApplication, "cleanup test", "en")
+            .await;
+        let _ = jump_handle
+            .disconnect(Disconnect::ByApplication, "cleanup test", "en")
+            .await;
+        // If we get here without panic/hang, cleanup succeeded
     }
 
     #[tokio::test]
-    #[ignore = "Requires two SSH servers — see test_ssh_connect_via_jump_host for Docker setup"]
+    #[ignore = "Requires Docker: docker compose -f tests/docker-compose.yml up -d"]
     async fn test_ssh_jump_host_target_auth_failure() {
-        // Would test: connect to jump host successfully but fail auth on the target.
-        // Verify that the jump host connection is cleaned up after the failure.
+        // IT: connect to jump host OK, then fail auth on target with wrong password
+        let jump_handle =
+            test_connect(TEST_SSH_HOST, TEST_JUMP_PORT, TEST_USER, TEST_PASS).await;
+
+        let channel = jump_handle
+            .channel_open_direct_tcpip("crossterm-test-ssh", 2222, "127.0.0.1", 0)
+            .await
+            .expect("tunnel should open");
+
+        let config = Arc::new(client::Config::default());
+        let mut target_handle =
+            client::connect_stream(config, channel.into_stream(), TestHandler)
+                .await
+                .unwrap();
+
+        // Attempt auth with wrong password
+        let authenticated = target_handle
+            .authenticate_password(TEST_USER, "wrong_password_123")
+            .await
+            .unwrap();
+        assert!(
+            !authenticated,
+            "auth with wrong password should fail"
+        );
+
+        // Clean up jump host
+        let _ = jump_handle
+            .disconnect(Disconnect::ByApplication, "", "en")
+            .await;
     }
 
     // ── Integration tests for Agent Forwarding (BE-SSH-02) ──────────────
 
     #[tokio::test]
-    #[ignore = "Requires a running SSH server with agent forwarding support and a local SSH agent.\n\
-        Setup: ensure SSH_AUTH_SOCK env variable is set (ssh-agent running).\n\
-        docker run -d -p 2222:22 -e PASSWORD_ACCESS=true -e USER_PASSWORD=test \
-        -e USER_NAME=test lscr.io/linuxserver/openssh-server\n\
-        Then run: cargo test -- --ignored test_ssh_agent_forward_connect"]
+    #[ignore = "Requires Docker: docker compose -f tests/docker-compose.yml up -d"]
     async fn test_ssh_agent_forward_connect() {
-        // Would test: connect with agent_forwarding=true,
-        // verify agent forwarding was requested on the channel.
+        // IT: connect with agent forwarding requested on the channel
+        let handle =
+            test_connect(TEST_SSH_HOST, TEST_SSH_PORT, TEST_USER, TEST_PASS).await;
+
+        let channel = handle
+            .channel_open_session()
+            .await
+            .expect("should open session");
+
+        // Request agent forwarding — may silently fail if no agent is running,
+        // but should not error the channel
+        let _ = channel.agent_forward(false).await;
+
+        // Verify the channel is still functional after agent_forward request
+        channel
+            .request_pty(false, "xterm-256color", 80, 24, 0, 0, &[])
+            .await
+            .expect("PTY request should succeed after agent forward");
+        channel
+            .request_shell(false)
+            .await
+            .expect("shell should open");
+
+        channel.close().await.unwrap();
+        let _ = handle
+            .disconnect(Disconnect::ByApplication, "", "en")
+            .await;
     }
 
     #[tokio::test]
-    #[ignore = "Requires SSH server + local SSH agent — see test_ssh_agent_forward_connect for setup"]
+    #[ignore = "Requires Docker: docker compose -f tests/docker-compose.yml up -d"]
     async fn test_ssh_agent_forward_no_agent_sock() {
-        // Would test: connect with agent_forwarding=true but SSH_AUTH_SOCK unset/invalid.
-        // Connection should still succeed (agent forwarding silently fails).
+        // IT: connect when SSH_AUTH_SOCK is not set — should still work
+        let original_sock = std::env::var("SSH_AUTH_SOCK").ok();
+        // SAFETY: test-only env manipulation
+        unsafe { std::env::remove_var("SSH_AUTH_SOCK") };
+
+        let handle =
+            test_connect(TEST_SSH_HOST, TEST_SSH_PORT, TEST_USER, TEST_PASS).await;
+        let output = test_exec(&handle, "echo agent_test_ok").await;
+        assert!(
+            output.contains("agent_test_ok"),
+            "exec should work without agent"
+        );
+
+        let _ = handle
+            .disconnect(Disconnect::ByApplication, "", "en")
+            .await;
+
+        // Restore SSH_AUTH_SOCK
+        if let Some(sock) = original_sock {
+            // SAFETY: test-only env manipulation
+            unsafe { std::env::set_var("SSH_AUTH_SOCK", sock) };
+        }
     }
 
     #[tokio::test]
-    #[ignore = "Requires a running SSH server — use Docker openssh-server container"]
+    #[ignore = "Requires Docker: docker compose -f tests/docker-compose.yml up -d"]
     async fn test_ssh_connect_and_exec() {
-        // Would test: connect, exec "echo hello", verify output contains "hello".
+        // IT: connect, exec "echo hello", verify output
+        let handle =
+            test_connect(TEST_SSH_HOST, TEST_SSH_PORT, TEST_USER, TEST_PASS).await;
+        let output = test_exec(&handle, "echo hello").await;
+        assert!(
+            output.contains("hello"),
+            "output should contain 'hello', got: {}",
+            output
+        );
+        let _ = handle
+            .disconnect(Disconnect::ByApplication, "", "en")
+            .await;
     }
 
     #[tokio::test]
-    #[ignore = "Requires a running SSH server — use Docker openssh-server container"]
+    #[ignore = "Requires Docker: docker compose -f tests/docker-compose.yml up -d"]
     async fn test_ssh_local_port_forward() {
-        // Would test: connect, add local port forward 127.0.0.1:18080 -> remote:80,
-        // verify the forward appears in connection info.
+        // IT: open direct-tcpip channel (the primitive behind local port forwarding)
+        let handle =
+            test_connect(TEST_SSH_HOST, TEST_SSH_PORT, TEST_USER, TEST_PASS).await;
+
+        // Forward to port 2222 on the remote loopback (the SSH server itself)
+        let channel = handle
+            .channel_open_direct_tcpip("127.0.0.1", 2222, "127.0.0.1", 0)
+            .await
+            .expect("direct-tcpip channel should open for local port forward");
+
+        // Read the SSH banner from the forwarded connection
+        let mut ch = channel;
+        let mut banner = Vec::new();
+        if let Some(ChannelMsg::Data { data }) = ch.wait().await {
+            banner.extend_from_slice(&data);
+        }
+        let banner_str = String::from_utf8_lossy(&banner);
+        assert!(
+            banner_str.contains("SSH"),
+            "should receive SSH banner through tunnel, got: {}",
+            banner_str
+        );
+
+        let _ = handle
+            .disconnect(Disconnect::ByApplication, "", "en")
+            .await;
     }
 
     #[tokio::test]
-    #[ignore = "Requires a running SSH server — use Docker openssh-server container"]
+    #[ignore = "Requires Docker: docker compose -f tests/docker-compose.yml up -d"]
     async fn test_ssh_disconnect() {
-        // Would test: connect, then disconnect, verify connection is removed from state.
+        // IT: connect, verify, then disconnect gracefully
+        let handle =
+            test_connect(TEST_SSH_HOST, TEST_SSH_PORT, TEST_USER, TEST_PASS).await;
+
+        let output = test_exec(&handle, "echo connected").await;
+        assert!(output.contains("connected"));
+
+        handle
+            .disconnect(Disconnect::ByApplication, "test disconnect", "en")
+            .await
+            .expect("disconnect should succeed");
     }
 
     #[test]

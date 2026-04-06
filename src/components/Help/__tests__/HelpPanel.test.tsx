@@ -43,4 +43,29 @@ describe("HelpPanel", () => {
     );
     expect(shortcutsBtn).toBeUndefined();
   });
+
+  // FT-H-03: Deep link navigates to correct article section
+  it("FT-H-03: deep link via articleSlug navigates to correct article", () => {
+    render(<HelpPanel open={true} onClose={onClose} articleSlug="ssh-connections" />);
+
+    // The SSH Connections article content should render
+    // Check for SSH-specific body content (may have multiple matches in sidebar + content)
+    expect(
+      screen.getAllByText("Authentication Methods", { exact: false }).length
+    ).toBeGreaterThanOrEqual(1);
+
+    // Should not show the default "Getting Started" article body
+    expect(
+      screen.queryByText("Welcome to CrossTerm — a cross-platform terminal emulator", { exact: false })
+    ).not.toBeInTheDocument();
+  });
+
+  it("FT-H-03: deep link to non-existent slug stays on default", () => {
+    render(<HelpPanel open={true} onClose={onClose} articleSlug="nonexistent-article" />);
+
+    // Should fall back to the default article
+    expect(
+      screen.getByText("Getting Started with CrossTerm", { exact: false })
+    ).toBeInTheDocument();
+  });
 });

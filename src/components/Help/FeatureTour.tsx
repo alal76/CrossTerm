@@ -259,7 +259,7 @@ export default function FeatureTour({ tourId, onComplete }: FeatureTourProps) {
       {/* Spotlight border ring */}
       {targetRect && (
         <div
-          className="absolute rounded-lg border-2 border-accent-primary pointer-events-none"
+          className="tour-spotlight absolute rounded-lg border-2 border-accent-primary pointer-events-none"
           style={{
             top: targetRect.top,
             left: targetRect.left,
@@ -274,7 +274,7 @@ export default function FeatureTour({ tourId, onComplete }: FeatureTourProps) {
       {step && (
         <div
           ref={popoverRef}
-          className="absolute w-72 bg-surface-elevated border border-border-default rounded-xl shadow-[var(--shadow-3)] p-4 pointer-events-auto"
+          className="tour-popover absolute w-72 bg-surface-elevated border border-border-default rounded-xl shadow-[var(--shadow-3)] p-4 pointer-events-auto"
           style={targetRect ? getPopoverStyle(targetRect, step.position) : { top: "50%", left: "50%", transform: "translate(-50%, -50%)" }}
         >
           <div className="flex items-start justify-between mb-2">

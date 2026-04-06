@@ -1824,4 +1824,247 @@ Host *
         let diff = (lc - now).num_seconds().abs();
         assert!(diff <= 1, "last_connected_at timestamp drift too large: {} seconds", diff);
     }
+
+    // ── UT-C-04: Session search by host ─────────────────────────────
+
+    #[test]
+    fn test_session_search_by_host() {
+        // UT-C-04
+        let env = TestEnv::new();
+
+        do_session_create(env.id(), make_session_request("Web Prod", "web.prod.example.com")).unwrap();
+        do_session_create(env.id(), make_session_request("DB Staging", "db.staging.internal")).unwrap();
+        do_session_create(env.id(), make_session_request("Cache Prod", "cache.prod.example.com")).unwrap();
+
+        // Search by hostname substring "prod.example"
+        let results = do_session_search(env.id(), "prod.example").unwrap();
+        assert_eq!(results.len(), 2);
+        let names: Vec<&str> = results.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"Web Prod"));
+        assert!(names.contains(&"Cache Prod"));
+
+        // Search by different hostname substring
+        let results = do_session_search(env.id(), "staging.internal").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "DB Staging");
+
+        // Partial host match
+        let results = do_session_search(env.id(), ".com").unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    // ── UT-C-05: Session search by tag ──────────────────────────────
+
+    #[test]
+    fn test_session_search_by_tag() {
+        // UT-C-05
+        let env = TestEnv::new();
+
+        let mut req1 = make_session_request("Server A", "10.0.0.1");
+        req1.tags = Some(vec!["production".to_string(), "web".to_string()]);
+        do_session_create(env.id(), req1).unwrap();
+
+        let mut req2 = make_session_request("Server B", "10.0.0.2");
+        req2.tags = Some(vec!["staging".to_string(), "web".to_string()]);
+        do_session_create(env.id(), req2).unwrap();
+
+        let mut req3 = make_session_request("Server C", "10.0.0.3");
+        req3.tags = Some(vec!["production".to_string(), "database".to_string()]);
+        do_session_create(env.id(), req3).unwrap();
+
+        // Search by tag "production" — should match A and C
+        let results = do_session_search(env.id(), "production").unwrap();
+        assert_eq!(results.len(), 2);
+        let names: Vec<&str> = results.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"Server A"));
+        assert!(names.contains(&"Server C"));
+
+        // Search by tag "web" — should match A and B
+        let results = do_session_search(env.id(), "web").unwrap();
+        assert_eq!(results.len(), 2);
+        let names: Vec<&str> = results.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"Server A"));
+        assert!(names.contains(&"Server B"));
+
+        // Search by tag "database" — should match only C
+        let results = do_session_search(env.id(), "database").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "Server C");
+
+        // Search by tag that doesn't exist
+        let results = do_session_search(env.id(), "monitoring").unwrap();
+        assert!(results.is_empty());
+    }
+
+    // ── UT-C-07: Session duplicate ──────────────────────────────────
+
+    #[test]
+    fn test_session_duplicate() {
+        // UT-C-07
+        let env = TestEnv::new();
+
+        // Create source session with specific connection details
+        let mut req = make_session_request("Original Server", "10.0.0.50");
+        req.tags = Some(vec!["critical".to_string(), "prod".to_string()]);
+        req.group = Some("datacenter-1".to_string());
+        req.startup_script = Some("echo hello".to_string());
+        req.auto_reconnect = Some(true);
+        req.keep_alive_interval_seconds = Some(30);
+        let source = do_session_create(env.id(), req).unwrap();
+
+        // Duplicate using the same logic as session_duplicate command
+        let new_id = Uuid::new_v4().to_string();
+        let now = Utc::now();
+        let dup = SessionDefinition {
+            id: new_id.clone(),
+            name: format!("{} (Copy)", source.name),
+            session_type: source.session_type.clone(),
+            group: source.group.clone(),
+            tags: source.tags.clone(),
+            icon: source.icon.clone(),
+            color_label: source.color_label.clone(),
+            credential_ref: source.credential_ref.clone(),
+            connection: source.connection.clone(),
+            startup_script: source.startup_script.clone(),
+            environment_variables: source.environment_variables.clone(),
+            notes: source.notes.clone(),
+            created_at: now,
+            updated_at: now,
+            last_connected_at: None,
+            auto_reconnect: source.auto_reconnect,
+            keep_alive_interval_seconds: source.keep_alive_interval_seconds,
+            settings_override: source.settings_override.clone(),
+            favorite: false,
+        };
+        let json = serde_json::to_string_pretty(&dup).unwrap();
+        std::fs::write(session_file(env.id(), &new_id), json).unwrap();
+
+        // Verify new UUID differs from source
+        assert_ne!(dup.id, source.id);
+
+        // Verify name has "(Copy)" suffix
+        assert_eq!(dup.name, "Original Server (Copy)");
+
+        // Verify connection details are identical
+        assert_eq!(dup.connection.host, source.connection.host);
+        assert_eq!(dup.connection.port, source.connection.port);
+
+        // Verify other fields carried over
+        assert_eq!(dup.session_type, source.session_type);
+        assert_eq!(dup.group, source.group);
+        assert_eq!(dup.tags, source.tags);
+        assert_eq!(dup.startup_script, source.startup_script);
+        assert_eq!(dup.auto_reconnect, source.auto_reconnect);
+        assert_eq!(dup.keep_alive_interval_seconds, source.keep_alive_interval_seconds);
+
+        // Verify duplicate is persisted and retrievable
+        let reloaded = do_session_get(env.id(), &new_id).unwrap();
+        assert_eq!(reloaded.name, "Original Server (Copy)");
+        assert_eq!(reloaded.connection.host.as_deref(), Some("10.0.0.50"));
+
+        // Verify both sessions exist in list
+        let list = do_session_list(env.id()).unwrap();
+        assert_eq!(list.len(), 2);
+    }
+
+    // ── UT-C-08: Profile switch ─────────────────────────────────────
+
+    #[test]
+    fn test_profile_switch() {
+        // UT-C-08
+        let env_a = TestEnv::new();
+        let env_b = TestEnv::new();
+
+        let state = ConfigState::new();
+
+        // Initially no active profile
+        assert!(state.active_profile_id.read().unwrap().is_none());
+
+        // Switch to profile A
+        {
+            let profile_a = do_profile_get(env_a.id()).unwrap();
+            let mut active = state.active_profile_id.write().unwrap();
+            *active = Some(env_a.id().to_string());
+            assert_eq!(profile_a.id, env_a.id());
+        }
+        assert_eq!(
+            state.active_profile_id.read().unwrap().as_deref(),
+            Some(env_a.id())
+        );
+
+        // Switch to profile B
+        {
+            let profile_b = do_profile_get(env_b.id()).unwrap();
+            let mut active = state.active_profile_id.write().unwrap();
+            *active = Some(env_b.id().to_string());
+            assert_eq!(profile_b.id, env_b.id());
+        }
+        assert_eq!(
+            state.active_profile_id.read().unwrap().as_deref(),
+            Some(env_b.id())
+        );
+
+        // Verify active_profile() returns profile B
+        let active_id = state.active_profile().unwrap();
+        assert_eq!(active_id, env_b.id());
+
+        // Switch back to profile A
+        {
+            let mut active = state.active_profile_id.write().unwrap();
+            *active = Some(env_a.id().to_string());
+        }
+        let active_id = state.active_profile().unwrap();
+        assert_eq!(active_id, env_a.id());
+    }
+
+    // ── UT-C-12: Session protocol options ───────────────────────────
+
+    #[test]
+    fn test_session_protocol_options() {
+        // UT-C-12
+        let env = TestEnv::new();
+
+        let mut protocol_opts = HashMap::new();
+        protocol_opts.insert("compression".to_string(), serde_json::json!(true));
+        protocol_opts.insert("cipher".to_string(), serde_json::json!("aes256-ctr"));
+        protocol_opts.insert("keepalive_interval".to_string(), serde_json::json!(15));
+        protocol_opts.insert("x11_forwarding".to_string(), serde_json::json!(false));
+        protocol_opts.insert("known_hosts_policy".to_string(), serde_json::json!("strict"));
+
+        let req = SessionCreateRequest {
+            name: "SSH with Options".to_string(),
+            session_type: SessionType::SshTerminal,
+            group: None,
+            tags: None,
+            icon: None,
+            color_label: None,
+            credential_ref: None,
+            connection: ConnectionDetails {
+                host: Some("10.0.0.99".to_string()),
+                port: Some(22),
+                protocol_options: Some(protocol_opts.clone()),
+            },
+            startup_script: None,
+            environment_variables: None,
+            notes: None,
+            auto_reconnect: None,
+            keep_alive_interval_seconds: None,
+            favorite: None,
+            settings_override: None,
+        };
+
+        let session = do_session_create(env.id(), req).unwrap();
+        let sid = session.id.clone();
+
+        // Retrieve from disk and verify round-trip
+        let reloaded = do_session_get(env.id(), &sid).unwrap();
+        let opts = reloaded.connection.protocol_options.expect("protocol_options should persist");
+
+        assert_eq!(opts.get("compression"), Some(&serde_json::json!(true)));
+        assert_eq!(opts.get("cipher"), Some(&serde_json::json!("aes256-ctr")));
+        assert_eq!(opts.get("keepalive_interval"), Some(&serde_json::json!(15)));
+        assert_eq!(opts.get("x11_forwarding"), Some(&serde_json::json!(false)));
+        assert_eq!(opts.get("known_hosts_policy"), Some(&serde_json::json!("strict")));
+        assert_eq!(opts.len(), 5);
+    }
 }

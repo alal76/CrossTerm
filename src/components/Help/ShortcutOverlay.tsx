@@ -162,7 +162,7 @@ export default function ShortcutOverlay({ open, onClose }: ShortcutOverlayProps)
 
       {/* Modal */}
       <div
-        className="relative w-full max-w-[560px] max-h-[70vh] bg-surface-primary rounded-xl border border-border-default shadow-[var(--shadow-3)] flex flex-col overflow-hidden"
+        className="shortcut-overlay relative w-full max-w-[560px] max-h-[70vh] bg-surface-primary rounded-xl border border-border-default shadow-[var(--shadow-3)] flex flex-col overflow-hidden"
         style={{ animation: "paletteIn var(--duration-short) var(--ease-decelerate)" }}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}

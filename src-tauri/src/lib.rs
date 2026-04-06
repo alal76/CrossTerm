@@ -4,6 +4,9 @@ mod keygen;
 mod sftp;
 mod ssh;
 mod terminal;
+#[cfg(feature = "integration")]
+pub mod vault;
+#[cfg(not(feature = "integration"))]
 mod vault;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

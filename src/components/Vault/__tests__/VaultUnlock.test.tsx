@@ -94,4 +94,64 @@ describe("VaultUnlock", () => {
       screen.getByText("Password must be at least 8 characters.")
     ).toBeInTheDocument();
   });
+
+  it("FT-C-12: password confirmation mismatch shows error", async () => {
+    const user = userEvent.setup();
+    // vault doesn't exist => create mode
+    mockInvoke.mockRejectedValueOnce(new Error("no vault"));
+
+    render(<VaultUnlock />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { name: "Create Vault" })
+      ).toBeInTheDocument();
+    });
+
+    const passwordInput = screen.getByPlaceholderText("Master password");
+    const confirmInput = screen.getByPlaceholderText("Confirm password");
+
+    // Type a valid-length password but mismatching confirmation
+    await user.type(passwordInput, "securepassword123");
+    await user.type(confirmInput, "differentpassword");
+
+    const submitButton = screen.getByRole("button", { name: "Create Vault" });
+    await user.click(submitButton);
+
+    expect(
+      screen.getByText("Passwords do not match.")
+    ).toBeInTheDocument();
+  });
+
+  it("FT-C-13: submit calls invoke('vault_create') and unlockVault", async () => {
+    const user = userEvent.setup();
+    // vault doesn't exist => create mode
+    mockInvoke.mockRejectedValueOnce(new Error("no vault"));
+
+    render(<VaultUnlock />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { name: "Create Vault" })
+      ).toBeInTheDocument();
+    });
+
+    // Mock successful vault_create and vault_unlock calls
+    mockInvoke.mockResolvedValue(undefined);
+
+    const passwordInput = screen.getByPlaceholderText("Master password");
+    const confirmInput = screen.getByPlaceholderText("Confirm password");
+
+    await user.type(passwordInput, "strongpassword123");
+    await user.type(confirmInput, "strongpassword123");
+
+    const submitButton = screen.getByRole("button", { name: "Create Vault" });
+    await user.click(submitButton);
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("vault_create", {
+        password: "strongpassword123",
+      });
+    });
+  });
 });

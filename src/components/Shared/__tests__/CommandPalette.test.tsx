@@ -51,4 +51,29 @@ describe("CommandPalette", () => {
     // Unrelated actions should be filtered out
     expect(screen.queryByText("Lock Vault")).not.toBeInTheDocument();
   });
+
+  // FT-C-18: Enter key on selected item executes action
+  it("FT-C-18: Enter key on selected item executes action", async () => {
+    const onOpenSettings = vi.fn();
+    render(<CommandPalette onOpenSettings={onOpenSettings} />);
+
+    openPalette();
+
+    const input = screen.getByPlaceholderText("Type a command…");
+
+    // Type to filter to "Open Settings"
+    await userEvent.type(input, "Open Settings");
+
+    // "Open Settings" should be visible and selected (first match)
+    expect(screen.getByText("Open Settings")).toBeInTheDocument();
+
+    // Press Enter to execute
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    // The action callback should have been invoked
+    expect(onOpenSettings).toHaveBeenCalledTimes(1);
+
+    // Palette should be closed
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
 });
