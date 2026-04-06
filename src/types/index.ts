@@ -454,3 +454,114 @@ export interface GcsObject { name: string; size: number; content_type: string; t
 
 export interface CostSummary { total_cost: number; currency: string; start_date: string; end_date: string; by_service: ServiceCost[]; }
 export interface ServiceCost { service_name: string; cost: number; }
+
+// --- Network Types ---
+
+export interface ScanResult {
+  ip: string;
+  hostname?: string;
+  mac_address?: string;
+  open_ports: OpenPort[];
+  os_guess?: string;
+  response_time_ms: number;
+}
+
+export interface OpenPort {
+  port: number;
+  service_name: string;
+  protocol: string;
+}
+
+export interface TunnelRule {
+  id: string;
+  name: string;
+  local_port: number;
+  remote_host: string;
+  remote_port: number;
+  tunnel_type: 'local' | 'remote' | 'dynamic';
+  ssh_session_ref?: string;
+  auto_start: boolean;
+  enabled: boolean;
+}
+
+export type TunnelStatus = 'active' | 'inactive' | { error: string };
+
+export interface FileServerInfo {
+  id: string;
+  directory: string;
+  port: number;
+  server_type: 'http' | 'tftp';
+  running: boolean;
+  url: string;
+}
+
+// --- Recording Types ---
+
+export interface RecordingInfo {
+  id: string;
+  path: string;
+  title?: string;
+  duration_secs: number;
+  size_bytes: number;
+  width: number;
+  height: number;
+  created_at: string;
+}
+
+export interface PlaybackState {
+  recording_id: string;
+  position: number;
+  speed: number;
+  playing: boolean;
+}
+
+// --- Sync Types ---
+
+export interface SyncStatus {
+  last_export?: string;
+  last_import?: string;
+}
+
+// --- FTP Types ---
+
+export interface FtpConfig {
+  host: string;
+  port: number;
+  username?: string;
+  password?: string;
+  use_tls: boolean;
+  passive_mode: boolean;
+}
+
+export interface FtpEntry {
+  name: string;
+  size: number;
+  entry_type: 'file' | 'directory' | 'link';
+  modified?: string;
+  permissions?: string;
+}
+
+// --- Serial Types ---
+
+export interface SerialConfig {
+  port_name: string;
+  baud_rate: number;
+  data_bits: 'five' | 'six' | 'seven' | 'eight';
+  stop_bits: 'one' | 'two';
+  parity: 'none' | 'odd' | 'even';
+  flow_control: 'none' | 'software' | 'hardware';
+}
+
+export interface SerialPortInfo {
+  name: string;
+  description?: string;
+  manufacturer?: string;
+}
+
+// --- Telnet Types ---
+
+export interface TelnetConfig {
+  host: string;
+  port: number;
+  terminal_type: string;
+}
