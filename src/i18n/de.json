@@ -1,0 +1,92 @@
+{
+  "app": {
+    "name": "CrossTerm",
+    "tagline": "Terminalemulator und Remote-Access-Suite"
+  },
+  "sidebar": {
+    "sessions": "Sitzungen",
+    "snippets": "Snippets",
+    "tunnels": "Tunnel",
+    "credentials": "Anmeldedaten-Manager",
+    "collapse": "Seitenleiste einklappen",
+    "expand": "Seitenleiste ausklappen"
+  },
+  "tabs": {
+    "newTab": "Neuer Tab",
+    "closeTab": "Tab schließen",
+    "closeOthers": "Andere schließen",
+    "closeAll": "Alle schließen",
+    "pinTab": "Tab anheften",
+    "unpinTab": "Tab lösen",
+    "duplicateTab": "Tab duplizieren",
+    "splitRight": "Rechts teilen",
+    "splitDown": "Unten teilen"
+  },
+  "titleBar": {
+    "profile": "Profil",
+    "switchProfile": "Profil wechseln",
+    "settings": "Einstellungen",
+    "search": "Suchen..."
+  },
+  "emptyCanvas": {
+    "title": "Willkommen bei CrossTerm",
+    "hint": "Drücken Sie {{shortcut}} um eine neue Sitzung zu öffnen",
+    "shortcut": "⌘T"
+  },
+  "status": {
+    "connected": "Verbunden",
+    "disconnected": "Getrennt",
+    "connecting": "Verbindung wird hergestellt...",
+    "idle": "Inaktiv"
+  },
+  "themes": {
+    "title": "Design",
+    "dark": "Dunkel",
+    "light": "Hell",
+    "system": "System"
+  },
+  "actions": {
+    "save": "Speichern",
+    "cancel": "Abbrechen",
+    "close": "Schließen",
+    "create": "Erstellen",
+    "delete": "Löschen",
+    "confirm": "Bestätigen",
+    "copy": "Kopieren",
+    "paste": "Einfügen",
+    "selectAll": "Alles auswählen",
+    "undo": "Rückgängig",
+    "redo": "Wiederholen",
+    "refresh": "Aktualisieren"
+  },
+  "sessions": {
+    "title": "Sitzungen",
+    "newSession": "Neue Sitzung",
+    "favorites": "Favoriten",
+    "recent": "Letzte",
+    "connect": "Verbinden",
+    "disconnect": "Trennen",
+    "edit": "Bearbeiten",
+    "delete": "Löschen"
+  },
+  "vault": {
+    "title": "Anmeldedaten-Tresor",
+    "locked": "Tresor gesperrt",
+    "unlocked": "Tresor entsperrt",
+    "unlock": "Entsperren",
+    "lock": "Sperren"
+  },
+  "terminal": {
+    "starting": "Terminal wird gestartet…",
+    "failedCreate": "Terminal konnte nicht erstellt werden",
+    "retry": "Erneut versuchen",
+    "clearTerminal": "Terminal leeren",
+    "search": "Suchen"
+  },
+  "settings": {
+    "title": "Einstellungen",
+    "general": "Allgemein",
+    "appearance": "Darstellung",
+    "security": "Sicherheit"
+  }
+}

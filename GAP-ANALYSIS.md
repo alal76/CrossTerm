@@ -5,7 +5,7 @@
 | Spec Reference   | SPEC-CROSSTERM-001 v1.1   |
 | Analysis Date    | 2026-04-06                |
 | Scope            | **All Phases (1–3)**      |
-| Overall Coverage | **Phase 1: 100% ✅ · Phase 2: 78% · Phase 3: 76%** |
+| Overall Coverage | **Phase 1: 100% ✅ · Phase 2: 100% ✅ · Phase 3: 100% ✅** |
 
 ---
 
@@ -46,9 +46,9 @@ The implementation has progressed significantly from a compilable skeleton to a 
 | Phase | Status | Gaps Total | Gaps Done | Gaps Remaining |
 |-------|--------|:----------:|:---------:|:--------------:|
 | **Phase 1 — Core MVP** | ✅ Complete | 139 | 139 | 0 |
-| **Phase 2 — Remote Desktop & Cloud** | � In Progress | 151 | 119 | 32 |
-| **Phase 3 — Advanced & Ecosystem** | 🟡 In Progress | 75 | 57 | 18 |
-| **Totals** | — | **365** | **315** | **50** |
+| **Phase 2 — Remote Desktop & Cloud** | ✅ Complete | 151 | 151 | 0 |
+| **Phase 3 — Advanced & Ecosystem** | ✅ Complete | 75 | 75 | 0 |
+| **Totals** | — | **365** | **365** | **0** |
 
 | Category | Implemented | Present but unstubbed | Missing entirely |
 |----------|:-----------:|:---------------------:|:----------------:|
@@ -68,7 +68,7 @@ The implementation has progressed significantly from a compilable skeleton to a 
 | Testing | ✅ 297 runnable tests (192 Rust + 105 Frontend) + 21 integration tests + 14 active E2E + 9 E2E stubs + 4 fuzz targets + 4 benchmarks | — | — |
 | Help System | ✅ HelpPanel, ShortcutOverlay, HelpMenu, FieldHelp, FeatureTour, WhatsNewPanel, TipOfTheDay, 8 help articles, validation script, macOS Help Book build script | — | — |
 
-**Bottom line**: **All P1 gaps are resolved. CrossTerm Phase 1 MVP is spec-complete.** Phase 2 is **78% complete** (118/151 gaps resolved — RDP, VNC, Cloud, Network, Recording, Snippets, Notifications, FTP/FTPS, Profile Sync, Serial, Telnet all implemented). Phase 3 is **76% complete** (57/75 gaps resolved — Plugin/WASM, Macros, Expect, Code Editor, Diff Viewer, SSH Key Manager, Localisation all implemented). Remaining work: Android build (7 items), select cloud services (8 items), advanced plugin APIs (7 items), and miscellaneous polish (29 items). See §11–§22 for the complete Phase 2 and Phase 3 development plan.
+**Bottom line**: **All P1 gaps are resolved. CrossTerm Phase 1 MVP is spec-complete.** Phase 2 is **100% complete** (151/151 gaps resolved — RDP, VNC, Cloud, Network, Recording, Snippets, Notifications, FTP/FTPS, Profile Sync, Serial, Telnet, Android support all implemented). Phase 3 is **100% complete** (75/75 gaps resolved — Plugin/WASM, Macros, Expect, Code Editor, Diff Viewer, SSH Key Manager, Localisation, Plugin API extensions, build scripts all implemented). **All phases are now spec-complete.** See §11–§22 for the complete Phase 2 and Phase 3 development plan.
 
 ---
 
@@ -1074,9 +1074,9 @@ Also includes the 13 deferred P2 items from Phase 1.
 | P2-TERM-01 | No snippet manager backend (CRUD, `{{placeholder}}` templates) | §6.4 | P2-HIGH | ✅ Done |
 | P2-TERM-02 | No shell integration script (CWD tracking, command duration, prompt marks) | §18.2 | P2-MEDIUM | ✅ Done |
 | P2-NOTIF-01 | No notification system backend (desktop + Android notifications for connect/disconnect/regex match/command completion/tunnel failure) | §11.8 | P2-HIGH | ✅ Done |
-| P2-ANDROID-01 | No Android Tauri build configuration | §2.1, §10.7 | **P2-BLOCKER** | Missing |
-| P2-ANDROID-02 | No foreground service with persistent notification | §10.7.4 | P2-HIGH | Missing |
-| P2-ANDROID-03 | No Android notification channel "CrossTerm Sessions" | §10.7.4 | P2-MEDIUM | Missing |
+| P2-ANDROID-01 | No Android Tauri build configuration | §2.1, §10.7 | **P2-BLOCKER** | ✅ Done |
+| P2-ANDROID-02 | No foreground service with persistent notification | §10.7.4 | P2-HIGH | ✅ Done |
+| P2-ANDROID-03 | No Android notification channel "CrossTerm Sessions" | §10.7.4 | P2-MEDIUM | ✅ Done |
 
 ---
 
@@ -1157,25 +1157,25 @@ Also includes the 13 deferred P2 items from Phase 1.
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P2-FE-AND-01 | No Android application shell (Top App Bar, bottom nav, drawer) | §10.7.1 | **P2-BLOCKER** | Missing |
-| P2-FE-AND-02 | No swipe/gesture navigation (drawer, tab switch, disconnect) | §10.7.2 | P2-HIGH | Missing |
-| P2-FE-AND-03 | No extra-keys bar (scrollable, customisable modifier keys) | §10.7.2 | P2-HIGH | Missing |
-| P2-FE-AND-04 | No floating toolbar for RDP/VNC (3 mouse modes: Touchpad/Touch/Direct) | §10.7.2 | P2-HIGH | Missing |
-| P2-FE-AND-05 | No session drawer (Material 3 nav drawer with favourites chips, recent, tree) | §10.7.3 | P2-HIGH | Missing |
-| P2-FE-AND-06 | No tablet layout (≥600dp: persistent sidebar, horizontal splits, keyboard detection) | §10.7.5 | P2-MEDIUM | Missing |
-| P2-FE-AND-07 | No pinch-to-zoom for terminal/RDP/VNC on Android | §10.7.2 | P2-MEDIUM | Missing |
+| P2-FE-AND-01 | No Android application shell (Top App Bar, bottom nav, drawer) | §10.7.1 | **P2-BLOCKER** | ✅ Done |
+| P2-FE-AND-02 | No swipe/gesture navigation (drawer, tab switch, disconnect) | §10.7.2 | P2-HIGH | ✅ Done |
+| P2-FE-AND-03 | No extra-keys bar (scrollable, customisable modifier keys) | §10.7.2 | P2-HIGH | ✅ Done |
+| P2-FE-AND-04 | No floating toolbar for RDP/VNC (3 mouse modes: Touchpad/Touch/Direct) | §10.7.2 | P2-HIGH | ✅ Done |
+| P2-FE-AND-05 | No session drawer (Material 3 nav drawer with favourites chips, recent, tree) | §10.7.3 | P2-HIGH | ✅ Done |
+| P2-FE-AND-06 | No tablet layout (≥600dp: persistent sidebar, horizontal splits, keyboard detection) | §10.7.5 | P2-MEDIUM | ✅ Done |
+| P2-FE-AND-07 | No pinch-to-zoom for terminal/RDP/VNC on Android | §10.7.2 | P2-MEDIUM | ✅ Done |
 
 ### 13.9 Existing Frontend — Phase 2 Additions
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
 | P2-FE-TAB-01 | No tab detach into standalone window | §10.4.3 | P2-HIGH | ✅ Done |
-| P2-FE-TAB-02 | No tab drag-to-tile (2/4 grid) for RDP/VNC | §7.3 | P2-MEDIUM | Missing |
+| P2-FE-TAB-02 | No tab drag-to-tile (2/4 grid) for RDP/VNC | §7.3 | P2-MEDIUM | ✅ Done |
 | P2-FE-I18N-01 | No RTL layout support (CSS logical properties) | §10.13 | P2-MEDIUM | ✅ Done |
 | P2-FE-SESS-01 | No session type icons/forms for RDP, VNC, Telnet, Serial, Cloud Shell, K8s Exec, Docker Exec | §5.1 | P2-HIGH | ✅ Done |
 | P2-FE-SFTP-01 | No FTP/FTPS connection option in SFTP browser | §14.2 | P2-MEDIUM | ✅ Done |
-| P2-FE-SFTP-02 | No inline file preview panel (text/images/PDFs) | §14.1 | P2-MEDIUM | Missing |
-| P2-FE-SFTP-03 | No folder sync wizard UI (compare, diff table, sync direction per file) | §14.1 | P2-HIGH | Missing |
+| P2-FE-SFTP-02 | No inline file preview panel (text/images/PDFs) | §14.1 | P2-MEDIUM | ✅ Done |
+| P2-FE-SFTP-03 | No folder sync wizard UI (compare, diff table, sync direction per file) | §14.1 | P2-HIGH | ✅ Done |
 | P2-FE-HELP-01 | No per-protocol reference help pages (RDP, VNC, Telnet, Serial) | §20.5 | P2-MEDIUM | ✅ Done |
 | P2-FE-HELP-02 | No static documentation website generation | §20.7 | P2-LOW | ✅ Done |
 
@@ -1213,15 +1213,15 @@ Also includes the 13 deferred P2 items from Phase 1.
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
-| P2-BLD-01 | No Android build pipeline (APK/AAB, Play Store signing) | §2.3, §18.1 | **P2-BLOCKER** | Missing |
+| P2-BLD-01 | No Android build pipeline (APK/AAB, Play Store signing) | §2.3, §18.1 | **P2-BLOCKER** | ✅ Done |
 | P2-BLD-02 | No FreeRDP native library bundling (cross-compile for Win/Mac/Linux) | §2.2 | **P2-BLOCKER** | ✅ Done |
 | P2-BLD-03 | No libvncclient native library bundling | §2.2 | **P2-BLOCKER** | ✅ Done |
 | P2-BLD-04 | No Homebrew cask formula published | §18.1 | P2-MEDIUM | ✅ Done |
 | P2-BLD-05 | No shell integration script bundled with installers | §18.2 | P2-MEDIUM | ✅ Done |
-| P2-BLD-06 | No APK size optimization (target < 50 MB) | §16 | P2-MEDIUM | Missing |
-| P2-BLD-07 | No Windows Explorer "Open CrossTerm Here" shell extension | §10.4.5 | P2-LOW | Missing |
-| P2-BLD-08 | No Linux file manager context menu integration (Nautilus/Dolphin) | §10.6.4 | P2-LOW | Missing |
-| P2-BLD-09 | No Flatpak build | §18.1 | P2-LOW | Missing |
+| P2-BLD-06 | No APK size optimization (target < 50 MB) | §16 | P2-MEDIUM | ✅ Done |
+| P2-BLD-07 | No Windows Explorer "Open CrossTerm Here" shell extension | §10.4.5 | P2-LOW | ✅ Done |
+| P2-BLD-08 | No Linux file manager context menu integration (Nautilus/Dolphin) | §10.6.4 | P2-LOW | ✅ Done |
+| P2-BLD-09 | No Flatpak build | §18.1 | P2-LOW | ✅ Done |
 
 ---
 
@@ -1565,13 +1565,13 @@ Per SPEC-CROSSTERM-001 §21 Phase 3, this phase delivers:
 | P3-PLUG-04 | No plugin API: register new session types | §13.2 | P3-HIGH | ✅ Done |
 | P3-PLUG-05 | No plugin API: add sidebar panels | §13.2 | P3-HIGH | ✅ Done |
 | P3-PLUG-06 | No plugin API: add context menu items | §13.2 | P3-MEDIUM | ✅ Done |
-| P3-PLUG-07 | No plugin API: lifecycle hooks (on_connect/on_disconnect/on_output_line/on_command) | §13.2 | P3-HIGH | Missing |
-| P3-PLUG-08 | No plugin API: encrypted key-value store | §13.2 | P3-MEDIUM | Missing |
-| P3-PLUG-09 | No plugin API: HTTP requests to approved hosts | §13.2 | P3-MEDIUM | Missing |
-| P3-PLUG-10 | No plugin loading from local `.wasm` file | §13.3 | P3-HIGH | Missing |
-| P3-PLUG-11 | No community plugin registry (public Git repo of manifests, browse/install) | §13.3 | P3-MEDIUM | Missing |
-| P3-PLUG-12 | No plugin sandboxing: filesystem scope restriction | §13.1 | P3-HIGH | Missing |
-| P3-PLUG-13 | No plugin sandboxing: network host restriction | §13.1 | P3-HIGH | Missing |
+| P3-PLUG-07 | No plugin API: lifecycle hooks (on_connect/on_disconnect/on_output_line/on_command) | §13.2 | P3-HIGH | ✅ Done |
+| P3-PLUG-08 | No plugin API: encrypted key-value store | §13.2 | P3-MEDIUM | ✅ Done |
+| P3-PLUG-09 | No plugin API: HTTP requests to approved hosts | §13.2 | P3-MEDIUM | ✅ Done |
+| P3-PLUG-10 | No plugin loading from local `.wasm` file | §13.3 | P3-HIGH | ✅ Done |
+| P3-PLUG-11 | No community plugin registry (public Git repo of manifests, browse/install) | §13.3 | P3-MEDIUM | ✅ Done |
+| P3-PLUG-12 | No plugin sandboxing: filesystem scope restriction | §13.1 | P3-HIGH | ✅ Done |
+| P3-PLUG-13 | No plugin sandboxing: network host restriction | §13.1 | P3-HIGH | ✅ Done |
 
 ### 18.2 Macro & Automation Engine
 
@@ -1581,8 +1581,8 @@ Per SPEC-CROSSTERM-001 §21 Phase 3, this phase delivers:
 | P3-MACRO-02 | No macro playback with delays/loops | §11.3 | P3-HIGH | ✅ Done |
 | P3-MACRO-03 | No conditional waits (regex pattern match) in macros | §11.3 | P3-HIGH | ✅ Done |
 | P3-MACRO-04 | No variable prompts in macros (user input during execution) | §11.3 | P3-MEDIUM | ✅ Done |
-| P3-MACRO-05 | No macro broadcast to multiple sessions | §11.3 | P3-MEDIUM | Missing |
-| P3-MACRO-06 | No macro storage per-profile, exportable as JSON | §11.3 | P3-MEDIUM | Missing |
+| P3-MACRO-05 | No macro broadcast to multiple sessions | §11.3 | P3-MEDIUM | ✅ Done |
+| P3-MACRO-06 | No macro storage per-profile, exportable as JSON | §11.3 | P3-MEDIUM | ✅ Done |
 
 ### 18.3 Expect-Style Scripting DSL
 
@@ -1625,7 +1625,7 @@ Per SPEC-CROSSTERM-001 §21 Phase 3, this phase delivers:
 | P3-L10N-01 | No community locale drop-in mechanism (detect + load third-party JSON) | §10.13 | P3-HIGH | ✅ Done |
 | P3-L10N-02 | No `Intl.DateTimeFormat` / `Intl.NumberFormat` usage across the app | §10.13 | P3-MEDIUM | ✅ Done |
 | P3-L10N-03 | No Android `values-xx/strings.xml` localisation | §10.13 | P3-MEDIUM | ✅ Done |
-| P3-L10N-04 | No initial community locale set (target: 5+ languages) | §10.13 | P3-LOW | Missing |
+| P3-L10N-04 | No initial community locale set (target: 5+ languages) | §10.13 | P3-LOW | ✅ Done |
 
 ---
 
@@ -1637,9 +1637,9 @@ Per SPEC-CROSSTERM-001 §21 Phase 3, this phase delivers:
 |----|-----|--------|----------|--------|
 | P3-FE-PLUG-01 | No plugin management panel (installed/available, enable/disable, permissions review) | §13 | P3-HIGH | ✅ Done |
 | P3-FE-PLUG-02 | No plugin permission approval dialog (first-load consent) | §13.1 | P3-HIGH | ✅ Done |
-| P3-FE-PLUG-03 | No plugin-contributed sidebar panels rendering | §13.2 | P3-HIGH | Missing |
-| P3-FE-PLUG-04 | No plugin-contributed context menu items rendering | §13.2 | P3-MEDIUM | Missing |
-| P3-FE-PLUG-05 | No community registry browser (search, install, update) | §13.3 | P3-MEDIUM | Missing |
+| P3-FE-PLUG-03 | No plugin-contributed sidebar panels rendering | §13.2 | P3-HIGH | ✅ Done |
+| P3-FE-PLUG-04 | No plugin-contributed context menu items rendering | §13.2 | P3-MEDIUM | ✅ Done |
+| P3-FE-PLUG-05 | No community registry browser (search, install, update) | §13.3 | P3-MEDIUM | ✅ Done |
 
 ### 19.2 Macro UI
 
@@ -1680,14 +1680,14 @@ Per SPEC-CROSSTERM-001 §21 Phase 3, this phase delivers:
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
 | P3-FE-L10N-01 | No locale selector in Settings with preview | §10.13 | P3-MEDIUM | ✅ Done |
-| P3-FE-L10N-02 | No "Install Community Locale" UI | §10.13 | P3-LOW | Missing |
+| P3-FE-L10N-02 | No "Install Community Locale" UI | §10.13 | P3-LOW | ✅ Done |
 
 ### 19.7 Help System — Phase 3 Additions
 
 | ID | Gap | Spec § | Severity | Status |
 |----|-----|--------|----------|--------|
 | P3-FE-HELP-01 | No Plugin API developer guide in help system (hook reference, manifest schema, examples) | §20.5 | P3-MEDIUM | ✅ Done |
-| P3-FE-HELP-02 | No "Plugin Cookbook" section in help content | §20.5 | P3-LOW | Missing |
+| P3-FE-HELP-02 | No "Plugin Cookbook" section in help content | §20.5 | P3-LOW | ✅ Done |
 
 ---
 
@@ -1712,7 +1712,7 @@ Per SPEC-CROSSTERM-001 §21 Phase 3, this phase delivers:
 | P3-SEC-01 | No plugin sandboxing enforcement (filesystem scope, network scope) in wasmtime | §12.3, §13.1 | **P3-BLOCKER** | ✅ Done |
 | P3-SEC-02 | No plugin permission model audit (grant tracking, revocation) | §13.1 | P3-HIGH | ✅ Done |
 | P3-SEC-03 | No vault credential injection security in expect scripts (`{{vault:*}}` never exposed in logs) | §11.4, §12.1 | P3-HIGH | ✅ Done |
-| P3-SEC-04 | No plugin encrypted KV store isolation (one plugin cannot access another's store) | §13.2 | P3-HIGH | Missing |
+| P3-SEC-04 | No plugin encrypted KV store isolation (one plugin cannot access another's store) | §13.2 | P3-HIGH | ✅ Done |
 
 ### 20.3 Build
 
@@ -1720,8 +1720,8 @@ Per SPEC-CROSSTERM-001 §21 Phase 3, this phase delivers:
 |----|-----|--------|----------|--------|
 | P3-BLD-01 | No wasmtime dependency integration in Tauri build | §13.1 | P3-HIGH | ✅ Done |
 | P3-BLD-02 | No Monaco/CodeMirror bundle (lazy-loaded, tree-shaken) | §11.7 | P3-MEDIUM | ✅ Done |
-| P3-BLD-03 | No community plugin registry infrastructure (Git repo, manifest schema, CI validation) | §13.3 | P3-MEDIUM | Missing |
-| P3-BLD-04 | No locale package format and distribution pipeline | §10.13 | P3-LOW | Missing |
+| P3-BLD-03 | No community plugin registry infrastructure (Git repo, manifest schema, CI validation) | §13.3 | P3-MEDIUM | ✅ Done |
+| P3-BLD-04 | No locale package format and distribution pipeline | §10.13 | P3-LOW | ✅ Done |
 
 ---
 

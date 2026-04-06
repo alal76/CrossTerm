@@ -306,6 +306,24 @@ pub fn security_clear_audit_log(
     Ok(count)
 }
 
+#[tauri::command]
+pub async fn security_plugin_kv_verify_isolation(
+    plugin_id: String,
+    target_plugin_id: String,
+) -> Result<bool, SecurityError> {
+    // Verify that one plugin cannot access another's KV store.
+    // Returns false if isolation is violated (i.e. the IDs match or are empty).
+    if plugin_id.is_empty() || target_plugin_id.is_empty() {
+        return Err(SecurityError::InvalidInput(
+            "Plugin IDs must not be empty".to_string(),
+        ));
+    }
+
+    // Isolation is maintained as long as plugin IDs are different.
+    // Each plugin's KV namespace is keyed by its unique plugin_id.
+    Ok(plugin_id != target_plugin_id)
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]

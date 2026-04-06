@@ -674,7 +674,17 @@
     "enable": "Enable",
     "disable": "Disable",
     "permissions": "Permissions",
-    "noPlugins": "No plugins installed. Install a plugin to extend CrossTerm."
+    "noPlugins": "No plugins installed. Install a plugin to extend CrossTerm.",
+    "hooks": "Lifecycle Hooks",
+    "kvStore": "Key-Value Store",
+    "sandbox": "Sandbox Config",
+    "registry": "Plugin Registry",
+    "installed": "Installed",
+    "available": "Available",
+    "update": "Update",
+    "cookbook": "Plugin Cookbook",
+    "gettingStarted": "Getting Started",
+    "sidebar": "Sidebar Panels"
   },
   "macro": {
     "editor": "Macro Editor",
@@ -757,7 +767,8 @@
     "previewFile": "Preview File",
     "closePreview": "Close Preview",
     "hexView": "Hex View",
-    "downloadFile": "Download"
+    "downloadFile": "Download",
+    "toolbar": "SFTP Tools"
   },
   "cloud": {
     "kubectl": "Kubernetes",
@@ -773,5 +784,28 @@
     "pod": "Pod",
     "command": "Command",
     "noPods": "No pods found"
+  },
+  "android": {
+    "sessions": "Sessions",
+    "terminal": "Terminal",
+    "files": "Files",
+    "settings": "Settings",
+    "gesture": {
+      "swipeRight": "Swipe right to open drawer"
+    },
+    "mouseMode": "Mouse Mode",
+    "touchpad": "Touchpad",
+    "touch": "Touch",
+    "direct": "Direct"
+  },
+  "tabTile": {
+    "grid": "Tile Grid",
+    "2x2": "2×2 Grid"
+  },
+  "locale": {
+    "install": "Install Community Locale",
+    "import": "Import from File",
+    "preview": "Preview",
+    "installed": "Installed Locales"
   }
 }

@@ -1,0 +1,65 @@
+{
+  "app": {
+    "name": "CrossTerm",
+    "tagline": "终端模拟器和远程访问套件"
+  },
+  "sidebar": {
+    "sessions": "会话",
+    "snippets": "代码片段",
+    "tunnels": "隧道",
+    "credentials": "凭据管理器"
+  },
+  "tabs": {
+    "newTab": "新标签页",
+    "closeTab": "关闭标签页",
+    "closeOthers": "关闭其他",
+    "closeAll": "全部关闭",
+    "pinTab": "固定标签页",
+    "unpinTab": "取消固定"
+  },
+  "emptyCanvas": {
+    "title": "欢迎使用 CrossTerm",
+    "hint": "按 {{shortcut}} 打开新会话",
+    "shortcut": "⌘T"
+  },
+  "status": {
+    "connected": "已连接",
+    "disconnected": "已断开",
+    "connecting": "连接中...",
+    "idle": "空闲"
+  },
+  "themes": {
+    "title": "主题",
+    "dark": "暗色",
+    "light": "亮色",
+    "system": "跟随系统"
+  },
+  "actions": {
+    "save": "保存",
+    "cancel": "取消",
+    "close": "关闭",
+    "create": "创建",
+    "delete": "删除",
+    "confirm": "确认",
+    "copy": "复制",
+    "paste": "粘贴",
+    "refresh": "刷新"
+  },
+  "settings": {
+    "title": "设置",
+    "general": "通用",
+    "appearance": "外观"
+  },
+  "vault": {
+    "title": "凭据保管库",
+    "locked": "已锁定",
+    "unlocked": "已解锁",
+    "unlock": "解锁",
+    "lock": "锁定"
+  },
+  "terminal": {
+    "starting": "正在启动终端…",
+    "failedCreate": "创建终端失败",
+    "retry": "重试"
+  }
+}

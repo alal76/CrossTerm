@@ -1,3 +1,4 @@
+mod android;
 mod audit;
 mod cloud;
 mod config;
@@ -66,6 +67,7 @@ pub fn run() {
         .manage(editor::EditorState::new())
         .manage(macros::MacroState::new())
         .manage(plugin_rt::PluginState::new())
+        .manage(android::AndroidState::new())
         .invoke_handler(tauri::generate_handler![
             // Vault
             vault::vault_create,
@@ -354,6 +356,40 @@ pub fn run() {
             plugin_rt::plugin_install,
             plugin_rt::plugin_uninstall,
             plugin_rt::plugin_send_event,
+            // Plugin API Extensions
+            plugin_rt::plugin_register_hook,
+            plugin_rt::plugin_unregister_hook,
+            plugin_rt::plugin_kv_get,
+            plugin_rt::plugin_kv_set,
+            plugin_rt::plugin_kv_delete,
+            plugin_rt::plugin_http_request,
+            plugin_rt::plugin_get_sandbox_config,
+            plugin_rt::plugin_set_sandbox_config,
+            plugin_rt::plugin_load_wasm,
+            // Macro Extensions
+            macros::macro_broadcast,
+            macros::macro_export,
+            macros::macro_import,
+            // Cloud Extensions
+            cloud::azure::cloud_azure_storage_browse,
+            cloud::azure::cloud_azure_aks_get_credentials,
+            cloud::azure::cloud_azure_aks_exec,
+            cloud::gcp::cloud_gcp_gke_get_credentials,
+            cloud::gcp::cloud_gcp_gke_exec,
+            // SFTP Extensions
+            sftp::sftp_preview,
+            sftp::sftp_sync_compare,
+            sftp::sftp_sync_execute,
+            // RDP Recording
+            rdp::rdp_start_recording,
+            rdp::rdp_stop_recording,
+            // Security Extensions
+            security::security_plugin_kv_verify_isolation,
+            // Android
+            android::android_start_foreground_service,
+            android::android_stop_foreground_service,
+            android::android_create_notification_channel,
+            android::android_is_foreground_active,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

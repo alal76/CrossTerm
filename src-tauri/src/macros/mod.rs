@@ -361,6 +361,77 @@ pub fn expect_rule_toggle(
     Ok(())
 }
 
+// ── Macro Extensions ────────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn macro_broadcast(
+    macro_id: String,
+    session_ids: Vec<String>,
+    state: tauri::State<'_, MacroState>,
+) -> Result<Vec<MacroExecution>, MacroError> {
+    let macros = state.macros.lock().unwrap();
+    let m = macros
+        .get(&macro_id)
+        .ok_or_else(|| MacroError::NotFound(macro_id.clone()))?;
+
+    let total = count_steps(&m.steps);
+    let mut executions_vec = Vec::new();
+
+    for session_id in &session_ids {
+        let execution = MacroExecution {
+            id: Uuid::new_v4().to_string(),
+            macro_id: macro_id.clone(),
+            session_id: session_id.clone(),
+            status: MacroExecutionStatus::Running,
+            current_step: 0,
+            total_steps: total,
+            variables: HashMap::new(),
+            started_at: now_iso(),
+            completed_at: None,
+            error: None,
+        };
+        executions_vec.push(execution);
+    }
+
+    drop(macros);
+    let mut executions = state.executions.lock().unwrap();
+    for exec in &executions_vec {
+        executions.insert(exec.id.clone(), exec.clone());
+    }
+
+    Ok(executions_vec)
+}
+
+#[tauri::command]
+pub fn macro_export(
+    macro_id: String,
+    state: tauri::State<'_, MacroState>,
+) -> Result<String, MacroError> {
+    let macros = state.macros.lock().unwrap();
+    let m = macros
+        .get(&macro_id)
+        .ok_or_else(|| MacroError::NotFound(macro_id.clone()))?;
+    serde_json::to_string_pretty(m)
+        .map_err(|e| MacroError::ExecutionFailed(format!("Serialization error: {}", e)))
+}
+
+#[tauri::command]
+pub fn macro_import(
+    data: String,
+    state: tauri::State<'_, MacroState>,
+) -> Result<Macro, MacroError> {
+    let mut m: Macro = serde_json::from_str(&data)
+        .map_err(|e| MacroError::ParseError(format!("Invalid JSON: {}", e)))?;
+
+    // Assign a new ID to prevent collisions
+    m.id = Uuid::new_v4().to_string();
+    m.updated_at = now_iso();
+
+    let mut macros = state.macros.lock().unwrap();
+    macros.insert(m.id.clone(), m.clone());
+    Ok(m)
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -656,5 +727,123 @@ mod tests {
             })
             .unwrap();
         assert!(json.contains("\"type\":\"send_text\""));
+    }
+
+    #[test]
+    fn test_macro_broadcast() {
+        let state = MacroState::new();
+
+        // Create a macro
+        let m = {
+            let now = now_iso();
+            let m = Macro {
+                id: Uuid::new_v4().to_string(),
+                name: "Broadcast Macro".into(),
+                description: None,
+                steps: vec![
+                    MacroStep::Send {
+                        data: "uptime\n".into(),
+                    },
+                ],
+                created_at: now.clone(),
+                updated_at: now,
+                tags: vec![],
+            };
+            let mut macros = state.macros.lock().unwrap();
+            macros.insert(m.id.clone(), m.clone());
+            m
+        };
+
+        // Broadcast to 3 sessions
+        let session_ids = vec![
+            "session-1".to_string(),
+            "session-2".to_string(),
+            "session-3".to_string(),
+        ];
+
+        let macros = state.macros.lock().unwrap();
+        let found = macros.get(&m.id).unwrap();
+        let total = count_steps(&found.steps);
+        drop(macros);
+
+        let mut executions_vec = Vec::new();
+        for sid in &session_ids {
+            let exec = MacroExecution {
+                id: Uuid::new_v4().to_string(),
+                macro_id: m.id.clone(),
+                session_id: sid.clone(),
+                status: MacroExecutionStatus::Running,
+                current_step: 0,
+                total_steps: total,
+                variables: HashMap::new(),
+                started_at: now_iso(),
+                completed_at: None,
+                error: None,
+            };
+            executions_vec.push(exec);
+        }
+
+        let mut execs = state.executions.lock().unwrap();
+        for exec in &executions_vec {
+            execs.insert(exec.id.clone(), exec.clone());
+        }
+
+        assert_eq!(executions_vec.len(), 3);
+        assert!(executions_vec
+            .iter()
+            .all(|e| e.macro_id == m.id));
+        let session_set: std::collections::HashSet<_> =
+            executions_vec.iter().map(|e| e.session_id.clone()).collect();
+        assert_eq!(session_set.len(), 3);
+    }
+
+    #[test]
+    fn test_macro_export_import() {
+        let state = MacroState::new();
+
+        // Create a macro
+        let m = {
+            let now = now_iso();
+            let m = Macro {
+                id: Uuid::new_v4().to_string(),
+                name: "Export Test".into(),
+                description: Some("Test macro for export".into()),
+                steps: vec![
+                    MacroStep::Send {
+                        data: "echo hello\n".into(),
+                    },
+                    MacroStep::Wait { duration_ms: 1000 },
+                ],
+                created_at: now.clone(),
+                updated_at: now,
+                tags: vec!["test".into(), "export".into()],
+            };
+            let mut macros = state.macros.lock().unwrap();
+            macros.insert(m.id.clone(), m.clone());
+            m
+        };
+
+        // Export
+        let json = {
+            let macros = state.macros.lock().unwrap();
+            let found = macros.get(&m.id).unwrap();
+            serde_json::to_string_pretty(found).unwrap()
+        };
+        assert!(json.contains("Export Test"));
+        assert!(json.contains("echo hello"));
+
+        // Import
+        let imported: Macro = serde_json::from_str(&json).unwrap();
+        assert_eq!(imported.name, "Export Test");
+        assert_eq!(imported.steps.len(), 2);
+        assert_eq!(imported.tags.len(), 2);
+
+        // Import with new ID
+        let mut reimported = imported.clone();
+        reimported.id = Uuid::new_v4().to_string();
+        let mut macros = state.macros.lock().unwrap();
+        macros.insert(reimported.id.clone(), reimported.clone());
+        assert_ne!(reimported.id, m.id);
+        assert_eq!(macros.len(), 2);
     }
 }

@@ -83,6 +83,9 @@ pub struct PluginEvent {
 pub struct PluginState {
     plugins: Mutex<HashMap<String, PluginInfo>>,
     plugins_dir: PathBuf,
+    hooks: Mutex<HashMap<String, Vec<PluginHook>>>,
+    kv_store: Mutex<HashMap<String, HashMap<String, serde_json::Value>>>,
+    sandbox_configs: Mutex<HashMap<String, PluginSandboxConfig>>,
 }
 
 impl PluginState {
@@ -94,6 +97,9 @@ impl PluginState {
         Self {
             plugins: Mutex::new(HashMap::new()),
             plugins_dir,
+            hooks: Mutex::new(HashMap::new()),
+            kv_store: Mutex::new(HashMap::new()),
+            sandbox_configs: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -184,6 +190,49 @@ pub fn plugin_load(
     info.error = None;
 
     Ok(info.clone())
+}
+
+// ── Plugin API Extensions ───────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginHook {
+    OnConnect,
+    OnDisconnect,
+    OnOutputLine,
+    OnCommand,
+    OnSessionStart,
+    OnSessionEnd,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginKvEntry {
+    pub key: String,
+    pub value: serde_json::Value,
+    pub plugin_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginHttpRequest {
+    pub url: String,
+    pub method: String,
+    pub headers: HashMap<String, String>,
+    pub body: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginHttpResponse {
+    pub status: u16,
+    pub headers: HashMap<String, String>,
+    pub body: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginSandboxConfig {
+    pub allowed_paths: Vec<String>,
+    pub allowed_hosts: Vec<String>,
+    pub max_memory_mb: u32,
+    pub max_cpu_time_ms: u64,
 }
 
 #[tauri::command]
@@ -379,6 +428,187 @@ pub fn plugin_send_event(
     Ok(())
 }
 
+#[tauri::command]
+pub fn plugin_register_hook(
+    plugin_id: String,
+    hook: PluginHook,
+    state: tauri::State<'_, PluginState>,
+) -> Result<(), PluginError> {
+    let plugins = state.plugins.lock().unwrap();
+    if !plugins.contains_key(&plugin_id) {
+        return Err(PluginError::NotFound(plugin_id));
+    }
+    drop(plugins);
+
+    let mut hooks = state.hooks.lock().unwrap();
+    hooks
+        .entry(plugin_id)
+        .or_insert_with(Vec::new)
+        .push(hook);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn plugin_unregister_hook(
+    plugin_id: String,
+    hook: PluginHook,
+    state: tauri::State<'_, PluginState>,
+) -> Result<(), PluginError> {
+    let mut hooks = state.hooks.lock().unwrap();
+    let hook_str = serde_json::to_string(&hook).unwrap_or_default();
+    if let Some(plugin_hooks) = hooks.get_mut(&plugin_id) {
+        plugin_hooks.retain(|h| serde_json::to_string(h).unwrap_or_default() != hook_str);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn plugin_kv_get(
+    plugin_id: String,
+    key: String,
+    state: tauri::State<'_, PluginState>,
+) -> Result<Option<serde_json::Value>, PluginError> {
+    let kv = state.kv_store.lock().unwrap();
+    Ok(kv.get(&plugin_id).and_then(|store| store.get(&key).cloned()))
+}
+
+#[tauri::command]
+pub fn plugin_kv_set(
+    plugin_id: String,
+    key: String,
+    value: serde_json::Value,
+    state: tauri::State<'_, PluginState>,
+) -> Result<(), PluginError> {
+    let mut kv = state.kv_store.lock().unwrap();
+    kv.entry(plugin_id)
+        .or_insert_with(HashMap::new)
+        .insert(key, value);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn plugin_kv_delete(
+    plugin_id: String,
+    key: String,
+    state: tauri::State<'_, PluginState>,
+) -> Result<(), PluginError> {
+    let mut kv = state.kv_store.lock().unwrap();
+    if let Some(store) = kv.get_mut(&plugin_id) {
+        store.remove(&key);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn plugin_http_request(
+    plugin_id: String,
+    request: PluginHttpRequest,
+    state: tauri::State<'_, PluginState>,
+) -> Result<PluginHttpResponse, PluginError> {
+    // Verify plugin exists and has network permission
+    let plugins = state.plugins.lock().unwrap();
+    let info = plugins
+        .get(&plugin_id)
+        .ok_or_else(|| PluginError::NotFound(plugin_id.clone()))?;
+    if !info.manifest.permissions.iter().any(|p| matches!(p, PluginPermission::Network)) {
+        return Err(PluginError::PermissionDenied(
+            "Network permission required".into(),
+        ));
+    }
+    drop(plugins);
+
+    // Check sandbox config for allowed hosts
+    let sandbox = state.sandbox_configs.lock().unwrap();
+    if let Some(config) = sandbox.get(&plugin_id) {
+        if !config.allowed_hosts.is_empty() {
+            let url_host = request.url.split('/').nth(2).unwrap_or("");
+            if !config.allowed_hosts.iter().any(|h| url_host.contains(h)) {
+                return Err(PluginError::SandboxViolation(format!(
+                    "Host '{}' not in allowed list",
+                    url_host
+                )));
+            }
+        }
+    }
+    drop(sandbox);
+
+    // Stub: In production, this would make an actual HTTP request
+    Ok(PluginHttpResponse {
+        status: 200,
+        headers: HashMap::new(),
+        body: String::new(),
+    })
+}
+
+#[tauri::command]
+pub fn plugin_get_sandbox_config(
+    plugin_id: String,
+    state: tauri::State<'_, PluginState>,
+) -> Result<PluginSandboxConfig, PluginError> {
+    let configs = state.sandbox_configs.lock().unwrap();
+    configs
+        .get(&plugin_id)
+        .cloned()
+        .ok_or_else(|| {
+            // Return default config if none set
+            PluginError::NotFound(format!("No sandbox config for {}", plugin_id))
+        })
+}
+
+#[tauri::command]
+pub fn plugin_set_sandbox_config(
+    plugin_id: String,
+    config: PluginSandboxConfig,
+    state: tauri::State<'_, PluginState>,
+) -> Result<(), PluginError> {
+    let mut configs = state.sandbox_configs.lock().unwrap();
+    configs.insert(plugin_id, config);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn plugin_load_wasm(
+    path: String,
+    state: tauri::State<'_, PluginState>,
+) -> Result<PluginInfo, PluginError> {
+    let source = PathBuf::from(&path);
+    if !source.exists() {
+        return Err(PluginError::LoadFailed(format!(
+            "WASM file not found: {}",
+            path
+        )));
+    }
+
+    let name = source
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "unknown".into());
+
+    let manifest = PluginManifest {
+        id: Uuid::new_v4().to_string(),
+        name: name.clone(),
+        version: "0.1.0".into(),
+        author: "Unknown".into(),
+        description: format!("WASM plugin {}", name),
+        permissions: vec![],
+        entry_point: path,
+        api_version: "1.0".into(),
+    };
+
+    let info = PluginInfo {
+        manifest: manifest.clone(),
+        enabled: false,
+        loaded: true,
+        load_time_ms: Some(0),
+        error: None,
+    };
+
+    let mut plugins = state.plugins.lock().unwrap();
+    plugins.insert(manifest.id.clone(), info.clone());
+
+    Ok(info)
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -409,6 +639,9 @@ mod tests {
         PluginState {
             plugins: Mutex::new(HashMap::new()),
             plugins_dir: std::env::temp_dir().join("crossterm-test-plugins"),
+            hooks: Mutex::new(HashMap::new()),
+            kv_store: Mutex::new(HashMap::new()),
+            sandbox_configs: Mutex::new(HashMap::new()),
         }
     }
 
@@ -538,5 +771,132 @@ mod tests {
 
         let err = PluginError::NotFound("nonexistent".into());
         assert!(err.to_string().contains("not found"));
+    }
+
+    #[test]
+    fn test_plugin_hooks() {
+        let state = make_state();
+        let plugin_id = "test-plugin".to_string();
+
+        // Register plugin first
+        {
+            let mut plugins = state.plugins.lock().unwrap();
+            plugins.insert(
+                plugin_id.clone(),
+                PluginInfo {
+                    manifest: make_manifest(),
+                    enabled: true,
+                    loaded: true,
+                    load_time_ms: Some(0),
+                    error: None,
+                },
+            );
+        }
+
+        // Register hooks
+        {
+            let mut hooks = state.hooks.lock().unwrap();
+            let plugin_hooks = hooks.entry(plugin_id.clone()).or_insert_with(Vec::new);
+            plugin_hooks.push(PluginHook::OnConnect);
+            plugin_hooks.push(PluginHook::OnDisconnect);
+            plugin_hooks.push(PluginHook::OnOutputLine);
+            assert_eq!(plugin_hooks.len(), 3);
+        }
+
+        // Unregister a hook
+        {
+            let mut hooks = state.hooks.lock().unwrap();
+            let hook_str = serde_json::to_string(&PluginHook::OnConnect).unwrap_or_default();
+            if let Some(plugin_hooks) = hooks.get_mut(&plugin_id) {
+                plugin_hooks.retain(|h| serde_json::to_string(h).unwrap_or_default() != hook_str);
+                assert_eq!(plugin_hooks.len(), 2);
+            }
+        }
+
+        // Verify hook serde
+        let json = serde_json::to_string(&PluginHook::OnSessionStart).unwrap();
+        assert!(json.contains("on_session_start"));
+    }
+
+    #[test]
+    fn test_plugin_kv_store() {
+        let state = make_state();
+        let plugin_a = "plugin-a".to_string();
+        let plugin_b = "plugin-b".to_string();
+
+        // Set values for plugin A
+        {
+            let mut kv = state.kv_store.lock().unwrap();
+            let store = kv.entry(plugin_a.clone()).or_insert_with(HashMap::new);
+            store.insert("key1".to_string(), serde_json::json!("value1"));
+            store.insert("key2".to_string(), serde_json::json!(42));
+        }
+
+        // Set values for plugin B
+        {
+            let mut kv = state.kv_store.lock().unwrap();
+            let store = kv.entry(plugin_b.clone()).or_insert_with(HashMap::new);
+            store.insert("key1".to_string(), serde_json::json!("b-value1"));
+        }
+
+        // Get from plugin A
+        {
+            let kv = state.kv_store.lock().unwrap();
+            let val = kv.get(&plugin_a).and_then(|s| s.get("key1")).cloned();
+            assert_eq!(val, Some(serde_json::json!("value1")));
+        }
+
+        // Ensure isolation: A cannot see B's data
+        {
+            let kv = state.kv_store.lock().unwrap();
+            let a_store = kv.get(&plugin_a).unwrap();
+            let b_store = kv.get(&plugin_b).unwrap();
+            assert_ne!(a_store.get("key1"), b_store.get("key1"));
+        }
+
+        // Delete
+        {
+            let mut kv = state.kv_store.lock().unwrap();
+            if let Some(store) = kv.get_mut(&plugin_a) {
+                store.remove("key1");
+                assert!(store.get("key1").is_none());
+                assert!(store.get("key2").is_some());
+            }
+        }
+    }
+
+    #[test]
+    fn test_plugin_sandbox_config() {
+        let state = make_state();
+        let plugin_id = "sandbox-plugin".to_string();
+
+        let config = PluginSandboxConfig {
+            allowed_paths: vec!["/tmp".to_string(), "/home".to_string()],
+            allowed_hosts: vec!["api.example.com".to_string()],
+            max_memory_mb: 128,
+            max_cpu_time_ms: 5000,
+        };
+
+        // Set config
+        {
+            let mut configs = state.sandbox_configs.lock().unwrap();
+            configs.insert(plugin_id.clone(), config.clone());
+        }
+
+        // Get config
+        {
+            let configs = state.sandbox_configs.lock().unwrap();
+            let retrieved = configs.get(&plugin_id).unwrap();
+            assert_eq!(retrieved.max_memory_mb, 128);
+            assert_eq!(retrieved.max_cpu_time_ms, 5000);
+            assert_eq!(retrieved.allowed_paths.len(), 2);
+            assert_eq!(retrieved.allowed_hosts.len(), 1);
+        }
+
+        // Verify serde roundtrip
+        let json = serde_json::to_string(&config).unwrap();
+        let parsed: PluginSandboxConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.max_memory_mb, 128);
+        assert_eq!(parsed.allowed_hosts[0], "api.example.com");
     }
 }

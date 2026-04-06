@@ -801,3 +801,41 @@ export interface AzureBlobEntry {
   last_modified: string;
   blob_type: string;
 }
+
+// --- Plugin API Extensions ---
+
+export type PluginHook = 'on_connect' | 'on_disconnect' | 'on_output_line' | 'on_command' | 'on_session_start' | 'on_session_end';
+
+export interface PluginSandboxConfig {
+  allowed_paths: string[];
+  allowed_hosts: string[];
+  max_memory_mb: number;
+  max_cpu_time_ms: number;
+}
+
+export interface PluginRegistryEntry {
+  id: string;
+  name: string;
+  version: string;
+  author: string;
+  description: string;
+  downloads: number;
+  category: string;
+  installed: boolean;
+  update_available: boolean;
+}
+
+// --- Android Types ---
+
+export interface ForegroundServiceConfig {
+  title: string;
+  body: string;
+  channel_id: string;
+}
+
+export interface NotificationChannel {
+  id: string;
+  name: string;
+  description: string;
+  importance: 'default' | 'high' | 'low' | 'min';
+}

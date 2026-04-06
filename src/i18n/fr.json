@@ -1,0 +1,103 @@
+{
+  "app": {
+    "name": "CrossTerm",
+    "tagline": "Émulateur de terminal et suite d'accès à distance"
+  },
+  "sidebar": {
+    "sessions": "Sessions",
+    "snippets": "Extraits",
+    "tunnels": "Tunnels",
+    "credentials": "Gestionnaire d'identifiants",
+    "collapse": "Réduire le panneau",
+    "expand": "Développer le panneau"
+  },
+  "tabs": {
+    "newTab": "Nouvel onglet",
+    "closeTab": "Fermer l'onglet",
+    "closeOthers": "Fermer les autres",
+    "closeAll": "Tout fermer",
+    "pinTab": "Épingler l'onglet",
+    "unpinTab": "Détacher l'onglet",
+    "duplicateTab": "Dupliquer l'onglet",
+    "splitRight": "Diviser à droite",
+    "splitDown": "Diviser en bas"
+  },
+  "titleBar": {
+    "profile": "Profil",
+    "switchProfile": "Changer de profil",
+    "settings": "Paramètres",
+    "search": "Rechercher..."
+  },
+  "statusBar": {
+    "profile": "Profil",
+    "encoding": "UTF-8",
+    "tunnels": "Tunnels",
+    "noTunnels": "Aucun tunnel actif",
+    "dimensions": "{{cols}} × {{rows}}"
+  },
+  "emptyCanvas": {
+    "title": "Bienvenue dans CrossTerm",
+    "hint": "Appuyez sur {{shortcut}} pour ouvrir une nouvelle session",
+    "shortcut": "⌘T"
+  },
+  "status": {
+    "connected": "Connecté",
+    "disconnected": "Déconnecté",
+    "connecting": "Connexion en cours...",
+    "idle": "Inactif"
+  },
+  "themes": {
+    "title": "Thème",
+    "dark": "Sombre",
+    "light": "Clair",
+    "system": "Système"
+  },
+  "actions": {
+    "save": "Enregistrer",
+    "cancel": "Annuler",
+    "close": "Fermer",
+    "create": "Créer",
+    "delete": "Supprimer",
+    "confirm": "Confirmer",
+    "copy": "Copier",
+    "paste": "Coller",
+    "selectAll": "Tout sélectionner",
+    "undo": "Annuler",
+    "redo": "Rétablir",
+    "refresh": "Actualiser"
+  },
+  "sessions": {
+    "title": "Sessions",
+    "newSession": "Nouvelle session",
+    "favorites": "Favoris",
+    "recent": "Récents",
+    "allSessions": "Toutes les sessions",
+    "search": "Rechercher des sessions...",
+    "connect": "Connecter",
+    "disconnect": "Déconnecter",
+    "edit": "Modifier",
+    "delete": "Supprimer"
+  },
+  "vault": {
+    "title": "Coffre-fort d'identifiants",
+    "locked": "Coffre verrouillé",
+    "unlocked": "Coffre déverrouillé",
+    "unlock": "Déverrouiller",
+    "lock": "Verrouiller"
+  },
+  "terminal": {
+    "starting": "Démarrage du terminal…",
+    "failedCreate": "Échec de la création du terminal",
+    "retry": "Réessayer",
+    "clearTerminal": "Effacer le terminal",
+    "search": "Rechercher"
+  },
+  "settings": {
+    "title": "Paramètres",
+    "general": "Général",
+    "appearance": "Apparence",
+    "terminalCategory": "Terminal",
+    "ssh": "SSH",
+    "security": "Sécurité"
+  }
+}

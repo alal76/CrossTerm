@@ -1,0 +1,17 @@
+app-id: com.crossterm.CrossTerm
+runtime: org.freedesktop.Platform
+runtime-version: '23.08'
+sdk: org.freedesktop.Sdk
+command: crossterm
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=network
+  - --share=ipc
+  - --filesystem=home
+modules:
+  - name: crossterm
+    buildsystem: simple
+    build-commands:
+      - cargo build --release --manifest-path src-tauri/Cargo.toml
+      - install -Dm755 src-tauri/target/release/crossterm /app/bin/crossterm
