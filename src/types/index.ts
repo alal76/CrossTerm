@@ -766,3 +766,38 @@ export interface CertFingerprint {
   subject: string;
   pinned: boolean;
 }
+
+// --- SFTP Preview & Sync Types ---
+
+export interface FilePreview {
+  path: string;
+  content_type: string;
+  data: string;
+  size: number;
+  truncated: boolean;
+}
+
+export interface SyncEntry {
+  path: string;
+  local_modified?: string;
+  remote_modified?: string;
+  sync_action: 'upload' | 'download' | 'skip' | 'conflict';
+  size: number;
+}
+
+export interface SyncResult {
+  uploaded: number;
+  downloaded: number;
+  skipped: number;
+  errors: string[];
+}
+
+// --- Azure Blob Types ---
+
+export interface AzureBlobEntry {
+  name: string;
+  content_length: number;
+  content_type: string;
+  last_modified: string;
+  blob_type: string;
+}

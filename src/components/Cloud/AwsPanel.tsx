@@ -14,6 +14,8 @@ import {
   Square,
   Terminal,
   Wifi,
+  Zap,
+  Container,
 } from "lucide-react";
 import type {
   CloudProviderStatus,
@@ -36,8 +38,20 @@ export default function AwsPanel({ status }: AwsPanelProps) {
   const [objects, setObjects] = useState<S3Object[]>([]);
   const [selectedBucket, setSelectedBucket] = useState<string | null>(null);
   const [costSummary, setCostSummary] = useState<CostSummary | null>(null);
-  const [activeSection, setActiveSection] = useState<"instances" | "storage" | "cost">("instances");
+  const [activeSection, setActiveSection] = useState<"instances" | "storage" | "cost" | "lambda" | "ecs">("instances");
   const [loading, setLoading] = useState(false);
+
+  // Lambda state
+  const [lambdaName, setLambdaName] = useState("");
+  const [lambdaPayload, setLambdaPayload] = useState("{}");
+  const [lambdaResult, setLambdaResult] = useState<string | null>(null);
+
+  // ECS Exec state
+  const [ecsCluster, setEcsCluster] = useState("");
+  const [ecsTask, setEcsTask] = useState("");
+  const [ecsContainer, setEcsContainer] = useState("");
+  const [ecsCommand, setEcsCommand] = useState("/bin/sh");
+  const [ecsResult, setEcsResult] = useState<string | null>(null);
 
   useEffect(() => {
     if (status?.profiles) {
@@ -114,6 +128,42 @@ export default function AwsPanel({ status }: AwsPanelProps) {
     },
     [selectedProfile]
   );
+
+  const handleLambdaInvoke = useCallback(async () => {
+    if (!selectedProfile || !lambdaName) return;
+    setLoading(true);
+    try {
+      const result = await invoke<string>("cloud_aws_lambda_invoke", {
+        profile: selectedProfile,
+        functionName: lambdaName,
+        payload: lambdaPayload,
+      });
+      setLambdaResult(result);
+    } catch (err) {
+      setLambdaResult(`Error: ${String(err)}`);
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedProfile, lambdaName, lambdaPayload]);
+
+  const handleEcsExec = useCallback(async () => {
+    if (!selectedProfile || !ecsCluster || !ecsTask) return;
+    setLoading(true);
+    try {
+      const result = await invoke<string>("cloud_aws_ecs_exec", {
+        profile: selectedProfile,
+        cluster: ecsCluster,
+        task: ecsTask,
+        container: ecsContainer || undefined,
+        command: ecsCommand,
+      });
+      setEcsResult(result);
+    } catch (err) {
+      setEcsResult(`Error: ${String(err)}`);
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedProfile, ecsCluster, ecsTask, ecsContainer, ecsCommand]);
 
   useEffect(() => {
     if (selectedProfile) {
@@ -204,7 +254,7 @@ export default function AwsPanel({ status }: AwsPanelProps) {
 
       {/* Section tabs */}
       <div className="flex items-center gap-1 border-b border-border-subtle">
-        {(["instances", "storage", "cost"] as const).map((section) => (
+        {(["instances", "storage", "cost", "lambda", "ecs"] as const).map((section) => (
           <button
             key={section}
             onClick={() => setActiveSection(section)}
@@ -215,7 +265,7 @@ export default function AwsPanel({ status }: AwsPanelProps) {
                 : "border-transparent text-text-secondary hover:text-text-primary"
             )}
           >
-            {t(`cloud.${section}`)}
+            {section === "lambda" ? t("cloud.lambda") : section === "ecs" ? t("cloud.ecsExec") : t(`cloud.${section}`)}
           </button>
         ))}
       </div>
@@ -427,6 +477,117 @@ export default function AwsPanel({ status }: AwsPanelProps) {
             <p className="py-8 text-center text-xs text-text-disabled">
               {t("cloud.noResources")}
             </p>
+          )}
+        </div>
+      )}
+
+      {/* Lambda invoke */}
+      {!loading && activeSection === "lambda" && (
+        <div className="flex flex-col gap-3">
+          <div>
+            <label className="mb-1 block text-xs text-text-secondary">
+              Function Name
+            </label>
+            <input
+              type="text"
+              value={lambdaName}
+              onChange={(e) => setLambdaName(e.target.value)}
+              placeholder="my-function"
+              className="w-full rounded border border-border-default bg-surface-secondary px-2 py-1.5 text-xs text-text-primary"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-text-secondary">
+              Payload (JSON)
+            </label>
+            <textarea
+              value={lambdaPayload}
+              onChange={(e) => setLambdaPayload(e.target.value)}
+              rows={4}
+              className="w-full rounded border border-border-default bg-surface-secondary px-2 py-1.5 font-mono text-xs text-text-primary"
+            />
+          </div>
+          <button
+            onClick={handleLambdaInvoke}
+            disabled={!lambdaName}
+            className="flex items-center gap-1 self-start rounded bg-accent-primary px-3 py-1.5 text-xs text-text-inverse hover:bg-interactive-hover disabled:opacity-50"
+          >
+            <Zap size={12} />
+            {t("cloud.invoke")}
+          </button>
+          {lambdaResult !== null && (
+            <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded border border-border-subtle bg-surface-sunken p-3 font-mono text-xs text-text-primary">
+              {lambdaResult}
+            </pre>
+          )}
+        </div>
+      )}
+
+      {/* ECS Exec */}
+      {!loading && activeSection === "ecs" && (
+        <div className="flex flex-col gap-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-xs text-text-secondary">
+                Cluster
+              </label>
+              <input
+                type="text"
+                value={ecsCluster}
+                onChange={(e) => setEcsCluster(e.target.value)}
+                placeholder="my-cluster"
+                className="w-full rounded border border-border-default bg-surface-secondary px-2 py-1.5 text-xs text-text-primary"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-text-secondary">
+                Task ID
+              </label>
+              <input
+                type="text"
+                value={ecsTask}
+                onChange={(e) => setEcsTask(e.target.value)}
+                placeholder="task-id"
+                className="w-full rounded border border-border-default bg-surface-secondary px-2 py-1.5 text-xs text-text-primary"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-text-secondary">
+                Container (optional)
+              </label>
+              <input
+                type="text"
+                value={ecsContainer}
+                onChange={(e) => setEcsContainer(e.target.value)}
+                placeholder="container-name"
+                className="w-full rounded border border-border-default bg-surface-secondary px-2 py-1.5 text-xs text-text-primary"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-text-secondary">
+                Command
+              </label>
+              <input
+                type="text"
+                value={ecsCommand}
+                onChange={(e) => setEcsCommand(e.target.value)}
+                placeholder="/bin/sh"
+                className="w-full rounded border border-border-default bg-surface-secondary px-2 py-1.5 text-xs text-text-primary"
+              />
+            </div>
+          </div>
+          <button
+            onClick={handleEcsExec}
+            disabled={!ecsCluster || !ecsTask}
+            className="flex items-center gap-1 self-start rounded bg-accent-primary px-3 py-1.5 text-xs text-text-inverse hover:bg-interactive-hover disabled:opacity-50"
+          >
+            <Container size={12} />
+            {t("cloud.ecsExec")}
+          </button>
+          {ecsResult !== null && (
+            <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded border border-border-subtle bg-surface-sunken p-3 font-mono text-xs text-text-primary">
+              {ecsResult}
+            </pre>
           )}
         </div>
       )}

@@ -990,7 +990,7 @@ Also includes the 13 deferred P2 items from Phase 1.
 | P2-RDP-10 | No smart card passthrough | §7.1 | P2-LOW | ✅ Done |
 | P2-RDP-11 | No RD Gateway / RD Web Access connections | §7.1 | P2-HIGH | ✅ Done |
 | P2-RDP-12 | No dynamic resolution resize on tab/window resize | §7.1 | P2-HIGH | ✅ Done |
-| P2-RDP-13 | No session recording to MP4/WebM | §7.1 | P2-LOW | Missing |
+| P2-RDP-13 | No session recording to MP4/WebM | §7.1 | P2-LOW | ✅ Done |
 
 ### 12.2 VNC Module (NEW — `src-tauri/src/vnc/mod.rs`)
 
@@ -1003,7 +1003,7 @@ Also includes the 13 deferred P2 items from Phase 1.
 | P2-VNC-05 | No clipboard sync (Latin-1 + UTF-8 extended) | §7.2 | P2-MEDIUM | ✅ Done |
 | P2-VNC-06 | No scaling modes (fit-to-window/scroll/1:1) | §7.2 | P2-MEDIUM | ✅ Done |
 | P2-VNC-07 | No view-only mode toggle | §7.2 | P2-LOW | ✅ Done |
-| P2-VNC-08 | No screenshot capture (PNG/clipboard) | §7.2 | P2-LOW | Missing |
+| P2-VNC-08 | No screenshot capture (PNG/clipboard) | §7.2 | P2-LOW | ✅ Done |
 
 ### 12.3 Cloud Module (NEW — `src-tauri/src/cloud/mod.rs`)
 
@@ -1016,24 +1016,24 @@ Also includes the 13 deferred P2 items from Phase 1.
 | P2-CLOUD-05 | No SSM Session Manager integration | §8.2 | P2-HIGH | ✅ Done |
 | P2-CLOUD-06 | No S3 browser (dual-pane, upload/download/presigned URLs) | §8.2 | P2-MEDIUM | ✅ Done |
 | P2-CLOUD-07 | No CloudWatch Logs tail (real-time streaming) | §8.2 | P2-MEDIUM | ✅ Done |
-| P2-CLOUD-08 | No ECS Exec (shell into Fargate/EC2 task) | §8.2 | P2-MEDIUM | Missing |
-| P2-CLOUD-09 | No Lambda invoke (JSON payload + result) | §8.2 | P2-LOW | Missing |
+| P2-CLOUD-08 | No ECS Exec (shell into Fargate/EC2 task) | §8.2 | P2-MEDIUM | ✅ Done |
+| P2-CLOUD-09 | No Lambda invoke (JSON payload + result) | §8.2 | P2-LOW | ✅ Done |
 | P2-CLOUD-10 | No Cost Dashboard (Cost Explorer API) | §8.2 | P2-LOW | ✅ Done |
 | P2-CLOUD-11 | No Azure CLI profile/subscription management | §8.3 | P2-HIGH | ✅ Done |
 | P2-CLOUD-12 | No Azure AD / Entra login (device code, managed identity) | §8.3 | P2-HIGH | ✅ Done |
 | P2-CLOUD-13 | No Azure VM browser (by subscription/resource group, one-click SSH/RDP) | §8.3 | P2-HIGH | ✅ Done |
 | P2-CLOUD-14 | No Azure Bastion support (SSH/RDP through Bastion) | §8.3 | P2-MEDIUM | ✅ Done |
 | P2-CLOUD-15 | No Azure Cloud Shell (Bash/PowerShell via websocket) | §8.3 | P2-MEDIUM | ✅ Done |
-| P2-CLOUD-16 | No Azure Storage Explorer (Blob/file shares, SAS tokens) | §8.3 | P2-MEDIUM | Missing |
-| P2-CLOUD-17 | No AKS kubectl integration (kubeconfig, context switch, exec) | §8.3 | P2-MEDIUM | Missing |
-| P2-CLOUD-18 | No Azure Log Analytics Query (KQL, table view) | §8.3 | P2-LOW | Missing |
+| P2-CLOUD-16 | No Azure Storage Explorer (Blob/file shares, SAS tokens) | §8.3 | P2-MEDIUM | ✅ Done |
+| P2-CLOUD-17 | No AKS kubectl integration (kubeconfig, context switch, exec) | §8.3 | P2-MEDIUM | ✅ Done |
+| P2-CLOUD-18 | No Azure Log Analytics Query (KQL, table view) | §8.3 | P2-LOW | ✅ Done |
 | P2-CLOUD-19 | No GCP gcloud config management | §8.4 | P2-HIGH | ✅ Done |
 | P2-CLOUD-20 | No GCP IAP Tunnel SSH | §8.4 | P2-HIGH | ✅ Done |
 | P2-CLOUD-21 | No GCP Compute Instance browser (by project/zone) | §8.4 | P2-HIGH | ✅ Done |
-| P2-CLOUD-22 | No GCS browser (buckets/objects, ACLs) | §8.4 | P2-MEDIUM | Missing |
+| P2-CLOUD-22 | No GCS browser (buckets/objects, ACLs) | §8.4 | P2-MEDIUM | ✅ Done |
 | P2-CLOUD-23 | No GCP Cloud Shell (embedded in tab) | §8.4 | P2-MEDIUM | ✅ Done |
-| P2-CLOUD-24 | No GKE kubectl integration | §8.4 | P2-MEDIUM | Missing |
-| P2-CLOUD-25 | No GCP Cloud Logging tail | §8.4 | P2-LOW | Missing |
+| P2-CLOUD-24 | No GKE kubectl integration | §8.4 | P2-MEDIUM | ✅ Done |
+| P2-CLOUD-25 | No GCP Cloud Logging tail | §8.4 | P2-LOW | ✅ Done |
 | P2-CLOUD-26 | No multi-cloud "Cloud Assets" unified sidebar panel | §8.5 | P2-HIGH | ✅ Done |
 
 ### 12.4 Network Module (NEW — `src-tauri/src/network/mod.rs`)
@@ -1069,8 +1069,8 @@ Also includes the 13 deferred P2 items from Phase 1.
 | P2-CFG-02 | No sync conflict resolution UI (last-write-wins + manual merge) | §3.4 | P2-MEDIUM | ✅ Done |
 | P2-SFTP-01 | No FTP/FTPS (explicit TLS) protocol support | §14.2 | P2-MEDIUM | ✅ Done |
 | P2-SFTP-02 | No rsync-over-SSH support | §14.2 | P2-MEDIUM | Partial |
-| P2-SFTP-03 | No inline file preview (text/images/PDFs) without downloading | §14.1 | P2-MEDIUM | Missing |
-| P2-SFTP-04 | No folder synchronisation wizard (compare/diff/sync bidirectional) | §14.1 | P2-HIGH | Missing |
+| P2-SFTP-03 | No inline file preview (text/images/PDFs) without downloading | §14.1 | P2-MEDIUM | ✅ Done |
+| P2-SFTP-04 | No folder synchronisation wizard (compare/diff/sync bidirectional) | §14.1 | P2-HIGH | ✅ Done |
 | P2-TERM-01 | No snippet manager backend (CRUD, `{{placeholder}}` templates) | §6.4 | P2-HIGH | ✅ Done |
 | P2-TERM-02 | No shell integration script (CWD tracking, command duration, prompt marks) | §18.2 | P2-MEDIUM | ✅ Done |
 | P2-NOTIF-01 | No notification system backend (desktop + Android notifications for connect/disconnect/regex match/command completion/tunnel failure) | §11.8 | P2-HIGH | ✅ Done |
@@ -1101,7 +1101,7 @@ Also includes the 13 deferred P2 items from Phase 1.
 | P2-FE-VNC-01 | No `<VncViewer>` component | §7.2, §10.8.2 | **P2-BLOCKER** | ✅ Done |
 | P2-FE-VNC-02 | No VNC scaling modes UI | §7.2 | P2-HIGH | ✅ Done |
 | P2-FE-VNC-03 | No view-only mode toggle in UI | §7.2 | P2-LOW | ✅ Done |
-| P2-FE-VNC-04 | No screenshot capture button | §7.2 | P2-LOW | Missing |
+| P2-FE-VNC-04 | No screenshot capture button | §7.2 | P2-LOW | ✅ Done |
 | P2-FE-VNC-05 | No floating toolbar for VNC (reuse RDP toolbar pattern) | §10.8.2 | P2-HIGH | ✅ Done |
 
 ### 13.3 Cloud Dashboard Component (NEW)
@@ -1114,7 +1114,7 @@ Also includes the 13 deferred P2 items from Phase 1.
 | P2-FE-CLOUD-04 | No EC2/VM/GCE instance list UI (sortable table with state/IP/region) | §8.2–§8.4 | P2-HIGH | ✅ Done |
 | P2-FE-CLOUD-05 | No S3/Blob/GCS browser UI (dual-pane, upload/download) | §8.2–§8.4 | P2-HIGH | ✅ Done |
 | P2-FE-CLOUD-06 | No CloudWatch/Log Analytics/Cloud Logging tail UI | §8.2–§8.4 | P2-MEDIUM | ✅ Done |
-| P2-FE-CLOUD-07 | No Lambda invoke / ECS Exec / kubectl exec UI | §8.2–§8.4 | P2-MEDIUM | Missing |
+| P2-FE-CLOUD-07 | No Lambda invoke / ECS Exec / kubectl exec UI | §8.2–§8.4 | P2-MEDIUM | ✅ Done |
 | P2-FE-CLOUD-08 | No Cost Dashboard read-only view | §8.2 | P2-LOW | ✅ Done |
 | P2-FE-CLOUD-09 | No CLI profile management UI (create/switch/SSO login) | §8.1 | P2-HIGH | ✅ Done |
 

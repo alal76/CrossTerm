@@ -414,6 +414,151 @@ pub async fn cloud_azure_log_analytics_query(
     Ok(results)
 }
 
+// ── P2-CLOUD-16: Azure Storage Explorer ─────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AzureBlobEntry {
+    pub name: String,
+    pub content_length: u64,
+    pub content_type: String,
+    pub last_modified: String,
+    pub blob_type: String,
+}
+
+#[tauri::command]
+pub async fn cloud_azure_storage_browse(
+    account: String,
+    container: Option<String>,
+) -> Result<Vec<AzureBlobEntry>, CloudError> {
+    let container_name = container.unwrap_or_else(|| "$root".to_string());
+
+    let output = tokio::process::Command::new("az")
+        .args([
+            "storage",
+            "blob",
+            "list",
+            "--account-name",
+            &account,
+            "--container-name",
+            &container_name,
+            "--output",
+            "json",
+        ])
+        .output()
+        .await
+        .map_err(|e| CloudError::CliExecution(format!("az storage blob list: {e}")))?;
+
+    if !output.status.success() {
+        return Err(CloudError::CliExecution(
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        ));
+    }
+
+    let arr: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout)?;
+
+    let entries = arr
+        .iter()
+        .map(|v| AzureBlobEntry {
+            name: v
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            content_length: v
+                .get("properties")
+                .and_then(|p| p.get("contentLength"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0),
+            content_type: v
+                .get("properties")
+                .and_then(|p| p.get("contentType"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("application/octet-stream")
+                .to_string(),
+            last_modified: v
+                .get("properties")
+                .and_then(|p| p.get("lastModified"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            blob_type: v
+                .get("properties")
+                .and_then(|p| p.get("blobType"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("BlockBlob")
+                .to_string(),
+        })
+        .collect();
+
+    Ok(entries)
+}
+
+// ── P2-CLOUD-17: AKS kubectl integration ───────────────────────────────
+
+#[tauri::command]
+pub async fn cloud_azure_aks_get_credentials(
+    cluster: String,
+    resource_group: String,
+) -> Result<String, CloudError> {
+    let output = tokio::process::Command::new("az")
+        .args([
+            "aks",
+            "get-credentials",
+            "--name",
+            &cluster,
+            "--resource-group",
+            &resource_group,
+            "--overwrite-existing",
+        ])
+        .output()
+        .await
+        .map_err(|e| CloudError::CliExecution(format!("az aks get-credentials: {e}")))?;
+
+    if !output.status.success() {
+        return Err(CloudError::CliExecution(
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        ));
+    }
+
+    Ok(format!("Credentials configured for cluster {}", cluster))
+}
+
+#[tauri::command]
+pub async fn cloud_azure_aks_exec(
+    cluster: String,
+    resource_group: String,
+    namespace: String,
+    pod: String,
+    command: String,
+) -> Result<String, CloudError> {
+    // First ensure credentials are available
+    cloud_azure_aks_get_credentials(cluster, resource_group).await?;
+
+    let output = tokio::process::Command::new("kubectl")
+        .args([
+            "exec",
+            "-it",
+            &pod,
+            "-n",
+            &namespace,
+            "--",
+            "sh",
+            "-c",
+            &command,
+        ])
+        .output()
+        .await
+        .map_err(|e| CloudError::CliExecution(format!("kubectl exec: {e}")))?;
+
+    if !output.status.success() {
+        return Err(CloudError::CliExecution(
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        ));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]

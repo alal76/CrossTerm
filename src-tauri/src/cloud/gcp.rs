@@ -489,6 +489,80 @@ pub async fn cloud_gcp_log_tail(
     Ok(())
 }
 
+// ── P2-CLOUD-24: GKE kubectl integration ────────────────────────────────
+
+#[tauri::command]
+pub async fn cloud_gcp_gke_get_credentials(
+    cluster: String,
+    zone: String,
+    project: Option<String>,
+) -> Result<String, CloudError> {
+    let mut args = vec![
+        "container".to_string(),
+        "clusters".to_string(),
+        "get-credentials".to_string(),
+        cluster.clone(),
+        "--zone".to_string(),
+        zone,
+    ];
+
+    if let Some(p) = &project {
+        args.push("--project".to_string());
+        args.push(p.clone());
+    }
+
+    let output = tokio::process::Command::new("gcloud")
+        .args(&args)
+        .output()
+        .await
+        .map_err(|e| CloudError::CliExecution(format!("gcloud container clusters get-credentials: {e}")))?;
+
+    if !output.status.success() {
+        return Err(CloudError::CliExecution(
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        ));
+    }
+
+    Ok(format!("Credentials configured for GKE cluster {}", cluster))
+}
+
+#[tauri::command]
+pub async fn cloud_gcp_gke_exec(
+    cluster: String,
+    zone: String,
+    namespace: String,
+    pod: String,
+    command: String,
+    project: Option<String>,
+) -> Result<String, CloudError> {
+    // Ensure credentials are available
+    cloud_gcp_gke_get_credentials(cluster, zone, project).await?;
+
+    let output = tokio::process::Command::new("kubectl")
+        .args([
+            "exec",
+            "-it",
+            &pod,
+            "-n",
+            &namespace,
+            "--",
+            "sh",
+            "-c",
+            &command,
+        ])
+        .output()
+        .await
+        .map_err(|e| CloudError::CliExecution(format!("kubectl exec: {e}")))?;
+
+    if !output.status.success() {
+        return Err(CloudError::CliExecution(
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        ));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]

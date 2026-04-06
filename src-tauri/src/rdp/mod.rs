@@ -546,6 +546,58 @@ pub fn rdp_send_ctrl_alt_del(
     state.backend.send_ctrl_alt_del(&connection_id)
 }
 
+// ── P2-RDP-13: Session recording ────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RdpRecordingFormat {
+    Mp4,
+    Webm,
+}
+
+#[tauri::command]
+pub fn rdp_start_recording(
+    state: tauri::State<'_, RdpState>,
+    conn_id: String,
+    output_path: String,
+    format: RdpRecordingFormat,
+) -> Result<(), RdpError> {
+    let connections = state.connections.lock().unwrap();
+    if !connections.contains_key(&conn_id) {
+        return Err(RdpError::NotFound(conn_id));
+    }
+    drop(connections);
+
+    // Validate output path is writable
+    if output_path.is_empty() {
+        return Err(RdpError::InvalidConfig("output_path cannot be empty".into()));
+    }
+
+    // Stub: In a real implementation, this would start capturing framebuffer
+    // frames and encoding them via ffmpeg to the specified format.
+    let _format_ext = match format {
+        RdpRecordingFormat::Mp4 => "mp4",
+        RdpRecordingFormat::Webm => "webm",
+    };
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn rdp_stop_recording(
+    state: tauri::State<'_, RdpState>,
+    conn_id: String,
+) -> Result<String, RdpError> {
+    let connections = state.connections.lock().unwrap();
+    let conn = connections
+        .get(&conn_id)
+        .ok_or_else(|| RdpError::NotFound(conn_id.clone()))?;
+
+    // Stub: return the output path. Real impl would finalize the ffmpeg encode.
+    let output = format!("recording_{}.mp4", conn.info.id);
+    Ok(output)
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]

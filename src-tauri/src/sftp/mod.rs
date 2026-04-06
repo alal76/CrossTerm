@@ -79,6 +79,45 @@ pub struct SftpSessionInfo {
     pub created_at: String,
 }
 
+// ── P2-SFTP-03: File Preview Types ──────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FilePreview {
+    pub path: String,
+    pub content_type: String,
+    pub data: String,
+    pub size: u64,
+    pub truncated: bool,
+}
+
+// ── P2-SFTP-04: Folder Sync Types ──────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncAction {
+    Upload,
+    Download,
+    Skip,
+    Conflict,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncEntry {
+    pub path: String,
+    pub local_modified: Option<String>,
+    pub remote_modified: Option<String>,
+    pub sync_action: SyncAction,
+    pub size: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncResult {
+    pub uploaded: u32,
+    pub downloaded: u32,
+    pub skipped: u32,
+    pub errors: Vec<String>,
+}
+
 #[derive(Clone, Serialize)]
 struct TransferProgressEvent {
     transfer_id: String,
@@ -827,6 +866,260 @@ pub async fn sftp_download_throttled(
     );
 
     Ok(transfer_id)
+}
+
+// ── P2-SFTP-03: Inline file preview ─────────────────────────────────────
+
+fn detect_content_type(path: &str) -> &'static str {
+    let ext = path
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "txt" | "log" | "md" | "csv" | "conf" | "cfg" | "ini" => "text/plain",
+        "json" => "application/json",
+        "yaml" | "yml" => "text/yaml",
+        "xml" => "text/xml",
+        "html" | "htm" => "text/html",
+        "css" => "text/css",
+        "js" | "ts" => "text/javascript",
+        "py" | "rs" | "go" | "rb" | "sh" | "bash" | "zsh" => "text/plain",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "svg" => "image/svg+xml",
+        "webp" => "image/webp",
+        "pdf" => "application/pdf",
+        _ => "application/octet-stream",
+    }
+}
+
+#[tauri::command]
+pub async fn sftp_preview(
+    state: tauri::State<'_, SftpState>,
+    session_id: String,
+    path: String,
+    max_bytes: Option<u64>,
+) -> Result<FilePreview, SftpError> {
+    let limit = max_bytes.unwrap_or(1_048_576); // 1MB default
+
+    let sessions = state.sessions.read().await;
+    let session = sessions
+        .get(&session_id)
+        .ok_or_else(|| SftpError::NotFound(session_id.clone()))?
+        .clone();
+
+    let session_locked = session.lock().await;
+
+    // Get file size first
+    let attrs = session_locked.sftp.metadata(&path).await?;
+    let file_size = attrs.size.unwrap_or(0);
+
+    // Read file data (up to limit)
+    let raw_data = session_locked.sftp.read(&path).await?;
+    let truncated = raw_data.len() as u64 > limit;
+    let data_slice = if truncated {
+        &raw_data[..limit as usize]
+    } else {
+        &raw_data[..]
+    };
+
+    let content_type = detect_content_type(&path);
+    let data = if content_type.starts_with("text/")
+        || content_type == "application/json"
+        || content_type == "text/yaml"
+    {
+        // Return as UTF-8 text
+        String::from_utf8_lossy(data_slice).to_string()
+    } else if content_type.starts_with("image/") || content_type == "application/pdf" {
+        // Return as base64
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD.encode(data_slice)
+    } else {
+        // Hex preview for binary files
+        data_slice
+            .iter()
+            .take(4096) // Max 4KB hex preview
+            .map(|b| format!("{:02x}", b))
+            .collect::<Vec<_>>()
+            .chunks(32)
+            .map(|chunk| chunk.join(" "))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    Ok(FilePreview {
+        path,
+        content_type: content_type.to_string(),
+        data,
+        size: file_size,
+        truncated,
+    })
+}
+
+// ── P2-SFTP-04: Folder sync wizard ─────────────────────────────────────
+
+#[tauri::command]
+pub async fn sftp_sync_compare(
+    state: tauri::State<'_, SftpState>,
+    session_id: String,
+    local_dir: String,
+    remote_dir: String,
+) -> Result<Vec<SyncEntry>, SftpError> {
+    let sessions = state.sessions.read().await;
+    let session = sessions
+        .get(&session_id)
+        .ok_or_else(|| SftpError::NotFound(session_id.clone()))?
+        .clone();
+
+    let session_locked = session.lock().await;
+
+    // List remote files
+    let remote_entries = session_locked.sftp.read_dir(&remote_dir).await?;
+    let mut remote_map: HashMap<String, (u64, Option<String>)> = HashMap::new();
+    for entry in remote_entries {
+        let name: String = entry.file_name();
+        if name == "." || name == ".." || entry.metadata().is_dir() {
+            continue;
+        }
+        let attrs = entry.metadata();
+        let size = attrs.size.unwrap_or(0);
+        let modified = timestamp_to_iso(attrs.mtime);
+        remote_map.insert(name, (size, modified));
+    }
+    drop(session_locked);
+
+    // List local files
+    let mut local_map: HashMap<String, (u64, Option<String>)> = HashMap::new();
+    if let Ok(mut dir) = tokio::fs::read_dir(&local_dir).await {
+        while let Ok(Some(entry)) = dir.next_entry().await {
+            if let Ok(metadata) = entry.metadata().await {
+                if metadata.is_file() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    let size = metadata.len();
+                    let modified = metadata
+                        .modified()
+                        .ok()
+                        .and_then(|t| {
+                            chrono::DateTime::<chrono::Utc>::from(t)
+                                .to_rfc3339()
+                                .into()
+                        });
+                    local_map.insert(name, (size, modified));
+                }
+            }
+        }
+    }
+
+    let mut entries = Vec::new();
+
+    // Files in both local and remote
+    for (name, (local_size, local_mod)) in &local_map {
+        if let Some((remote_size, remote_mod)) = remote_map.get(name) {
+            let action = if local_size != remote_size {
+                // Different sizes → conflict
+                SyncAction::Conflict
+            } else {
+                SyncAction::Skip
+            };
+            entries.push(SyncEntry {
+                path: name.clone(),
+                local_modified: local_mod.clone(),
+                remote_modified: remote_mod.clone(),
+                sync_action: action,
+                size: *local_size,
+            });
+        } else {
+            // Local only → upload
+            entries.push(SyncEntry {
+                path: name.clone(),
+                local_modified: local_mod.clone(),
+                remote_modified: None,
+                sync_action: SyncAction::Upload,
+                size: *local_size,
+            });
+        }
+    }
+
+    // Files only in remote → download
+    for (name, (remote_size, remote_mod)) in &remote_map {
+        if !local_map.contains_key(name) {
+            entries.push(SyncEntry {
+                path: name.clone(),
+                local_modified: None,
+                remote_modified: remote_mod.clone(),
+                sync_action: SyncAction::Download,
+                size: *remote_size,
+            });
+        }
+    }
+
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(entries)
+}
+
+#[tauri::command]
+pub async fn sftp_sync_execute(
+    state: tauri::State<'_, SftpState>,
+    session_id: String,
+    entries: Vec<SyncEntry>,
+    local_dir: String,
+    remote_dir: String,
+) -> Result<SyncResult, SftpError> {
+    let sessions = state.sessions.read().await;
+    let session = sessions
+        .get(&session_id)
+        .ok_or_else(|| SftpError::NotFound(session_id.clone()))?
+        .clone();
+
+    let mut uploaded = 0u32;
+    let mut downloaded = 0u32;
+    let mut skipped = 0u32;
+    let mut errors = Vec::new();
+
+    for entry in &entries {
+        let local_path = format!("{}/{}", local_dir, entry.path);
+        let remote_path = format!("{}/{}", remote_dir, entry.path);
+
+        match entry.sync_action {
+            SyncAction::Upload => {
+                match tokio::fs::read(&local_path).await {
+                    Ok(data) => {
+                        let session_locked = session.lock().await;
+                        match session_locked.sftp.write(&remote_path, &data).await {
+                            Ok(()) => uploaded += 1,
+                            Err(e) => errors.push(format!("Upload {}: {}", entry.path, e)),
+                        }
+                    }
+                    Err(e) => errors.push(format!("Read {}: {}", local_path, e)),
+                }
+            }
+            SyncAction::Download => {
+                let session_locked = session.lock().await;
+                match session_locked.sftp.read(&remote_path).await {
+                    Ok(data) => {
+                        drop(session_locked);
+                        match tokio::fs::write(&local_path, &data).await {
+                            Ok(()) => downloaded += 1,
+                            Err(e) => errors.push(format!("Write {}: {}", local_path, e)),
+                        }
+                    }
+                    Err(e) => errors.push(format!("Download {}: {}", entry.path, e)),
+                }
+            }
+            SyncAction::Skip | SyncAction::Conflict => {
+                skipped += 1;
+            }
+        }
+    }
+
+    Ok(SyncResult {
+        uploaded,
+        downloaded,
+        skipped,
+        errors,
+    })
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────

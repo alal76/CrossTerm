@@ -738,5 +738,40 @@
     "success": "Success",
     "export": "Export Log",
     "noEntries": "No audit entries yet."
+  },
+  "sftp": {
+    "preview": "Preview",
+    "syncWizard": "Folder Sync",
+    "compare": "Compare",
+    "syncExecute": "Sync",
+    "upload": "Upload",
+    "download": "Download",
+    "skip": "Skip",
+    "conflict": "Conflict",
+    "selectLocalDir": "Select local directory",
+    "selectRemoteDir": "Select remote directory",
+    "syncActions": "Sync Actions",
+    "executing": "Syncing...",
+    "syncComplete": "Sync Complete",
+    "noChanges": "No changes detected",
+    "previewFile": "Preview File",
+    "closePreview": "Close Preview",
+    "hexView": "Hex View",
+    "downloadFile": "Download"
+  },
+  "cloud": {
+    "kubectl": "Kubernetes",
+    "pods": "Pods",
+    "exec": "Exec",
+    "namespace": "Namespace",
+    "cluster": "Cluster",
+    "lambda": "Lambda",
+    "invoke": "Invoke",
+    "ecsExec": "ECS Exec",
+    "zone": "Zone",
+    "project": "Project",
+    "pod": "Pod",
+    "command": "Command",
+    "noPods": "No pods found"
   }
 }
