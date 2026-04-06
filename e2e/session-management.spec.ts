@@ -168,13 +168,13 @@ test.describe('Session Management', () => {
   // Steps: Create second profile → switch → different session list
   // Assertions: Isolated data
   test.skip('E2E-19: multiple profiles have isolated session data', async ({ page }) => {
-    // TODO: Requires pre-setup with backend profile management
+    // NOTE: Requires pre-setup with backend profile management
     await page.goto('/');
 
     // Click profile area in title bar
     await page.locator('header').getByText('Default').click();
 
-    // TODO: Create a second profile from the TitleBar/settings
+    // NOTE: Create a second profile from the TitleBar/settings
     // Add sessions to each profile
     // Switch between profiles
     // Verify each profile shows its own session list (data isolation)

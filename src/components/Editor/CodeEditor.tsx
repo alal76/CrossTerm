@@ -219,7 +219,7 @@ export default function CodeEditor() {
               checked={useRegex}
               onChange={(e) => setUseRegex(e.target.checked)}
               className="w-3 h-3"
-            />
+            />{' '}
             Regex
           </label>
           <Replace size={14} className="text-text-secondary" />

@@ -115,21 +115,20 @@ export default function LocaleSelector() {
       </div>
 
       {/* Completeness info */}
-      {selected && selected.completeness < 1.0 && (
+      {selected && selected.completeness < 1 && (
         <div className="text-xs text-text-secondary">
           {t("l10n.completeness")}: {Math.round(selected.completeness * 100)}%
         </div>
       )}
 
       {/* Contribute link */}
-      <a
-        href="#"
+      <button
+        type="button"
         className="flex items-center gap-1 text-xs text-text-link hover:underline"
-        onClick={(e) => e.preventDefault()}
       >
         <ExternalLink size={11} />
         {t("l10n.contribute")}
-      </a>
+      </button>
     </div>
   );
 }

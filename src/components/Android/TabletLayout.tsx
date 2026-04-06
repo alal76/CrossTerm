@@ -2,10 +2,10 @@ import { useState, useEffect } from 'react';
 import clsx from 'clsx';
 
 interface TabletLayoutProps {
-  sidebar?: React.ReactNode;
-  main: React.ReactNode;
-  secondaryPanel?: React.ReactNode;
-  minWidthDp?: number;
+  readonly sidebar?: React.ReactNode;
+  readonly main: React.ReactNode;
+  readonly secondaryPanel?: React.ReactNode;
+  readonly minWidthDp?: number;
 }
 
 export default function TabletLayout({

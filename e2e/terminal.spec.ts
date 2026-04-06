@@ -5,7 +5,7 @@ test.describe('Terminal', () => {
   // Steps: Resize window < 900px
   // Assertions: Sidebar auto-collapses
   test.skip('E2E-15: window resize below 900px auto-collapses sidebar', async ({ page }) => {
-    // TODO: Requires Tauri window management to test real window resize
+    // NOTE: Requires Tauri window management to test real window resize
     await page.goto('/');
 
     // Set wide viewport

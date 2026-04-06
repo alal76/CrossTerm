@@ -279,7 +279,7 @@ export default function FolderSyncWizard({
           {result.errors.length > 0 && (
             <div className="mt-2 w-full rounded border border-status-disconnected/30 bg-status-disconnected/10 p-2 text-xs text-status-disconnected">
               {result.errors.map((err, i) => (
-                <p key={i}>{err}</p>
+                <p key={`err-${i}-${err.slice(0, 20)}`}>{err}</p>
               ))}
             </div>
           )}

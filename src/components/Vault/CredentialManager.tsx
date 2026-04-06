@@ -436,29 +436,36 @@ export default function CredentialManager() {
 
       {/* List */}
       <div className="flex-1 overflow-y-auto">
-        {loading && credentials.length === 0 ? (
-          <div className="flex items-center justify-center h-32">
-            <Loader2 size={20} className="animate-spin text-accent-primary" />
-          </div>
-        ) : credentials.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center px-6">
-            <div className="w-14 h-14 rounded-2xl bg-surface-elevated flex items-center justify-center mb-3">
-              <Key size={24} className="text-text-disabled" />
-            </div>
-            <p className="text-sm text-text-primary mb-1">{t("vault.noCredentials")}</p>
-            <p className="text-xs text-text-secondary mb-4">
-              {t("vault.noCredentialsHint")}
-            </p>
-            <button
-              onClick={() => setFormOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-interactive-default hover:bg-interactive-hover text-text-primary transition-colors duration-[var(--duration-short)]"
-            >
-              <Plus size={13} />
-              {t("vault.addCredential")}
-            </button>
-          </div>
-        ) : (
-          <div className="divide-y divide-border-subtle">
+        {(() => {
+          if (loading && credentials.length === 0) {
+            return (
+              <div className="flex items-center justify-center h-32">
+                <Loader2 size={20} className="animate-spin text-accent-primary" />
+              </div>
+            );
+          }
+          if (credentials.length === 0) {
+            return (
+              <div className="flex flex-col items-center justify-center h-full text-center px-6">
+                <div className="w-14 h-14 rounded-2xl bg-surface-elevated flex items-center justify-center mb-3">
+                  <Key size={24} className="text-text-disabled" />
+                </div>
+                <p className="text-sm text-text-primary mb-1">{t("vault.noCredentials")}</p>
+                <p className="text-xs text-text-secondary mb-4">
+                  {t("vault.noCredentialsHint")}
+                </p>
+                <button
+                  onClick={() => setFormOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-interactive-default hover:bg-interactive-hover text-text-primary transition-colors duration-[var(--duration-short)]"
+                >
+                  <Plus size={13} />
+                  {t("vault.addCredential")}
+                </button>
+              </div>
+            );
+          }
+          return (
+            <div className="divide-y divide-border-subtle">
             {credentials.map((cred) => (
               <div
                 key={cred.id}
@@ -493,7 +500,8 @@ export default function CredentialManager() {
               </div>
             ))}
           </div>
-        )}
+        );
+        })()}
       </div>
 
       {/* Modal */}

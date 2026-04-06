@@ -22,9 +22,9 @@ const DEFAULT_KEYS: ExtraKey[] = [
 ];
 
 interface ExtraKeysBarProps {
-  keys?: ExtraKey[];
-  onKeyPress?: (value: string) => void;
-  className?: string;
+  readonly keys?: ExtraKey[];
+  readonly onKeyPress?: (value: string) => void;
+  readonly className?: string;
 }
 
 export default function ExtraKeysBar({

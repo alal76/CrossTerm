@@ -145,8 +145,9 @@ export default function SecuritySettings() {
         </label>
         <div className="grid grid-cols-3 gap-2">
           <div>
-            <label className="text-xs text-text-secondary">Max Attempts</label>
+            <label htmlFor="security-max-attempts" className="text-xs text-text-secondary">Max Attempts</label>
             <input
+              id="security-max-attempts"
               type="number"
               min={1}
               value={config.rate_limit.max_attempts}
@@ -163,8 +164,9 @@ export default function SecuritySettings() {
             />
           </div>
           <div>
-            <label className="text-xs text-text-secondary">Window (s)</label>
+            <label htmlFor="security-window" className="text-xs text-text-secondary">Window (s)</label>
             <input
+              id="security-window"
               type="number"
               min={1}
               value={config.rate_limit.window_secs}
@@ -181,8 +183,9 @@ export default function SecuritySettings() {
             />
           </div>
           <div>
-            <label className="text-xs text-text-secondary">Lockout (s)</label>
+            <label htmlFor="security-lockout" className="text-xs text-text-secondary">Lockout (s)</label>
             <input
+              id="security-lockout"
               type="number"
               min={1}
               value={config.rate_limit.lockout_secs}

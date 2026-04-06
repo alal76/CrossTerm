@@ -160,13 +160,11 @@ export default function QuickConnect({ onConnect }: Readonly<QuickConnectProps>)
   const parsed = parseInput(input);
 
   return (
-    <div className="fixed inset-0 z-[9000] flex justify-center pt-[15vh]" onClick={close} onKeyDown={(e) => e.key === "Escape" && close()} aria-hidden="true">
-      <div className="absolute inset-0 bg-surface-overlay/60 backdrop-blur-sm" />
+    <div className="fixed inset-0 z-[9000] flex justify-center pt-[15vh]">
+      <div className="absolute inset-0 bg-surface-overlay/60 backdrop-blur-sm" onClick={close} aria-hidden="true" />
       <dialog
         open
         className="relative w-full max-w-md bg-surface-elevated rounded-xl border border-border-default shadow-[var(--shadow-3)] overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.key === "Escape" && close()}
         style={{ animation: "paletteIn var(--duration-medium) var(--ease-decelerate)" }}
       >
         <div className="flex items-center gap-2.5 px-4 py-3 border-b border-border-subtle">

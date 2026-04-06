@@ -4,12 +4,12 @@ import clsx from 'clsx';
 import type { Session } from '@/types';
 
 interface SessionDrawerProps {
-  open: boolean;
-  onClose: () => void;
-  favorites?: Session[];
-  recent?: Session[];
-  sessions?: Session[];
-  onSessionSelect?: (session: Session) => void;
+  readonly open: boolean;
+  readonly onClose: () => void;
+  readonly favorites?: Session[];
+  readonly recent?: Session[];
+  readonly sessions?: Session[];
+  readonly onSessionSelect?: (session: Session) => void;
 }
 
 export default function SessionDrawer({
@@ -27,11 +27,9 @@ export default function SessionDrawer({
       {/* Backdrop */}
       {open && (
         <div
-          role="button"
-          tabIndex={0}
+          aria-hidden="true"
           className="fixed inset-0 bg-black/40 z-40"
           onClick={onClose}
-          onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
         />
       )}
 

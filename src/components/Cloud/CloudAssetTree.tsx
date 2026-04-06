@@ -70,11 +70,10 @@ function TreeNode({
         }}
       >
         {hasChildren ? (
-          expanded ? (
-            <ChevronDown size={12} className="shrink-0 text-text-secondary" />
-          ) : (
-            <ChevronRight size={12} className="shrink-0 text-text-secondary" />
-          )
+          (() => {
+            const ExpandIcon = expanded ? ChevronDown : ChevronRight;
+            return <ExpandIcon size={12} className="shrink-0 text-text-secondary" />;
+          })()
         ) : (
           <span className="w-3 shrink-0" />
         )}
@@ -149,27 +148,35 @@ export default function CloudAssetTree() {
         </button>
       </div>
 
-      {loading ? (
-        <div className="flex justify-center py-8">
-          <Loader2 size={20} className="animate-spin text-text-disabled" />
-        </div>
-      ) : tree.length > 0 ? (
-        <div className="rounded border border-border-default bg-surface-secondary p-1">
-          {tree.map((node) => (
-            <TreeNode
-              key={node.id}
-              node={node}
-              depth={0}
-              onConnect={handleConnect}
-            />
-          ))}
-        </div>
-      ) : (
-        <div className="flex flex-col items-center justify-center py-16 text-text-disabled">
-          <Cloud size={32} />
-          <p className="mt-2 text-sm">{t("cloud.noResources")}</p>
-        </div>
-      )}
+      {(() => {
+        if (loading) {
+          return (
+            <div className="flex justify-center py-8">
+              <Loader2 size={20} className="animate-spin text-text-disabled" />
+            </div>
+          );
+        }
+        if (tree.length > 0) {
+          return (
+            <div className="rounded border border-border-default bg-surface-secondary p-1">
+              {tree.map((node) => (
+                <TreeNode
+                  key={node.id}
+                  node={node}
+                  depth={0}
+                  onConnect={handleConnect}
+                />
+              ))}
+            </div>
+          );
+        }
+        return (
+          <div className="flex flex-col items-center justify-center py-16 text-text-disabled">
+            <Cloud size={32} />
+            <p className="mt-2 text-sm">{t("cloud.noResources")}</p>
+          </div>
+        );
+      })()}
     </div>
   );
 }

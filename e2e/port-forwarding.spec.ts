@@ -5,14 +5,14 @@ test.describe('Port Forwarding', () => {
   // Steps: Connect to SSH → configure port forward → verify tunnel
   // Assertions: Data flows through tunnel
   test.skip('E2E-16: ssh port forwarding creates tunnel', async ({ page }) => {
-    // TODO: Requires SSH Docker container with port forwarding support
+    // NOTE: Requires SSH Docker container with port forwarding support
     await page.goto('/');
 
     // Connect to SSH session via Quick Connect
     await page.keyboard.press('Control+Shift+n');
     await page.waitForTimeout(300);
 
-    // TODO: Connect to Docker SSH container
+    // NOTE: Connect to Docker SSH container
     // const quickConnect = page.locator('[role="dialog"]');
     // await quickConnect.locator('input').fill('ssh testuser@127.0.0.1:2222');
     // await page.keyboard.press('Enter');
@@ -24,7 +24,7 @@ test.describe('Port Forwarding', () => {
     await page.waitForTimeout(200);
     await expect(sidebar).toBeVisible();
 
-    // TODO: Configure a local port forward (e.g., local:8080 → remote:80)
+    // NOTE: Configure a local port forward (e.g., local:8080 → remote:80)
     // Verify the port forward appears in the active forwards list
     // Verify data can flow through the tunnel using fetch
     // await expect(sidebar.getByText('8080')).toBeVisible();

@@ -6,8 +6,8 @@ import clsx from 'clsx';
 type MouseMode = 'touchpad' | 'touch' | 'direct';
 
 interface AndroidRdpToolbarProps {
-  onModeChange?: (mode: MouseMode) => void;
-  className?: string;
+  readonly onModeChange?: (mode: MouseMode) => void;
+  readonly className?: string;
 }
 
 export default function AndroidRdpToolbar({ onModeChange, className }: Readonly<AndroidRdpToolbarProps>) {

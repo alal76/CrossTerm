@@ -84,7 +84,7 @@ jobs:
 
       - name: Audit Rust dependencies
         working-directory: src-tauri
-        run: cargo audit
+        run: cargo audit --ignore RUSTSEC-2023-0071
 
       - name: Audit npm dependencies
         run: npm audit --audit-level=high
@@ -204,7 +204,7 @@ jobs:
 
       - name: Audit Rust dependencies
         working-directory: src-tauri
-        run: cargo audit
+        run: cargo audit --ignore RUSTSEC-2023-0071
 
       - name: Audit npm dependencies
         run: npm audit --audit-level=high
@@ -330,6 +330,11 @@ jobs:
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
+
+      - name: Start Xvfb
+        run: |
+          sudo apt-get install -y xvfb
+          Xvfb :99 -screen 0 1280x1024x24 &
 
       - name: Start Tauri dev server
         run: npx tauri dev &

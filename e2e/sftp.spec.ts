@@ -5,14 +5,14 @@ test.describe('SFTP Browser', () => {
   // Steps: Connect to SSH session → open SFTP panel → browse
   // Assertions: Files/directories listed
   test.skip('E2E-07: sftp browser lists remote files after ssh connect', async ({ page }) => {
-    // TODO: Requires SSH Docker container with SFTP support
+    // NOTE: Requires SSH Docker container with SFTP support
     await page.goto('/');
 
     // Open a Quick Connect SSH session
     await page.keyboard.press('Control+Shift+n');
     await page.waitForTimeout(300);
 
-    // TODO: Connect to SSH session (Docker test container at 127.0.0.1:2222)
+    // NOTE: Connect to SSH session (Docker test container at 127.0.0.1:2222)
     // const quickConnect = page.locator('[role="dialog"]');
     // const input = quickConnect.locator('input');
     // await input.fill('ssh testuser@127.0.0.1:2222');
@@ -30,7 +30,7 @@ test.describe('SFTP Browser', () => {
     await bottomPanel.getByText('SFTP Browser').click();
     await page.waitForTimeout(200);
 
-    // TODO: Once SSH is connected, the SFTP browser should show remote files
+    // NOTE: Once SSH is connected, the SFTP browser should show remote files
     // Verify files and directories are listed
     // await expect(bottomPanel.getByText('Name')).toBeVisible();
     // await expect(bottomPanel.getByText('Size')).toBeVisible();

@@ -254,20 +254,27 @@ export default function AwsPanel({ status }: AwsPanelProps) {
 
       {/* Section tabs */}
       <div className="flex items-center gap-1 border-b border-border-subtle">
-        {(["instances", "storage", "cost", "lambda", "ecs"] as const).map((section) => (
-          <button
-            key={section}
-            onClick={() => setActiveSection(section)}
-            className={clsx(
-              "border-b-2 px-3 py-1.5 text-xs font-medium transition-colors",
-              activeSection === section
-                ? "border-accent-primary text-accent-primary"
-                : "border-transparent text-text-secondary hover:text-text-primary"
-            )}
-          >
-            {section === "lambda" ? t("cloud.lambda") : section === "ecs" ? t("cloud.ecsExec") : t(`cloud.${section}`)}
-          </button>
-        ))}
+        {(["instances", "storage", "cost", "lambda", "ecs"] as const).map((section) => {
+          const getSectionLabel = (s: string): string => {
+            if (s === "lambda") return t("cloud.lambda");
+            if (s === "ecs") return t("cloud.ecsExec");
+            return t(`cloud.${s}`);
+          };
+          return (
+            <button
+              key={section}
+              onClick={() => setActiveSection(section)}
+              className={clsx(
+                "border-b-2 px-3 py-1.5 text-xs font-medium transition-colors",
+                activeSection === section
+                  ? "border-accent-primary text-accent-primary"
+                  : "border-transparent text-text-secondary hover:text-text-primary"
+              )}
+            >
+              {getSectionLabel(section)}
+            </button>
+          );
+        })}
       </div>
 
       {loading && (
@@ -485,10 +492,11 @@ export default function AwsPanel({ status }: AwsPanelProps) {
       {!loading && activeSection === "lambda" && (
         <div className="flex flex-col gap-3">
           <div>
-            <label className="mb-1 block text-xs text-text-secondary">
+            <label htmlFor="aws-lambda-func" className="mb-1 block text-xs text-text-secondary">
               Function Name
             </label>
             <input
+              id="aws-lambda-func"
               type="text"
               value={lambdaName}
               onChange={(e) => setLambdaName(e.target.value)}
@@ -497,10 +505,11 @@ export default function AwsPanel({ status }: AwsPanelProps) {
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs text-text-secondary">
+            <label htmlFor="aws-lambda-payload" className="mb-1 block text-xs text-text-secondary">
               Payload (JSON)
             </label>
             <textarea
+              id="aws-lambda-payload"
               value={lambdaPayload}
               onChange={(e) => setLambdaPayload(e.target.value)}
               rows={4}
@@ -528,10 +537,11 @@ export default function AwsPanel({ status }: AwsPanelProps) {
         <div className="flex flex-col gap-3">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="mb-1 block text-xs text-text-secondary">
+              <label htmlFor="aws-ecs-cluster" className="mb-1 block text-xs text-text-secondary">
                 Cluster
               </label>
               <input
+                id="aws-ecs-cluster"
                 type="text"
                 value={ecsCluster}
                 onChange={(e) => setEcsCluster(e.target.value)}
@@ -540,10 +550,11 @@ export default function AwsPanel({ status }: AwsPanelProps) {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs text-text-secondary">
+              <label htmlFor="aws-ecs-task" className="mb-1 block text-xs text-text-secondary">
                 Task ID
               </label>
               <input
+                id="aws-ecs-task"
                 type="text"
                 value={ecsTask}
                 onChange={(e) => setEcsTask(e.target.value)}
@@ -552,10 +563,11 @@ export default function AwsPanel({ status }: AwsPanelProps) {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs text-text-secondary">
+              <label htmlFor="aws-ecs-container" className="mb-1 block text-xs text-text-secondary">
                 Container (optional)
               </label>
               <input
+                id="aws-ecs-container"
                 type="text"
                 value={ecsContainer}
                 onChange={(e) => setEcsContainer(e.target.value)}
@@ -564,10 +576,11 @@ export default function AwsPanel({ status }: AwsPanelProps) {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs text-text-secondary">
+              <label htmlFor="aws-ecs-command" className="mb-1 block text-xs text-text-secondary">
                 Command
               </label>
               <input
+                id="aws-ecs-command"
                 type="text"
                 value={ecsCommand}
                 onChange={(e) => setEcsCommand(e.target.value)}

@@ -155,7 +155,7 @@ export default function FilePreview({
                 )}
               >
                 {preview.data.split("\n").map((line, i) => (
-                  <div key={i} className="flex">
+                  <div key={`${i}-${line.slice(0, 32)}`} className="flex">
                     <span className="mr-3 inline-block w-8 select-none text-right text-text-disabled">
                       {i + 1}
                     </span>

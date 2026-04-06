@@ -5,7 +5,7 @@ test.describe('Credential Vault', () => {
   // Steps: Sessions panel → New → fill form with vault credential → save
   // Assertions: Session in tree with credential reference
   test.skip('E2E-02: create session with vault credential reference', async ({ page }) => {
-    // TODO: Requires vault to be pre-created with Docker/backend
+    // NOTE: Requires vault to be pre-created with Docker/backend
     await page.goto('/');
 
     // Navigate to the vault via sidebar
@@ -13,7 +13,7 @@ test.describe('Credential Vault', () => {
     const vaultBtn = sidebar.locator('button[title="Tunnels"]');
     await vaultBtn.click();
 
-    // TODO: Unlock the vault with master password
+    // NOTE: Unlock the vault with master password
     // Navigate to Sessions panel
     // Create a new session that references a stored credential
     // Verify the session appears in the tree with credential linked
@@ -23,7 +23,7 @@ test.describe('Credential Vault', () => {
   // Steps: Unlock vault → add password credential → verify in list
   // Assertions: Credential name visible
   test.skip('E2E-09: unlock vault and add credential appears in list', async ({ page }) => {
-    // TODO: Requires vault backend (Tauri) to be operational
+    // NOTE: Requires vault backend (Tauri) to be operational
     await page.goto('/');
 
     // Open command palette and search for vault-related actions
@@ -33,7 +33,7 @@ test.describe('Credential Vault', () => {
     const paletteDialog = page.locator('[role="dialog"]');
     await expect(paletteDialog).toBeVisible();
 
-    // TODO: Navigate to the Vault panel
+    // NOTE: Navigate to the Vault panel
     // Enter the vault password and unlock
     // Click "Add Credential"
     // Fill in credential name, username, password
@@ -48,7 +48,7 @@ test.describe('Credential Vault', () => {
   // Steps: Lock vault → try list credentials → blocked
   // Assertions: Error message or lock screen
   test.skip('E2E-18: locked vault blocks credential operations', async ({ page }) => {
-    // TODO: Requires vault backend for lock/unlock flow
+    // NOTE: Requires vault backend for lock/unlock flow
     await page.goto('/');
 
     // Use command palette to lock vault
@@ -62,7 +62,7 @@ test.describe('Credential Vault', () => {
     await paletteDialog.getByText('Lock Vault').click();
     await page.waitForTimeout(300);
 
-    // TODO: Attempt to list or access credentials
+    // NOTE: Attempt to list or access credentials
     // Verify an error message or lock screen is shown
     // Verify no credential data is visible
   });

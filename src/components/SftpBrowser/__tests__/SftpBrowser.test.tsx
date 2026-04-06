@@ -53,10 +53,10 @@ describe("SftpBrowser", () => {
   it("FT-C-27: breadcrumb click navigates back to root", async () => {
     const listCalls: string[] = [];
 
-    mockInvoke.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
       if (cmd === "sftp_open") return "sftp-session-1";
       if (cmd === "sftp_list") {
-        const path = (args?.path as string) ?? "/";
+        const path = ((args as Record<string, unknown>)?.path as string) ?? "/";
         listCalls.push(path);
         if (path === "/docs") {
           return [
@@ -104,10 +104,10 @@ describe("SftpBrowser", () => {
   it("FT-C-28: double-click directory enters it", async () => {
     const invokedPaths: string[] = [];
 
-    mockInvoke.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
       if (cmd === "sftp_open") return "sftp-session-1";
       if (cmd === "sftp_list") {
-        const path = (args?.path as string) ?? "/";
+        const path = ((args as Record<string, unknown>)?.path as string) ?? "/";
         invokedPaths.push(path);
         if (path === "/docs") {
           return [

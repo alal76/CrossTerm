@@ -128,8 +128,10 @@ export default function ShortcutOverlay({ open, onClose }: ShortcutOverlayProps)
   const handleExport = useCallback(() => {
     const lines: string[] = [t("help.shortcutOverlay.title"), ""];
     for (const cat of sortedCategories) {
-      lines.push(t(`help.shortcutOverlay.categories.${cat}`, cat).toUpperCase());
-      lines.push("-".repeat(40));
+      lines.push(
+        t(`help.shortcutOverlay.categories.${cat}`, cat).toUpperCase(),
+        "-".repeat(40),
+      );
       for (const s of grouped[cat]) {
         const keys = isMac ? s.macKeys : s.keys;
         const custom = "isCustom" in s && s.isCustom ? ` ${t("help.shortcutOverlay.customLabel")}` : "";
@@ -152,20 +154,16 @@ export default function ShortcutOverlay({ open, onClose }: ShortcutOverlayProps)
     <dialog
       open
       className="fixed inset-0 z-[9000] flex items-center justify-center"
-      onClick={onClose}
-      onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
       aria-modal="true"
       aria-label={t("help.shortcutOverlay.title")}
     >
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/40" />
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} aria-hidden="true" />
 
       {/* Modal */}
       <div
         className="shortcut-overlay relative w-full max-w-[560px] max-h-[70vh] bg-surface-primary rounded-xl border border-border-default shadow-[var(--shadow-3)] flex flex-col overflow-hidden"
         style={{ animation: "paletteIn var(--duration-short) var(--ease-decelerate)" }}
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border-subtle">

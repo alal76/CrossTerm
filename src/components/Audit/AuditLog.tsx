@@ -201,16 +201,23 @@ export default function AuditLog() {
 
       {/* Table */}
       <div className="flex-1 overflow-auto">
-        {loading ? (
-          <div className="flex items-center justify-center h-32">
-            <Loader2 size={20} className="animate-spin text-text-secondary" />
-          </div>
-        ) : filteredEntries.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-32 text-text-secondary">
-            <FileText size={32} className="mb-2 opacity-50" />
-            <p className="text-sm">{t("audit.noEntries")}</p>
-          </div>
-        ) : (
+        {(() => {
+          if (loading) {
+            return (
+              <div className="flex items-center justify-center h-32">
+                <Loader2 size={20} className="animate-spin text-text-secondary" />
+              </div>
+            );
+          }
+          if (filteredEntries.length === 0) {
+            return (
+              <div className="flex flex-col items-center justify-center h-32 text-text-secondary">
+                <FileText size={32} className="mb-2 opacity-50" />
+                <p className="text-sm">{t("audit.noEntries")}</p>
+              </div>
+            );
+          }
+          return (
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-text-secondary border-b border-border-subtle sticky top-0 bg-surface-primary">
@@ -258,7 +265,8 @@ export default function AuditLog() {
               ))}
             </tbody>
           </table>
-        )}
+          );
+        })()}
       </div>
     </div>
   );

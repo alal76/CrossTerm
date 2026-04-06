@@ -6,8 +6,8 @@ import clsx from 'clsx';
 type AndroidTab = 'sessions' | 'terminal' | 'files' | 'settings';
 
 interface AndroidShellProps {
-  children?: React.ReactNode;
-  onDrawerToggle?: () => void;
+  readonly children?: React.ReactNode;
+  readonly onDrawerToggle?: () => void;
 }
 
 export default function AndroidShell({ children, onDrawerToggle }: Readonly<AndroidShellProps>) {

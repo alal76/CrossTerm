@@ -1,12 +1,12 @@
 import { useRef, useCallback } from 'react';
 
 interface GestureNavProps {
-  children: React.ReactNode;
-  onSwipeLeft?: () => void;
-  onSwipeRight?: () => void;
-  onSwipeUp?: () => void;
-  onSwipeDown?: () => void;
-  sensitivity?: number;
+  readonly children: React.ReactNode;
+  readonly onSwipeLeft?: () => void;
+  readonly onSwipeRight?: () => void;
+  readonly onSwipeUp?: () => void;
+  readonly onSwipeDown?: () => void;
+  readonly sensitivity?: number;
 }
 
 export default function GestureNav({

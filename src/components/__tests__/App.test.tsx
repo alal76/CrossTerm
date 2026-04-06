@@ -132,13 +132,13 @@ describe("App", () => {
     expect(screen.queryByLabelText("Bottom Panel")).not.toBeInTheDocument();
 
     // Press Ctrl+J to toggle
-    fireEvent.keyDown(window, { key: "j", ctrlKey: true });
+    fireEvent.keyDown(document, { key: "j", ctrlKey: true });
 
     // Bottom panel should now be visible
     expect(screen.getByLabelText("Bottom Panel")).toBeInTheDocument();
 
     // Press Ctrl+J again to hide
-    fireEvent.keyDown(window, { key: "j", ctrlKey: true });
+    fireEvent.keyDown(document, { key: "j", ctrlKey: true });
 
     // Bottom panel should be hidden again
     expect(screen.queryByLabelText("Bottom Panel")).not.toBeInTheDocument();
@@ -153,11 +153,6 @@ describe("App", () => {
 
     // On "compact" breakpoint, the sidebar nav is not rendered
     // The sidebar component returns null for compact
-    const navElements = document.querySelectorAll("nav");
-    // Should only have the bottom nav, not the sidebar nav
-    const sidebarNav = Array.from(navElements).find(
-      (n) => n.querySelector("[data-tooltip]") !== null
-    );
 
     // At compact, the bottom nav bar appears instead
     // Verify that sidebar session panel content is not visible

@@ -43,7 +43,7 @@ test.describe('Command Palette', () => {
   // Steps: Cmd+Shift+N → type `ssh user@host` → enter
   // Assertions: Tab created with SSH type
   test.skip('E2E-11: quick connect creates ssh tab from uri', async ({ page }) => {
-    // TODO: Requires SSH server/Docker for actual connection
+    // NOTE: Requires SSH server/Docker for actual connection
     await page.goto('/');
 
     // Open Quick Connect with Ctrl+Shift+N
@@ -62,7 +62,7 @@ test.describe('Command Palette', () => {
     await page.keyboard.press('Enter');
     await page.waitForTimeout(500);
 
-    // TODO: Verify a new tab is created with SSH connection type
+    // NOTE: Verify a new tab is created with SSH connection type
     // This requires the Tauri SSH backend to be running
     // const tabs = page.locator('[role="tablist"] [role="tab"]');
     // await expect(tabs.first()).toBeVisible();

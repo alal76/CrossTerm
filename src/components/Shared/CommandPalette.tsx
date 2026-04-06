@@ -268,13 +268,12 @@ export default function CommandPalette({
   return (
     <div
       className="fixed inset-0 z-[9000] flex justify-center pt-[10vh]"
-      onClick={close}
-      onKeyDown={(e) => e.key === "Escape" && close()}
-      aria-hidden="true"
     >
       <div
         className="absolute inset-0 bg-surface-overlay/60 backdrop-blur-sm"
         style={{ transition: `opacity var(--duration-short) var(--ease-default)` }}
+        onClick={close}
+        aria-hidden="true"
       />
       <dialog
         open
@@ -283,8 +282,6 @@ export default function CommandPalette({
           maxHeight: "400px",
           animation: "paletteIn var(--duration-medium) var(--ease-decelerate)",
         }}
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.key === "Escape" && close()}
       >
         <div className="flex items-center gap-2 px-4 py-3 border-b border-border-subtle">
           <Command size={16} className="text-text-secondary shrink-0" />

@@ -84,7 +84,7 @@ export default function KubectlPanel({
           name: parts[0] ?? "",
           ready: parts[1] ?? "0/0",
           status: parts[2] ?? "Unknown",
-          restarts: parseInt(parts[3] ?? "0", 10),
+          restarts: Number.parseInt(parts[3] ?? "0", 10),
           age: parts[4] ?? "",
           namespace,
         };

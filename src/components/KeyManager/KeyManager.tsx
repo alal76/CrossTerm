@@ -173,30 +173,42 @@ export default function KeyManager() {
 
       {/* Content */}
       <div className="flex-1 overflow-auto p-4">
-        {loading ? (
-          <div className="flex items-center justify-center h-32">
-            <Loader2 size={20} className="animate-spin text-text-secondary" />
-          </div>
-        ) : activeTab === "keys" ? (
-          <KeysTable
-            keys={keys}
-            onExport={handleExport}
-            onDelete={handleDelete}
-            onAgentAdd={handleAgentAdd}
-          />
-        ) : activeTab === "agent" ? (
-          <AgentSection
-            agentKeys={agentKeys}
-            onRemove={handleAgentRemove}
-            onRemoveAll={handleAgentRemoveAll}
-            onRefresh={fetchAgentKeys}
-          />
-        ) : (
-          <CertificatesSection
-            certificates={certificates}
-            onRefresh={fetchCertificates}
-          />
-        )}
+        {(() => {
+          if (loading) {
+            return (
+              <div className="flex items-center justify-center h-32">
+                <Loader2 size={20} className="animate-spin text-text-secondary" />
+              </div>
+            );
+          }
+          switch (activeTab) {
+            case "keys":
+              return (
+                <KeysTable
+                  keys={keys}
+                  onExport={handleExport}
+                  onDelete={handleDelete}
+                  onAgentAdd={handleAgentAdd}
+                />
+              );
+            case "agent":
+              return (
+                <AgentSection
+                  agentKeys={agentKeys}
+                  onRemove={handleAgentRemove}
+                  onRemoveAll={handleAgentRemoveAll}
+                  onRefresh={fetchAgentKeys}
+                />
+              );
+            default:
+              return (
+                <CertificatesSection
+                  certificates={certificates}
+                  onRefresh={fetchCertificates}
+                />
+              );
+          }
+        })()}
       </div>
     </div>
   );

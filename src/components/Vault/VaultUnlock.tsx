@@ -35,6 +35,28 @@ async function detectAuthMethods(
   setIsMac(navigator.userAgent.toUpperCase().includes("MAC"));
 }
 
+function VaultHeader({ isNewVault, t }: { readonly isNewVault: boolean | null; readonly t: (key: string) => string }) {
+  return (
+    <div className="flex flex-col items-center mb-8">
+      <div className="w-16 h-16 rounded-2xl bg-accent-primary/10 flex items-center justify-center mb-4">
+        {isNewVault ? (
+          <ShieldCheck size={32} className="text-accent-primary" />
+        ) : (
+          <Lock size={32} className="text-accent-primary" />
+        )}
+      </div>
+      <h1 className="text-lg font-semibold text-text-primary">
+        {isNewVault ? t("vault.createVault") : t("vault.unlock")}
+      </h1>
+      <p className="text-xs text-text-secondary mt-1 text-center max-w-[260px]">
+        {isNewVault
+          ? t("vault.createDescription")
+          : t("vault.unlockDescription")}
+      </p>
+    </div>
+  );
+}
+
 export default function VaultUnlock() {
   const { t } = useTranslation();
   const [password, setPassword] = useState("");
@@ -147,23 +169,7 @@ export default function VaultUnlock() {
   return (
     <div className="flex items-center justify-center w-full h-full bg-surface-primary">
       <div className="w-full max-w-sm px-6">
-        <div className="flex flex-col items-center mb-8">
-          <div className="w-16 h-16 rounded-2xl bg-accent-primary/10 flex items-center justify-center mb-4">
-            {isNewVault ? (
-              <ShieldCheck size={32} className="text-accent-primary" />
-            ) : (
-              <Lock size={32} className="text-accent-primary" />
-            )}
-          </div>
-          <h1 className="text-lg font-semibold text-text-primary">
-            {isNewVault ? t("vault.createVault") : t("vault.unlock")}
-          </h1>
-          <p className="text-xs text-text-secondary mt-1 text-center max-w-[260px]">
-            {isNewVault
-              ? t("vault.createDescription")
-              : t("vault.unlockDescription")}
-          </p>
-        </div>
+        <VaultHeader isNewVault={isNewVault} t={t} />
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           <div className="relative">

@@ -6,6 +6,11 @@ import clsx from "clsx";
 import type { VncConfig, VncConnectionStatus, VncScalingMode } from "@/types";
 import VncToolbar from "./VncToolbar";
 
+/** VNC protocol requires numeric key codes — no modern standard equivalent */
+function vncKeyCode(e: KeyboardEvent): number {
+  return e.keyCode;
+}
+
 interface VncViewerProps {
   readonly sessionId: string;
   readonly config: VncConfig;
@@ -155,7 +160,7 @@ export default function VncViewer({ sessionId, config }: VncViewerProps) {
       if (!id || viewOnly) return;
       invoke("vnc_send_key", {
         connectionId: id,
-        keyCode: e.keyCode,
+        keyCode: vncKeyCode(e),
         pressed: true,
       }).catch(() => {});
     }
@@ -165,7 +170,7 @@ export default function VncViewer({ sessionId, config }: VncViewerProps) {
       if (!id || viewOnly) return;
       invoke("vnc_send_key", {
         connectionId: id,
-        keyCode: e.keyCode,
+        keyCode: vncKeyCode(e),
         pressed: false,
       }).catch(() => {});
     }
@@ -264,6 +269,7 @@ export default function VncViewer({ sessionId, config }: VncViewerProps) {
   return (
     <div
       ref={containerRef}
+      role="application"
       tabIndex={0}
       className={clsx(
         "relative flex items-center justify-center w-full h-full",

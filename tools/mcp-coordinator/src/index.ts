@@ -74,21 +74,21 @@ function parseGapAnalysis(): GapItem[] {
     if (line.includes("Phase 3")) currentPhase = 3;
 
     // Detect category sections
-    const sectionMatch = line.match(/^### \d+\.\d+ (.+)/);
+    const sectionMatch = /^### \d+\.\d+ (.+)/.exec(line);
     if (sectionMatch) {
       currentCategory = sectionMatch[1].trim();
     }
 
     // Parse gap table rows
-    const rowMatch = line.match(
-      /^\| ([\w-]+) \| (.+?) \| (§[\d.]+) \| (.+?) \| (Missing|✅ Done|Partial|Stub|In-Progress) \|$/
+    const rowMatch = /^\| ([\w-]+) \| (.+?) \| (§[\d.]+) \| (.+?) \| (Missing|✅ Done|Partial|Stub|In-Progress) \|$/.exec(
+      line
     );
     if (rowMatch) {
       gaps.push({
         id: rowMatch[1].trim(),
         description: rowMatch[2].trim(),
         specReference: rowMatch[3].trim(),
-        severity: rowMatch[4].trim().replace(/\*\*/g, ""),
+        severity: rowMatch[4].trim().replaceAll("**", ""),
         status: rowMatch[5].trim().replace("✅ ", "") as GapItem["status"],
         phase: currentPhase,
         category: currentCategory,
@@ -566,6 +566,26 @@ server.tool(
   }
 );
 
+// ── Helpers ──
+
+function updateGapStatuses(state: CoordinatorState, wp: WorkPackage, gapStatuses?: Record<string, string>) {
+  if (gapStatuses) {
+    for (const [gapId, status] of Object.entries(gapStatuses)) {
+      const gap = state.gaps.find((g) => g.id === gapId);
+      if (!gap) continue;
+      gap.status = status as GapItem["status"];
+      if (status === "Done") gap.completedAt = new Date().toISOString();
+    }
+    return;
+  }
+  for (const gapId of wp.gapIds) {
+    const gap = state.gaps.find((g) => g.id === gapId);
+    if (!gap) continue;
+    gap.status = "Done";
+    gap.completedAt = new Date().toISOString();
+  }
+}
+
 // ── Tool: Complete Work Package ──
 
 server.tool(
@@ -588,27 +608,7 @@ server.tool(
     }
 
     wp.status = "completed";
-
-    // Update gap statuses
-    if (gapStatuses) {
-      for (const [gapId, status] of Object.entries(gapStatuses)) {
-        const gap = state.gaps.find((g) => g.id === gapId);
-        if (gap) {
-          gap.status = status as GapItem["status"];
-          if (status === "Done") gap.completedAt = new Date().toISOString();
-        }
-      }
-    } else {
-      // Default: mark all gaps in this package as Done
-      for (const gapId of wp.gapIds) {
-        const gap = state.gaps.find((g) => g.id === gapId);
-        if (gap) {
-          gap.status = "Done";
-          gap.completedAt = new Date().toISOString();
-        }
-      }
-    }
-
+    updateGapStatuses(state, wp, gapStatuses);
     saveState(state);
 
     return {
@@ -685,7 +685,7 @@ server.tool(
         const statusText = gap.status === "Done" ? "✅ Done" : "⚠️ Stub";
         // Match the gap row and replace the status
         const pattern = new RegExp(
-          `(\\| ${gap.id.replace(/[-]/g, "[-]")} \\|.+\\|)\\s*(Missing|Partial)\\s*\\|`,
+          String.raw`(\| ${gap.id.replaceAll("-", "[-]")} \|.+\|)\s*(Missing|Partial)\s*\|`,
           "g"
         );
         const newContent = content.replace(pattern, `$1 ${statusText} |`);
@@ -767,4 +767,8 @@ async function main() {
   console.error("CrossTerm Coordinator MCP server running on stdio");
 }
 
-main().catch(console.error);
+try {
+  await main();
+} catch (err) {
+  console.error(err);
+}

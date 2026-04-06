@@ -36,17 +36,12 @@ export default function MacroEditor() {
   const [execution, setExecution] = useState<MacroExecution | null>(null);
   const [macroName, setMacroName] = useState('');
   const [steps, setSteps] = useState<MacroStep[]>([]);
-  const [, setLoading] = useState(true);
-
   const loadMacros = useCallback(async () => {
     try {
-      setLoading(true);
       const list = await invoke<MacroInfo[]>('macro_list');
       setMacros(list);
     } catch {
       // ignore
-    } finally {
-      setLoading(false);
     }
   }, []);
 

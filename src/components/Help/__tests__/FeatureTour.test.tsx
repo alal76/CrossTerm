@@ -83,7 +83,7 @@ describe("FeatureTour", () => {
   it("FT-H-07: Escape key closes tour", () => {
     render(<FeatureTour tourId="ssh" onComplete={onComplete} />);
 
-    fireEvent.keyDown(globalThis, { key: "Escape" });
+    fireEvent.keyDown(document, { key: "Escape" });
 
     expect(onComplete).toHaveBeenCalledTimes(1);
   });
