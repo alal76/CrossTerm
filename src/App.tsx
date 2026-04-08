@@ -25,6 +25,7 @@ import {
   Copy,
   MoreVertical,
   Radio,
+  Radar,
   KeyRound,
   Bell,
   ExternalLink,
@@ -48,6 +49,7 @@ import HelpMenu from "@/components/Help/HelpMenu";
 import WhatsNewPanel from "@/components/Help/WhatsNewPanel";
 import FeatureTour from "@/components/Help/FeatureTour";
 import TipOfTheDay from "@/components/Help/TipOfTheDay";
+import NetworkExplorer from "@/components/NetworkTools/NetworkExplorer";
 import VaultUnlock from "@/components/Vault/VaultUnlock";
 import CredentialManager from "@/components/Vault/CredentialManager";
 import SettingsPanel from "@/components/Settings/SettingsPanel";
@@ -543,6 +545,7 @@ const SIDEBAR_MODES = [
   { mode: SidebarMode.Sessions, icon: FolderOpen, label: "sidebar.sessions" as const },
   { mode: SidebarMode.Snippets, icon: Code2, label: "sidebar.snippets" as const },
   { mode: SidebarMode.Tunnels, icon: Lock, label: "sidebar.tunnels" as const },
+  { mode: SidebarMode.Network, icon: Radar, label: "sidebar.network" as const },
 ];
 
 function Sidebar({
@@ -654,6 +657,9 @@ function Sidebar({
                 icon={<Lock size={32} className="text-text-disabled" />}
                 message={t("statusBar.noTunnels")}
               />
+            )}
+            {sidebarMode === SidebarMode.Network && (
+              <NetworkExplorer />
             )}
           </div>
         </div>

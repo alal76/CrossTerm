@@ -139,6 +139,7 @@ pub fn run() {
             terminal::terminal_stop_logging,
             // SSH
             ssh::ssh_connect,
+            ssh::ssh_discover,
             ssh::ssh_disconnect,
             ssh::ssh_auth_respond,
             ssh::ssh_write,
@@ -268,6 +269,7 @@ pub fn run() {
             network::network_scan_start,
             network::network_scan_results,
             network::network_scan_save_as_sessions,
+            network::network_explore_start,
             network::network_wol_send,
             network::network_tunnel_create,
             network::network_tunnel_remove,

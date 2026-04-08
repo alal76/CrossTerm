@@ -172,6 +172,38 @@ struct AuthPromptInfo {
     echo: bool,
 }
 
+#[derive(Clone, Serialize)]
+struct SshConnectLogEvent {
+    connection_id: String,
+    level: String,
+    message: String,
+}
+
+#[derive(Clone, Serialize)]
+struct SshBannerEvent {
+    connection_id: String,
+    banner: String,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct SshDiscoverResult {
+    pub host: String,
+    pub port: u16,
+    pub none_auth_accepted: bool,
+    pub auth_required: bool,
+    pub banner: Option<String>,
+}
+
+/// Credential info for auto-save event emitted after successful auth.
+#[derive(Clone, Serialize, Deserialize)]
+struct SshAuthSuccessEvent {
+    connection_id: String,
+    host: String,
+    port: u16,
+    username: String,
+    auth_method: String,
+}
+
 // ── Internal command channel for the session task ───────────────────────
 
 enum SshCommand {
@@ -200,6 +232,21 @@ pub(crate) struct SshClientHandler {
 #[async_trait]
 impl client::Handler for SshClientHandler {
     type Error = SshError;
+
+    async fn auth_banner(
+        &mut self,
+        banner: &str,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        let _ = self.app_handle.emit(
+            "ssh:banner",
+            SshBannerEvent {
+                connection_id: self.connection_id.clone(),
+                banner: banner.to_string(),
+            },
+        );
+        Ok(())
+    }
 
     async fn check_server_key(
         &mut self,
@@ -657,7 +704,65 @@ async fn connect_via_jump(
     Ok((target_handle, jump_handle))
 }
 
+// ── Helpers: connection log ─────────────────────────────────────────────
+
+fn emit_connect_log(app_handle: &AppHandle, connection_id: &str, level: &str, message: &str) {
+    let _ = app_handle.emit(
+        "ssh:connect_log",
+        SshConnectLogEvent {
+            connection_id: connection_id.to_string(),
+            level: level.to_string(),
+            message: message.to_string(),
+        },
+    );
+}
+
 // ── Tauri Commands ──────────────────────────────────────────────────────
+
+/// Discover authentication requirements by connecting and performing "none" auth.
+#[tauri::command]
+pub async fn ssh_discover(
+    app_handle: AppHandle,
+    host: String,
+    port: u16,
+    username: String,
+) -> Result<SshDiscoverResult, SshError> {
+    let connection_id = format!("discover-{}", Uuid::new_v4());
+
+    let handler = SshClientHandler {
+        app_handle: app_handle.clone(),
+        connection_id: connection_id.clone(),
+        host: host.clone(),
+        port,
+        remote_forwards: Arc::new(TokioMutex::new(HashMap::new())),
+        agent_enabled: false,
+        #[cfg(unix)]
+        agent_sockets: HashMap::new(),
+    };
+
+    emit_connect_log(&app_handle, &connection_id, "info", &format!("Connecting to {}:{}…", host, port));
+
+    let mut handle = ssh_connect_transport(&host, port, handler, None).await?;
+
+    emit_connect_log(&app_handle, &connection_id, "info", "Transport established, probing auth methods…");
+
+    let none_accepted = handle
+        .authenticate_none(&username)
+        .await
+        .map_err(|e| SshError::ConnectionFailed(e.to_string()))?;
+
+    let _ = handle.disconnect(Disconnect::ByApplication, "Discovery complete", "en").await;
+
+    let result = SshDiscoverResult {
+        host,
+        port,
+        none_auth_accepted: none_accepted,
+        auth_required: !none_accepted,
+        banner: None,
+    };
+
+    Ok(result)
+}
 
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
@@ -716,14 +821,18 @@ pub async fn ssh_connect(
 
     let remote_forwards = handler.remote_forwards.clone();
 
+    emit_connect_log(&app_handle, &connection_id, "info", &format!("Connecting to {}@{}:{}…", username, host, port));
+
     // Connect — either directly or via jump host
     let (handle, jump_host_handle) = if let Some(ref jump) = jump_host {
+        emit_connect_log(&app_handle, &connection_id, "info", &format!("Using jump host {}:{}…", jump.host, jump.port));
         match connect_via_jump(
             jump, &host, port, &username, &auth,
             handler, &app_handle, &connection_id, keep_alive_secs,
         ).await {
             Ok((h, jh)) => (h, Some(jh)),
             Err(e) => {
+                emit_connect_log(&app_handle, &connection_id, "error", &format!("Jump host connection failed: {}", e));
                 crate::audit::append_event(&pid, crate::audit::AuditEventType::SessionConnect,
                     &format!("SSH connect FAILED {}@{}:{} via jump {}:{} - {}",
                         username, host, port, jump.host, jump.port, e));
@@ -735,6 +844,7 @@ pub async fn ssh_connect(
         let mut h = ssh_connect_transport(&host, port, handler, keep_alive_secs)
             .await
             .map_err(|e| {
+                emit_connect_log(&app_handle, &connection_id, "error", &format!("Transport failed: {}", e));
                 crate::audit::append_event(
                     &pid,
                     crate::audit::AuditEventType::SessionConnect,
@@ -743,8 +853,18 @@ pub async fn ssh_connect(
                 e
             })?;
 
+        emit_connect_log(&app_handle, &connection_id, "info", "Transport established, host key verified");
+
         // Step 2: Try primary auth method
+        let auth_method_name = match &auth {
+            SshAuth::Password { .. } => "password",
+            SshAuth::PrivateKey { .. } => "publickey",
+            SshAuth::None => "none",
+        };
+        emit_connect_log(&app_handle, &connection_id, "info", &format!("Trying {} authentication…", auth_method_name));
+
         let authenticated = ssh_try_auth(&mut h, &username, &auth).await.map_err(|e| {
+            emit_connect_log(&app_handle, &connection_id, "error", &format!("Auth error: {}", e));
             crate::audit::append_event(
                 &pid,
                 crate::audit::AuditEventType::SessionConnect,
@@ -755,6 +875,7 @@ pub async fn ssh_connect(
 
         // Step 3: If primary auth failed, fall back to keyboard-interactive
         if !authenticated {
+            emit_connect_log(&app_handle, &connection_id, "warn", &format!("{} authentication rejected, trying keyboard-interactive…", auth_method_name));
             ssh_keyboard_interactive_auth(
                 &mut h,
                 &username,
@@ -764,6 +885,7 @@ pub async fn ssh_connect(
             )
             .await
             .map_err(|e| {
+                emit_connect_log(&app_handle, &connection_id, "error", &format!("Keyboard-interactive auth failed: {}", e));
                 crate::audit::append_event(
                     &pid,
                     crate::audit::AuditEventType::SessionConnect,
@@ -775,6 +897,25 @@ pub async fn ssh_connect(
 
         (h, None)
     };
+
+    emit_connect_log(&app_handle, &connection_id, "info", "Authentication successful");
+
+    // Emit auth success event so frontend can offer auto-save
+    let auth_method_label = match &auth {
+        SshAuth::Password { .. } => "password",
+        SshAuth::PrivateKey { .. } => "publickey",
+        SshAuth::None => "none",
+    };
+    let _ = app_handle.emit(
+        "ssh:auth_success",
+        SshAuthSuccessEvent {
+            connection_id: connection_id.clone(),
+            host: host.clone(),
+            port,
+            username: username.clone(),
+            auth_method: auth_method_label.to_string(),
+        },
+    );
 
     // Measure connection latency (connect start to auth success)
     let latency_ms = connect_start.elapsed().as_millis() as u64;
@@ -2153,5 +2294,78 @@ mod tests {
         let err = SshError::HostKeyChanged("example.com:22".into());
         assert!(err.to_string().contains("example.com:22"));
         assert!(err.to_string().contains("MITM"));
+    }
+
+    #[test]
+    fn test_ssh_connect_log_event_serde() {
+        let log = SshConnectLogEvent {
+            connection_id: "conn-123".to_string(),
+            level: "info".to_string(),
+            message: "Transport established".to_string(),
+        };
+        let json = serde_json::to_string(&log).unwrap();
+        assert!(json.contains("\"connection_id\":\"conn-123\""));
+        assert!(json.contains("\"level\":\"info\""));
+        assert!(json.contains("\"message\":\"Transport established\""));
+    }
+
+    #[test]
+    fn test_ssh_banner_event_serde() {
+        let banner = SshBannerEvent {
+            connection_id: "conn-abc".to_string(),
+            banner: "Authorized users only\n".to_string(),
+        };
+        let json = serde_json::to_string(&banner).unwrap();
+        assert!(json.contains("\"banner\":\"Authorized users only"));
+    }
+
+    #[test]
+    fn test_ssh_discover_result_serde() {
+        let result = SshDiscoverResult {
+            host: "192.168.1.1".to_string(),
+            port: 22,
+            none_auth_accepted: false,
+            auth_required: true,
+            banner: Some("Welcome".to_string()),
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        let deserialized: SshDiscoverResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.host, "192.168.1.1");
+        assert!(deserialized.auth_required);
+        assert!(!deserialized.none_auth_accepted);
+        assert_eq!(deserialized.banner, Some("Welcome".to_string()));
+    }
+
+    #[test]
+    fn test_ssh_discover_result_no_banner() {
+        let result = SshDiscoverResult {
+            host: "10.0.0.1".to_string(),
+            port: 2222,
+            none_auth_accepted: true,
+            auth_required: false,
+            banner: None,
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        let deserialized: SshDiscoverResult = serde_json::from_str(&json).unwrap();
+        assert!(deserialized.none_auth_accepted);
+        assert!(!deserialized.auth_required);
+        assert_eq!(deserialized.banner, None);
+    }
+
+    #[test]
+    fn test_ssh_auth_success_event_serde() {
+        let evt = SshAuthSuccessEvent {
+            connection_id: "conn-xyz".to_string(),
+            host: "server.example.com".to_string(),
+            port: 22,
+            username: "admin".to_string(),
+            auth_method: "password".to_string(),
+        };
+        let json = serde_json::to_string(&evt).unwrap();
+        assert!(json.contains("\"auth_method\":\"password\""));
+        assert!(json.contains("\"username\":\"admin\""));
+        let deserialized: SshAuthSuccessEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.connection_id, "conn-xyz");
+        assert_eq!(deserialized.auth_method, "password");
     }
 }

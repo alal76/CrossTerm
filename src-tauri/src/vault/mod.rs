@@ -816,7 +816,7 @@ impl Vault {
             .insert(vault_id.to_string(), cancel_tx);
 
         let vid = vault_id.to_string();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
             loop {
                 tokio::select! {

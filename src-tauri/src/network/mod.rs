@@ -146,6 +146,84 @@ pub struct TunnelStatusEvent {
     pub status: TunnelStatus,
 }
 
+// ── Network Explore Types ───────────────────────────────────────────────
+
+/// Well-known service ports for the network explorer.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ServiceFilter {
+    Ssh,
+    Vnc,
+    Rdp,
+    Http,
+    Https,
+    Telnet,
+    Ftp,
+    Smb,
+    Mysql,
+    Postgresql,
+    Redis,
+    Mongodb,
+    Custom(u16),
+}
+
+impl ServiceFilter {
+    fn port(&self) -> u16 {
+        match self {
+            ServiceFilter::Ssh => 22,
+            ServiceFilter::Vnc => 5900,
+            ServiceFilter::Rdp => 3389,
+            ServiceFilter::Http => 80,
+            ServiceFilter::Https => 443,
+            ServiceFilter::Telnet => 23,
+            ServiceFilter::Ftp => 21,
+            ServiceFilter::Smb => 445,
+            ServiceFilter::Mysql => 3306,
+            ServiceFilter::Postgresql => 5432,
+            ServiceFilter::Redis => 6379,
+            ServiceFilter::Mongodb => 27017,
+            ServiceFilter::Custom(p) => *p,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExploreTarget {
+    pub cidr: String,
+    /// Well-known service filters to scan. If empty, defaults to SSH/VNC/RDP/HTTP/HTTPS.
+    pub services: Vec<ServiceFilter>,
+    /// Additional arbitrary ports supplied by the user.
+    pub extra_ports: Vec<u16>,
+    /// Per-host TCP connect timeout in milliseconds (default 1500).
+    pub timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExploreResult {
+    pub ip: String,
+    pub hostname: Option<String>,
+    pub mac_address: Option<String>,
+    pub open_ports: Vec<OpenPort>,
+    pub os_guess: Option<String>,
+    pub response_time_ms: f64,
+    /// Quick-connect session type derived from the highest-priority open port.
+    pub suggested_session_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExploreProgress {
+    pub scan_id: String,
+    pub hosts_scanned: u32,
+    pub total_hosts: u32,
+    pub hosts_found: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExploreHostFound {
+    pub scan_id: String,
+    pub result: ExploreResult,
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────────
 
 /// Parse a CIDR notation string into a list of IPv4 addresses.
@@ -213,6 +291,7 @@ pub fn build_wol_packet(mac_bytes: &[u8; 6]) -> Vec<u8> {
 /// Guess service name from port number.
 fn guess_service(port: u16) -> String {
     match port {
+        21 => "ftp".to_string(),
         22 => "ssh".to_string(),
         23 => "telnet".to_string(),
         25 => "smtp".to_string(),
@@ -233,6 +312,24 @@ fn guess_service(port: u16) -> String {
         8443 => "https-alt".to_string(),
         27017 => "mongodb".to_string(),
         _ => format!("port-{}", port),
+    }
+}
+
+/// Suggest the best session type from open ports (priority order).
+fn suggest_session_type(open_ports: &[OpenPort]) -> Option<String> {
+    let ports: Vec<u16> = open_ports.iter().map(|p| p.port).collect();
+    if ports.contains(&22) {
+        Some("ssh".to_string())
+    } else if ports.contains(&3389) {
+        Some("rdp".to_string())
+    } else if ports.contains(&5900) {
+        Some("vnc".to_string())
+    } else if ports.contains(&23) {
+        Some("telnet".to_string())
+    } else if ports.contains(&21) {
+        Some("sftp".to_string())
+    } else {
+        None
     }
 }
 
@@ -383,6 +480,101 @@ pub async fn network_scan_start(
                     scan_id: scan_id_clone.clone(),
                     hosts_scanned: scan_idx as u32 + 1,
                     total_hosts,
+                },
+            );
+        }
+    });
+
+    Ok(scan_id)
+}
+
+/// Default service filters when the user doesn't specify any.
+const DEFAULT_EXPLORE_SERVICES: &[ServiceFilter] = &[
+    ServiceFilter::Ssh,
+    ServiceFilter::Rdp,
+    ServiceFilter::Vnc,
+    ServiceFilter::Http,
+    ServiceFilter::Https,
+    ServiceFilter::Telnet,
+    ServiceFilter::Ftp,
+    ServiceFilter::Smb,
+];
+
+#[tauri::command]
+pub async fn network_explore_start(
+    target: ExploreTarget,
+    app: AppHandle,
+) -> Result<String, NetworkError> {
+    let scan_id = Uuid::new_v4().to_string();
+    let addresses = parse_cidr(&target.cidr)?;
+    let total_hosts = addresses.len() as u32;
+    let timeout = Duration::from_millis(target.timeout_ms.unwrap_or(1500));
+
+    // Build the deduplicated port list from service filters + extra ports
+    let services = if target.services.is_empty() {
+        DEFAULT_EXPLORE_SERVICES.to_vec()
+    } else {
+        target.services.clone()
+    };
+    let mut ports: Vec<u16> = services.iter().map(|s| s.port()).collect();
+    ports.extend(&target.extra_ports);
+    ports.sort_unstable();
+    ports.dedup();
+
+    // Validate port range
+    if ports.iter().any(|&p| p == 0) {
+        return Err(NetworkError::InvalidCidr("Port 0 is not valid".to_string()));
+    }
+
+    let scan_id_clone = scan_id.clone();
+
+    tokio::spawn(async move {
+        let mut hosts_found: u32 = 0;
+        for (scan_idx, addr) in addresses.into_iter().enumerate() {
+            let ip = IpAddr::V4(addr);
+            let start = Instant::now();
+
+            // Check all requested ports concurrently
+            let mut port_futures = Vec::with_capacity(ports.len());
+            for &port in &ports {
+                port_futures.push(check_port(ip, port, timeout));
+            }
+            let port_results = futures::future::join_all(port_futures).await;
+            let open_ports: Vec<OpenPort> = port_results.into_iter().flatten().collect();
+            let response_time = start.elapsed().as_secs_f64() * 1000.0;
+
+            if !open_ports.is_empty() {
+                let hostname = reverse_dns(ip).await;
+                let os_guess = guess_os(&open_ports);
+                let suggested_session_type = suggest_session_type(&open_ports);
+
+                let result = ExploreResult {
+                    ip: ip.to_string(),
+                    hostname,
+                    mac_address: None,
+                    open_ports,
+                    os_guess,
+                    response_time_ms: response_time,
+                    suggested_session_type,
+                };
+
+                hosts_found += 1;
+                let _ = app.emit(
+                    "network:explore_host_found",
+                    ExploreHostFound {
+                        scan_id: scan_id_clone.clone(),
+                        result,
+                    },
+                );
+            }
+
+            let _ = app.emit(
+                "network:explore_progress",
+                ExploreProgress {
+                    scan_id: scan_id_clone.clone(),
+                    hosts_scanned: scan_idx as u32 + 1,
+                    total_hosts,
+                    hosts_found,
                 },
             );
         }
@@ -821,5 +1013,79 @@ mod tests {
 
         assert!(parse_cidr("invalid").is_err());
         assert!(parse_cidr("192.168.1.0/33").is_err());
+    }
+
+    #[test]
+    fn test_service_filter_ports() {
+        assert_eq!(ServiceFilter::Ssh.port(), 22);
+        assert_eq!(ServiceFilter::Rdp.port(), 3389);
+        assert_eq!(ServiceFilter::Vnc.port(), 5900);
+        assert_eq!(ServiceFilter::Http.port(), 80);
+        assert_eq!(ServiceFilter::Https.port(), 443);
+        assert_eq!(ServiceFilter::Telnet.port(), 23);
+        assert_eq!(ServiceFilter::Ftp.port(), 21);
+        assert_eq!(ServiceFilter::Smb.port(), 445);
+        assert_eq!(ServiceFilter::Mysql.port(), 3306);
+        assert_eq!(ServiceFilter::Postgresql.port(), 5432);
+        assert_eq!(ServiceFilter::Redis.port(), 6379);
+        assert_eq!(ServiceFilter::Mongodb.port(), 27017);
+        assert_eq!(ServiceFilter::Custom(8080).port(), 8080);
+    }
+
+    #[test]
+    fn test_suggest_session_type() {
+        // SSH takes priority
+        let ports = vec![
+            OpenPort { port: 22, service_name: "ssh".to_string(), protocol: "tcp".to_string() },
+            OpenPort { port: 3389, service_name: "rdp".to_string(), protocol: "tcp".to_string() },
+        ];
+        assert_eq!(suggest_session_type(&ports), Some("ssh".to_string()));
+
+        // RDP when no SSH
+        let ports_rdp = vec![
+            OpenPort { port: 3389, service_name: "rdp".to_string(), protocol: "tcp".to_string() },
+            OpenPort { port: 80, service_name: "http".to_string(), protocol: "tcp".to_string() },
+        ];
+        assert_eq!(suggest_session_type(&ports_rdp), Some("rdp".to_string()));
+
+        // VNC
+        let ports_vnc = vec![
+            OpenPort { port: 5900, service_name: "vnc".to_string(), protocol: "tcp".to_string() },
+        ];
+        assert_eq!(suggest_session_type(&ports_vnc), Some("vnc".to_string()));
+
+        // Telnet
+        let ports_telnet = vec![
+            OpenPort { port: 23, service_name: "telnet".to_string(), protocol: "tcp".to_string() },
+        ];
+        assert_eq!(suggest_session_type(&ports_telnet), Some("telnet".to_string()));
+
+        // No connectable service
+        let ports_web = vec![
+            OpenPort { port: 80, service_name: "http".to_string(), protocol: "tcp".to_string() },
+        ];
+        assert_eq!(suggest_session_type(&ports_web), None);
+
+        // Empty
+        assert_eq!(suggest_session_type(&[]), None);
+    }
+
+    #[test]
+    fn test_guess_service_ftp() {
+        assert_eq!(guess_service(21), "ftp");
+        assert_eq!(guess_service(22), "ssh");
+        assert_eq!(guess_service(60000), "port-60000");
+    }
+
+    #[test]
+    fn test_default_explore_services() {
+        // Ensure default list has the 8 core services
+        assert_eq!(DEFAULT_EXPLORE_SERVICES.len(), 8);
+        let ports: Vec<u16> = DEFAULT_EXPLORE_SERVICES.iter().map(|s| s.port()).collect();
+        assert!(ports.contains(&22));  // ssh
+        assert!(ports.contains(&3389)); // rdp
+        assert!(ports.contains(&5900)); // vnc
+        assert!(ports.contains(&80));  // http
+        assert!(ports.contains(&443)); // https
     }
 }

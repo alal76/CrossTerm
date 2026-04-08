@@ -25,6 +25,7 @@ export enum SidebarMode {
   Sessions = "sessions",
   Snippets = "snippets",
   Tunnels = "tunnels",
+  Network = "network",
 }
 
 export enum BottomPanelMode {
@@ -504,6 +505,81 @@ export interface FileServerInfo {
   server_type: 'http' | 'tftp';
   running: boolean;
   url: string;
+}
+
+// --- Network Explore Types ---
+
+export type ServiceFilter =
+  | 'ssh'
+  | 'vnc'
+  | 'rdp'
+  | 'http'
+  | 'https'
+  | 'telnet'
+  | 'ftp'
+  | 'smb'
+  | 'mysql'
+  | 'postgresql'
+  | 'redis'
+  | 'mongodb'
+  | { custom: number };
+
+export interface ExploreTarget {
+  cidr: string;
+  services: ServiceFilter[];
+  extra_ports: number[];
+  timeout_ms?: number;
+}
+
+export interface ExploreResult {
+  ip: string;
+  hostname?: string;
+  mac_address?: string;
+  open_ports: OpenPort[];
+  os_guess?: string;
+  response_time_ms: number;
+  suggested_session_type?: string;
+}
+
+export interface ExploreProgress {
+  scan_id: string;
+  hosts_scanned: number;
+  total_hosts: number;
+  hosts_found: number;
+}
+
+export interface ExploreHostFound {
+  scan_id: string;
+  result: ExploreResult;
+}
+
+// --- SSH Discovery Types ---
+
+export interface SshDiscoverResult {
+  host: string;
+  port: number;
+  none_auth_accepted: boolean;
+  auth_required: boolean;
+  banner?: string;
+}
+
+export interface SshConnectLogEvent {
+  connection_id: string;
+  level: "info" | "warn" | "error";
+  message: string;
+}
+
+export interface SshBannerEvent {
+  connection_id: string;
+  banner: string;
+}
+
+export interface SshAuthSuccessEvent {
+  connection_id: string;
+  host: string;
+  port: number;
+  username: string;
+  auth_method: string;
 }
 
 // --- Recording Types ---

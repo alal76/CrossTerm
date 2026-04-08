@@ -1,12 +1,18 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useVaultStore } from "@/stores/vaultStore";
-import { ConnectionStatus } from "@/types";
-import { Loader2, KeyRound, Save } from "lucide-react";
+import {
+  ConnectionStatus,
+  type SshConnectLogEvent,
+  type SshBannerEvent,
+  type SshAuthSuccessEvent,
+} from "@/types";
+import { Loader2, KeyRound, Save, Terminal, AlertTriangle } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import clsx from "clsx";
 import SshTerminalView from "./SshTerminalView";
 import ReconnectOverlay from "./ReconnectOverlay";
 
@@ -63,6 +69,17 @@ export default function SshTerminalTab({
   const lastAuthPassword = useRef<string | null>(null);
   const pendingConnId = useRef<string | null>(null);
 
+  // ── Connection log state ──
+  const [connectLogs, setConnectLogs] = useState<SshConnectLogEvent[]>([]);
+  const [banner, setBanner] = useState<string | null>(null);
+  // Track auth method for auto-save
+  const authSuccessInfo = useRef<SshAuthSuccessEvent | null>(null);
+
+  // ── Credential prompt state (when connecting with none auth and auth is required) ──
+  const [showCredentialPrompt, setShowCredentialPrompt] = useState(false);
+  const [credPassword, setCredPassword] = useState("");
+  const [credSubmitting, setCredSubmitting] = useState(false);
+
   // ── Listen for auth prompts from backend ──
   useEffect(() => {
     const unlisten = listen<AuthPromptEvent>("ssh:auth_prompt", (event) => {
@@ -84,11 +101,28 @@ export default function SshTerminalTab({
   useEffect(() => {
     let cancelled = false;
 
+    // ── Scoped listeners for this connection attempt ──
+    const unlisteners = [
+      listen<SshConnectLogEvent>("ssh:connect_log", (event) => {
+        if (!cancelled) setConnectLogs((prev) => [...prev, event.payload]);
+      }),
+      listen<SshBannerEvent>("ssh:banner", (event) => {
+        if (!cancelled) setBanner(event.payload.banner);
+      }),
+      listen<SshAuthSuccessEvent>("ssh:auth_success", (event) => {
+        if (!cancelled) { authSuccessInfo.current = event.payload; }
+      }),
+    ];
+
     async function connect() {
       try {
         setLoading(true);
         setError(null);
         setAuthPrompt(null);
+        setConnectLogs([]);
+        setBanner(null);
+        setShowCredentialPrompt(false);
+        authSuccessInfo.current = null;
 
         // Generate a temporary connection ID reference so auth_prompt listener
         // can match events during the blocked ssh_connect call
@@ -115,8 +149,16 @@ export default function SshTerminalTab({
           return;
         }
 
-        // Auth succeeded — if we went through interactive auth, offer to save
+        // Auth succeeded — offer to save credential (keyboard-interactive or password)
+        const successAuthMethod = (authSuccessInfo.current as { auth_method?: string } | null)?.auth_method;
         if (lastAuthPassword.current) {
+          setShowSaveOffer(true);
+        } else if (
+          auth.type === "password" &&
+          auth.password &&
+          successAuthMethod === "password"
+        ) {
+          lastAuthPassword.current = auth.password;
           setShowSaveOffer(true);
         }
 
@@ -144,6 +186,7 @@ export default function SshTerminalTab({
 
     return () => {
       cancelled = true;
+      for (const p of unlisteners) { p.then((fn) => fn()); }
       if (connectionId) {
         invoke("ssh_disconnect", { connectionId }).catch(() => {});
         removeTerminal(connectionId);
@@ -192,6 +235,42 @@ export default function SshTerminalTab({
       unlisten.then((fn) => fn());
     };
   }, [loading]);
+
+  const handleCredentialRetry = useCallback(async () => {
+    if (!credPassword) return;
+    setCredSubmitting(true);
+    setError(null);
+    setShowCredentialPrompt(false);
+    setLoading(true);
+    setConnectLogs([]);
+    authSuccessInfo.current = null;
+    try {
+      const newAuth: SshAuthPayload = { type: "password", password: credPassword };
+      const connId = await invoke<string>("ssh_connect", {
+        sessionId,
+        host,
+        port,
+        username,
+        auth: newAuth,
+      });
+      lastAuthPassword.current = credPassword;
+      setShowSaveOffer(true);
+      createTerminal(sessionId, connId);
+      setConnectionId(connId);
+      pendingConnId.current = null;
+      const tabs = useSessionStore.getState().openTabs;
+      const tab = tabs.find((tt) => tt.sessionId === sessionId);
+      if (tab) {
+        updateTabStatus(tab.id, ConnectionStatus.Connected);
+      }
+    } catch (e) {
+      setError(String(e));
+      setShowCredentialPrompt(true);
+    } finally {
+      setLoading(false);
+      setCredSubmitting(false);
+    }
+  }, [credPassword, sessionId, host, port, username, createTerminal, updateTabStatus]);
 
   const handleAuthSubmit = async () => {
     if (!authPrompt) return;
@@ -300,11 +379,39 @@ export default function SshTerminalTab({
   if (loading) {
     return (
       <div className="flex items-center justify-center w-full h-full bg-surface-primary">
-        <div className="flex flex-col items-center gap-3 text-text-secondary">
+        <div className="flex flex-col items-center gap-4 max-w-md w-full px-6">
           <Loader2 size={24} className="animate-spin text-accent-primary" />
-          <span className="text-sm">
-            Connecting to {username}@{host}:{port}…
+          <span className="text-sm text-text-secondary">
+            {t("ssh.connectingTo", { target: `${username}@${host}:${port}` })}
           </span>
+          {banner && (
+            <div className="w-full rounded border border-border-default bg-surface-elevated p-3">
+              <p className="text-xs text-text-secondary font-medium mb-1">{t("ssh.banner")}</p>
+              <pre className="text-xs text-text-primary whitespace-pre-wrap">{banner}</pre>
+            </div>
+          )}
+          {connectLogs.length > 0 && (
+            <div className="w-full rounded border border-border-default bg-surface-elevated p-3 max-h-48 overflow-y-auto">
+              <div className="flex items-center gap-1.5 mb-2">
+                <Terminal size={14} className="text-text-secondary" />
+                <span className="text-xs text-text-secondary font-medium">{t("ssh.connectionLog")}</span>
+              </div>
+              {connectLogs.map((log, i) => (
+                <div key={`${log.level}-${i}-${log.message}`} className="flex items-start gap-1.5 text-xs leading-relaxed">
+                  {log.level === "error" ? (
+                    <AlertTriangle size={11} className="text-status-disconnected shrink-0 mt-0.5" />
+                  ) : (
+                    <span className={clsx("shrink-0 mt-0.5", log.level === "warn" ? "text-status-idle" : "text-text-secondary")}>·</span>
+                  )}
+                  <span className={clsx(
+                    log.level === "error" && "text-status-disconnected",
+                    log.level === "warn" && "text-status-idle",
+                    log.level === "info" && "text-text-secondary"
+                  )}>{log.message}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -313,33 +420,100 @@ export default function SshTerminalTab({
   if (error) {
     return (
       <div className="flex items-center justify-center w-full h-full bg-surface-primary">
-        <div className="flex flex-col items-center gap-3 max-w-sm text-center">
+        <div className="flex flex-col items-center gap-3 max-w-md w-full px-6 text-center">
           <div className="w-10 h-10 rounded-full bg-status-disconnected/20 flex items-center justify-center">
-            <span className="text-status-disconnected text-lg">!</span>
+            <AlertTriangle size={20} className="text-status-disconnected" />
           </div>
           <p className="text-sm text-text-primary">
-            Failed to connect to {host}:{port}
+            {t("ssh.connectionFailed", `Failed to connect to ${host}:${port}`)}
           </p>
-          <p className="text-xs text-text-secondary">{error}</p>
-          <button
-            onClick={() => {
-              setError(null);
-              setLoading(true);
-              invoke<string>("ssh_connect", { sessionId, host, port, username, auth })
-                .then((connId) => {
-                  createTerminal(sessionId, connId);
-                  setConnectionId(connId);
-                  setLoading(false);
-                })
-                .catch((e) => {
-                  setError(String(e));
-                  setLoading(false);
-                });
-            }}
-            className="px-3 py-1.5 text-xs rounded bg-interactive-default hover:bg-interactive-hover text-text-primary transition-colors duration-[var(--duration-short)]"
-          >
-            Retry
-          </button>
+          <p className="text-xs text-text-secondary break-all">{error}</p>
+          {connectLogs.length > 0 && (
+            <div className="w-full rounded border border-border-default bg-surface-elevated p-3 max-h-36 overflow-y-auto text-left">
+              <div className="flex items-center gap-1.5 mb-2">
+                <Terminal size={14} className="text-text-secondary" />
+                <span className="text-xs text-text-secondary font-medium">{t("ssh.connectionLog")}</span>
+              </div>
+              {connectLogs.map((log, i) => (
+                <div key={`${log.level}-${i}-${log.message}`} className="flex items-start gap-1.5 text-xs leading-relaxed">
+                  <span className={clsx(
+                    "shrink-0",
+                    log.level === "error" && "text-status-disconnected",
+                    log.level === "warn" && "text-status-idle",
+                    log.level === "info" && "text-text-secondary"
+                  )}>·</span>
+                  <span className={clsx(
+                    log.level === "error" && "text-status-disconnected",
+                    log.level === "warn" && "text-status-idle",
+                    log.level === "info" && "text-text-secondary"
+                  )}>{log.message}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {banner && (
+            <div className="w-full rounded border border-border-default bg-surface-elevated p-3 text-left">
+              <p className="text-xs text-text-secondary font-medium mb-1">{t("ssh.banner")}</p>
+              <pre className="text-xs text-text-primary whitespace-pre-wrap">{banner}</pre>
+            </div>
+          )}
+          {showCredentialPrompt ? (
+            <form
+              className="w-full flex flex-col gap-3 text-left"
+              onSubmit={(e) => { e.preventDefault(); handleCredentialRetry(); }}
+            >
+              <label className="text-xs text-text-secondary">{t("ssh.enterPassword")}</label>
+              <input
+                type="password"
+                autoFocus
+                value={credPassword}
+                onChange={(e) => setCredPassword(e.target.value)}
+                placeholder={t("ssh.passwordPlaceholder", "Password")}
+                className="w-full px-3 py-2 text-sm rounded bg-surface-elevated border border-border-default text-text-primary focus:border-accent-primary focus:outline-none"
+              />
+              <button
+                type="submit"
+                disabled={credSubmitting || !credPassword}
+                className="px-3 py-2 text-sm rounded bg-interactive-default hover:bg-interactive-hover text-text-primary disabled:opacity-50 transition-colors duration-[var(--duration-short)]"
+              >
+                {credSubmitting ? (
+                  <Loader2 size={14} className="animate-spin mx-auto" />
+                ) : (
+                  t("ssh.connect")
+                )}
+              </button>
+            </form>
+          ) : (
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowCredentialPrompt(true)}
+                className="px-3 py-1.5 text-xs rounded bg-interactive-default hover:bg-interactive-hover text-text-primary transition-colors duration-[var(--duration-short)]"
+              >
+                {t("ssh.retryWithCredentials")}
+              </button>
+              <button
+                onClick={() => {
+                  setError(null);
+                  setLoading(true);
+                  setConnectLogs([]);
+                  authSuccessInfo.current = null;
+                  invoke<string>("ssh_connect", { sessionId, host, port, username, auth })
+                    .then((connId) => {
+                      createTerminal(sessionId, connId);
+                      setConnectionId(connId);
+                      setLoading(false);
+                    })
+                    .catch((e) => {
+                      setError(String(e));
+                      setLoading(false);
+                    });
+                }}
+                className="px-3 py-1.5 text-xs rounded text-text-secondary hover:text-text-primary transition-colors duration-[var(--duration-short)]"
+              >
+                {t("common.retry", "Retry")}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );
