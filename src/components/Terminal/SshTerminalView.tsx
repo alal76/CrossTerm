@@ -116,7 +116,10 @@ export default function SshTerminalView({ connectionId, isActive }: SshTerminalV
       invoke("ssh_write", { connectionId, data }).catch(() => {});
     });
 
-    // Listen for SSH output
+    // We must register listeners BEFORE draining the buffer.
+    // The drain switches the backend from buffering to event emission,
+    // so any data arriving after drain is emitted as ssh:output.
+    // If listeners aren't registered yet, those events would be lost.
     const outputUnlisten = listen<{ connection_id: string; data: string }>(
       "ssh:output",
       (event) => {
@@ -126,7 +129,6 @@ export default function SshTerminalView({ connectionId, isActive }: SshTerminalV
       }
     );
 
-    // Listen for SSH disconnection
     const disconnectUnlisten = listen<{ connection_id: string; reason: string }>(
       "ssh:disconnected",
       (event) => {
@@ -138,6 +140,16 @@ export default function SshTerminalView({ connectionId, isActive }: SshTerminalV
     );
 
     updateTerminalStatus(connectionId, ConnectionStatus.Connected);
+
+    // Wait for listeners to be registered, THEN drain buffered output.
+    // This ensures no data is lost between drain and listener registration.
+    Promise.all([outputUnlisten, disconnectUnlisten]).then(() => {
+      invoke<string>("ssh_drain_buffer", { connectionId })
+        .then((buffered) => {
+          if (buffered) term.write(buffered);
+        })
+        .catch(() => {});
+    });
 
     const doResize = () => {
       try {

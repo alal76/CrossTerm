@@ -399,14 +399,10 @@ impl client::Handler for SshClientHandler {
             return Ok(());
         }
 
-        let text = String::from_utf8_lossy(data).to_string();
-        let _ = self.app_handle.emit(
-            "ssh:output",
-            SshOutputEvent {
-                connection_id: self.connection_id.clone(),
-                data: text,
-            },
-        );
+        // Shell channel data is handled by the reader task via ch.wait(),
+        // and ssh_exec channels handle their own output.  Emitting here
+        // would duplicate output and leak exec-channel data (e.g. remote
+        // monitoring commands) into the terminal.
         Ok(())
     }
 
@@ -438,6 +434,12 @@ pub(crate) struct SshConnection {
     forward_tasks: HashMap<String, tokio::task::JoinHandle<()>>,
     #[allow(clippy::type_complexity)]
     remote_forwards: Arc<TokioMutex<HashMap<(String, u32), (String, u16)>>>,
+    /// Early output buffer: collects data before the frontend terminal mounts.
+    /// Shared with the reader task; drained once via `ssh_drain_buffer`.
+    output_buffer: Arc<std::sync::Mutex<Option<Vec<String>>>>,
+    /// Cached content from the first drain, returned on subsequent drain calls
+    /// (React StrictMode may call drain multiple times due to double-mount).
+    drained_cache: Arc<std::sync::Mutex<Option<String>>>,
 }
 
 // ── State ───────────────────────────────────────────────────────────────
@@ -959,6 +961,11 @@ pub async fn ssh_connect(
 
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<SshCommand>(256);
 
+    // Output buffer: collects data until the frontend terminal mounts and drains it
+    let output_buffer: Arc<std::sync::Mutex<Option<Vec<String>>>> =
+        Arc::new(std::sync::Mutex::new(Some(Vec::new())));
+    let output_buffer_reader = output_buffer.clone();
+
     let conn_id_reader = connection_id.clone();
     let app_reader = app_handle.clone();
     let connections_ref = state.connections.clone();
@@ -970,13 +977,25 @@ pub async fn ssh_connect(
                     match msg {
                         Some(ChannelMsg::Data { data }) => {
                             let text = String::from_utf8_lossy(&data).to_string();
-                            let _ = app_reader.emit(
-                                "ssh:output",
-                                SshOutputEvent {
-                                    connection_id: conn_id_reader.clone(),
-                                    data: text,
-                                },
-                            );
+                            // Buffer output if the frontend hasn't drained yet
+                            let should_emit = {
+                                let mut buf = output_buffer_reader.lock().unwrap();
+                                if let Some(ref mut vec) = *buf {
+                                    vec.push(text.clone());
+                                    false
+                                } else {
+                                    true
+                                }
+                            };
+                            if should_emit {
+                                let _ = app_reader.emit(
+                                    "ssh:output",
+                                    SshOutputEvent {
+                                        connection_id: conn_id_reader.clone(),
+                                        data: text,
+                                    },
+                                );
+                            }
                         }
                         Some(ChannelMsg::ExitStatus { exit_status }) => {
                             let _ = app_reader.emit(
@@ -1051,6 +1070,8 @@ pub async fn ssh_connect(
         cmd_tx,
         forward_tasks: HashMap::new(),
         remote_forwards,
+        output_buffer,
+        drained_cache: Arc::new(std::sync::Mutex::new(None)),
     };
 
     {
@@ -1083,6 +1104,41 @@ pub async fn ssh_connect(
     );
 
     Ok(connection_id)
+}
+
+/// Drain the early-output buffer for a connection.  Returns all buffered
+/// output and switches the reader task to direct event emission.
+#[tauri::command]
+pub async fn ssh_drain_buffer(
+    state: tauri::State<'_, SshState>,
+    connection_id: String,
+) -> Result<String, SshError> {
+    let conn_arc = {
+        let connections = state.connections.read().await;
+        connections
+            .get(&connection_id)
+            .cloned()
+            .ok_or_else(|| SshError::NotFound(connection_id.clone()))?
+    };
+    let conn = conn_arc.lock().await;
+    // Return cached content if already drained (handles React StrictMode double-mount).
+    {
+        let cache = conn.drained_cache.lock().unwrap();
+        if let Some(ref cached) = *cache {
+            return Ok(cached.clone());
+        }
+    }
+    let result = {
+        let mut buf = conn.output_buffer.lock().unwrap();
+        // Take the buffer out (sets to None), which tells the reader task
+        // to switch to direct event emission.
+        buf.take().unwrap_or_default().join("")
+    };
+    {
+        let mut cache = conn.drained_cache.lock().unwrap();
+        *cache = Some(result.clone());
+    }
+    Ok(result)
 }
 
 #[tauri::command]

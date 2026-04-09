@@ -42,6 +42,7 @@ interface SshTerminalTabProps {
   readonly port: number;
   readonly username: string;
   readonly auth: SshAuthPayload;
+  readonly credentialRef?: string;
 }
 
 export default function SshTerminalTab({
@@ -51,6 +52,7 @@ export default function SshTerminalTab({
   port,
   username,
   auth,
+  credentialRef,
 }: SshTerminalTabProps) {
   const { t } = useTranslation();
   const [connectionId, setConnectionId] = useState<string | null>(null);
@@ -124,6 +126,23 @@ export default function SshTerminalTab({
         setShowCredentialPrompt(false);
         authSuccessInfo.current = null;
 
+        // Resolve auth: if we have a credentialRef, try fetching from vault
+        let resolvedAuth = auth;
+        if (auth.type === "none" && credentialRef) {
+          const cred = await useVaultStore.getState().getCredential(credentialRef);
+          if (cred) {
+            if (cred.credential_type === "password" && cred.data?.password) {
+              resolvedAuth = { type: "password", password: cred.data.password as string };
+            } else if (cred.credential_type === "private_key" && cred.data?.key_data) {
+              resolvedAuth = {
+                type: "private_key",
+                key_data: cred.data.key_data as string,
+                passphrase: (cred.data.passphrase as string) ?? undefined,
+              };
+            }
+          }
+        }
+
         // Generate a temporary connection ID reference so auth_prompt listener
         // can match events during the blocked ssh_connect call
         const tempId = `pending-${sessionId}-${Date.now()}`;
@@ -142,7 +161,7 @@ export default function SshTerminalTab({
           host,
           port,
           username,
-          auth,
+          auth: resolvedAuth,
         });
         if (cancelled) {
           invoke("ssh_disconnect", { connectionId: connId }).catch(() => {});
@@ -299,12 +318,19 @@ export default function SshTerminalTab({
     try {
       const activeVaultId = useVaultStore.getState().activeVaultId;
       if (activeVaultId) {
-        await useVaultStore.getState().addCredential({
+        const credId = await useVaultStore.getState().addCredential({
           name: `${username}@${host}:${port}`,
           credential_type: "password",
           username,
           data: { password: lastAuthPassword.current },
         });
+        // Link the saved credential back to the session so future
+        // connections auto-retrieve it from the vault.
+        useSessionStore.getState().updateSession(sessionId, { credentialRef: credId });
+        invoke("session_update", {
+          id: sessionId,
+          request: { credential_ref: credId },
+        }).catch(() => {});
       }
     } catch {
       // Silent — vault may be locked
@@ -523,12 +549,28 @@ export default function SshTerminalTab({
 
   const handleReconnect = async (): Promise<boolean> => {
     try {
+      // Resolve vault credential for reconnection
+      let reconnectAuth = auth;
+      if (auth.type === "none" && credentialRef) {
+        const cred = await useVaultStore.getState().getCredential(credentialRef);
+        if (cred) {
+          if (cred.credential_type === "password" && cred.data?.password) {
+            reconnectAuth = { type: "password", password: cred.data.password as string };
+          } else if (cred.credential_type === "private_key" && cred.data?.key_data) {
+            reconnectAuth = {
+              type: "private_key",
+              key_data: cred.data.key_data as string,
+              passphrase: (cred.data.passphrase as string) ?? undefined,
+            };
+          }
+        }
+      }
       const connId = await invoke<string>("ssh_connect", {
         sessionId,
         host,
         port,
         username,
-        auth,
+        auth: reconnectAuth,
       });
       removeTerminal(connectionId);
       createTerminal(sessionId, connId);

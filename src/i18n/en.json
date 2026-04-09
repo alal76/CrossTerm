@@ -8,6 +8,7 @@
     "snippets": "Snippets",
     "tunnels": "Tunnels",
     "network": "Network",
+    "remote_files": "Remote Files",
     "credentials": "Credential Manager",
     "collapse": "Collapse Sidebar",
     "expand": "Expand Sidebar"
@@ -86,7 +87,28 @@
     "encoding": "UTF-8",
     "tunnels": "Tunnels",
     "noTunnels": "No active tunnels",
-    "dimensions": "{{cols}} × {{rows}}"
+    "dimensions": "{{cols}} × {{rows}}",
+    "cpu": "CPU",
+    "mem": "MEM",
+    "disk": "DISK",
+    "load": "Load",
+    "monitoring": "Server Monitor",
+    "monitorOff": "Monitor Off"
+  },
+  "remoteFiles": {
+    "title": "Remote Files",
+    "noConnection": "No active SSH connection",
+    "connectFirst": "Connect to an SSH session to browse remote files",
+    "followTerminal": "Follow terminal path",
+    "upload": "Upload file",
+    "download": "Download",
+    "refresh": "Refresh",
+    "parent": "Go to parent",
+    "openInTerminal": "Open in terminal",
+    "newFolder": "New folder",
+    "delete": "Delete",
+    "rename": "Rename",
+    "openNetworkExplorer": "Open in main window"
   },
   "vault": {
     "title": "Credential Vault",

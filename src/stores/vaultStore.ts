@@ -36,6 +36,7 @@ interface VaultState {
 
   fetchCredentials: () => Promise<void>;
   addCredential: (request: { name: string; credential_type: string; username?: string; data: unknown; tags?: string[]; notes?: string }) => Promise<string>;
+  getCredential: (id: string) => Promise<{ credential_type: string; username: string | null; data: Record<string, unknown> } | null>;
   updateCredential: (id: string, request: { name?: string; username?: string; data?: unknown; tags?: string[]; notes?: string }) => Promise<void>;
   deleteCredential: (id: string) => Promise<void>;
 
@@ -211,6 +212,21 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     } catch (e) {
       set({ error: String(e), loading: false });
       throw e;
+    }
+  },
+
+  getCredential: async (id) => {
+    const { activeVaultId, vaultLockStates } = get();
+    if (!activeVaultId || vaultLockStates[activeVaultId]) return null;
+    try {
+      const detail = await invoke<{
+        credential_type: string;
+        username: string | null;
+        data: Record<string, unknown>;
+      }>("credential_get", { vaultId: activeVaultId, id });
+      return detail;
+    } catch {
+      return null;
     }
   },
 

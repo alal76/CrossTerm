@@ -465,7 +465,7 @@ export default function SessionTree({
         for (const s of sessions) {
           if (s.group === folderPath) {
             updateSession(s.id, { group: newPath });
-          } else if (s.group.startsWith(folderPath + "/")) {
+          } else if (s.group?.startsWith(folderPath + "/")) {
             updateSession(s.id, { group: s.group.replace(folderPath, newPath) });
           }
         }
@@ -479,11 +479,11 @@ export default function SessionTree({
   const handleDeleteFolder = useCallback(
     (folderPath: string) => {
       const count = sessions.filter(
-        (s) => s.group === folderPath || s.group.startsWith(folderPath + "/")
+        (s) => s.group === folderPath || s.group?.startsWith(folderPath + "/")
       ).length;
       if (globalThis.confirm(t("sessionTree.confirmDeleteFolder", { folder: folderPath, count }))) {
         for (const s of sessions) {
-          if (s.group === folderPath || s.group.startsWith(folderPath + "/")) {
+          if (s.group === folderPath || s.group?.startsWith(folderPath + "/")) {
             updateSession(s.id, { group: "" });
           }
         }

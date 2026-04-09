@@ -140,6 +140,7 @@ pub fn run() {
             // SSH
             ssh::ssh_connect,
             ssh::ssh_discover,
+            ssh::ssh_drain_buffer,
             ssh::ssh_disconnect,
             ssh::ssh_auth_respond,
             ssh::ssh_write,

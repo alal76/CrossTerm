@@ -106,24 +106,37 @@ pub struct ProfileUpdateRequest {
 // ── Session types ───────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
 pub enum SessionType {
+    #[serde(rename = "ssh")]
     SshTerminal,
+    #[serde(rename = "sftp")]
     SftpBrowser,
+    #[serde(rename = "scp")]
     ScpTransfer,
+    #[serde(rename = "rdp")]
     Rdp,
+    #[serde(rename = "vnc")]
     Vnc,
+    #[serde(rename = "telnet")]
     Telnet,
+    #[serde(rename = "serial")]
     SerialConsole,
+    #[serde(rename = "local_shell")]
     LocalShell,
+    #[serde(rename = "wsl")]
     WslShell,
+    #[serde(rename = "cloud_shell")]
     CloudShell,
+    #[serde(rename = "web_console")]
     WebConsole,
+    #[serde(rename = "kubernetes_exec")]
     KubernetesExec,
+    #[serde(rename = "docker_exec")]
     DockerExec,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ConnectionDetails {
     pub host: Option<String>,
     pub port: Option<u16>,
@@ -131,6 +144,7 @@ pub struct ConnectionDetails {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionDefinition {
     pub id: String,
     pub name: String,

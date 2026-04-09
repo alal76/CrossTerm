@@ -56,3 +56,37 @@ export function formatNumber(
 ): string {
   return new Intl.NumberFormat(locale ?? navigator.language).format(num);
 }
+
+// ── Host color coding ──
+
+/** 10 distinct, accessible colors for host-based session tagging. */
+const HOST_COLORS = [
+  "#ef4444", // red
+  "#f97316", // orange
+  "#eab308", // yellow
+  "#22c55e", // green
+  "#14b8a6", // teal
+  "#3b82f6", // blue
+  "#6366f1", // indigo
+  "#a855f7", // purple
+  "#ec4899", // pink
+  "#06b6d4", // cyan
+] as const;
+
+/** Deterministic hash of a string to a 32-bit unsigned integer. */
+function djb2(str: string): number {
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) + hash + (str.codePointAt(i) ?? 0)) >>> 0;
+  }
+  return hash;
+}
+
+/**
+ * Return a consistent color for a given hostname.
+ * Same host always maps to the same color.
+ */
+export function hostColor(host: string): string {
+  if (!host) return HOST_COLORS[0];
+  return HOST_COLORS[djb2(host) % HOST_COLORS.length];
+}

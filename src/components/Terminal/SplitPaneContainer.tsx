@@ -108,6 +108,7 @@ function LeafPane({
           host={session.connection.host}
           port={session.connection.port}
           username={(session.connection.protocolOptions?.["username"] as string) ?? "root"}
+          credentialRef={session.credentialRef}
           auth={(() => {
             const pw = (session.connection.protocolOptions?.["password"] as string) ?? "";
             return pw ? { type: "password" as const, password: pw } : { type: "none" as const };

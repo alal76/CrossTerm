@@ -50,6 +50,7 @@ import WhatsNewPanel from "@/components/Help/WhatsNewPanel";
 import FeatureTour from "@/components/Help/FeatureTour";
 import TipOfTheDay from "@/components/Help/TipOfTheDay";
 import NetworkExplorer from "@/components/NetworkTools/NetworkExplorer";
+import RemoteFileBrowser from "@/components/RemoteFiles/RemoteFileBrowser";
 import VaultUnlock from "@/components/Vault/VaultUnlock";
 import CredentialManager from "@/components/Vault/CredentialManager";
 import SettingsPanel from "@/components/Settings/SettingsPanel";
@@ -57,6 +58,7 @@ import SessionEditor from "@/components/SessionTree/SessionEditor";
 import SftpBrowser from "@/components/SftpBrowser/SftpBrowser";
 import SnippetListPanel from "@/components/Snippets/SnippetListPanel";
 import NotificationHistoryPanel from "@/components/Notifications/NotificationHistoryPanel";
+import { hostColor } from "@/utils/formatters";
 
 const SESSION_TYPE_ICONS: Record<string, string> = {
   ssh: "⌨",
@@ -72,6 +74,7 @@ const SESSION_TYPE_ICONS: Record<string, string> = {
   docker_exec: "🐳",
   web_console: "🌐",
   scp: "📤",
+  network_explorer: "📡",
 };
 
 const STATUS_SHAPES: Record<ConnectionStatus, string> = {
@@ -382,6 +385,7 @@ function TabBar({
   const activeTabId = useSessionStore((s) => s.activeTabId);
   const setActiveTab = useSessionStore((s) => s.setActiveTab);
   const closeTab = useSessionStore((s) => s.closeTab);
+  const tabSessions = useSessionStore((s) => s.sessions);
   const broadcastMode = useTerminalStore((s) => s.broadcastMode);
   const toggleBroadcastMode = useTerminalStore((s) => s.toggleBroadcastMode);
 
@@ -437,7 +441,13 @@ function TabBar({
         className="flex items-center flex-1 overflow-x-auto scrollbar-none px-1 gap-0.5"
         role="tablist"
       >
-        {sortedTabs.map((tab) => (
+        {sortedTabs.map((tab) => {
+          const tabSession = tabSessions.find((s: Session) => s.id === tab.sessionId);
+          const tabHostColor = tabSession?.connection?.host
+            ? hostColor(tabSession.connection.host)
+            : undefined;
+
+          return (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
@@ -457,10 +467,21 @@ function TabBar({
               "group flex items-center gap-1.5 px-3 h-8 rounded-t text-xs whitespace-nowrap transition-colors",
               tab.pinned ? "min-w-[32px] justify-center" : "min-w-[120px] max-w-[240px]",
               tab.id === activeTabId
-                ? "bg-surface-primary text-text-primary border-t-2 border-t-accent-primary"
+                ? "bg-surface-primary text-text-primary border-t-2"
                 : "text-text-secondary hover:bg-surface-elevated hover:text-text-primary border-t-2 border-t-transparent"
             )}
+            style={
+              tab.id === activeTabId && tabHostColor
+                ? { borderTopColor: tabHostColor }
+                : undefined
+            }
           >
+            {tabHostColor && (
+              <span
+                className="inline-block w-2 h-2 rounded-full shrink-0"
+                style={{ backgroundColor: tabHostColor }}
+              />
+            )}
             <span className="text-sm">{SESSION_TYPE_ICONS[tab.sessionType] ?? "⌨"}</span>
             {!tab.pinned && (
               <span className="truncate flex-1 text-left">{tab.title}</span>
@@ -479,7 +500,8 @@ function TabBar({
               </button>
             )}
           </button>
-        ))}
+          );
+        })}
       </div>
       {canScrollRight && (
         <button
@@ -536,35 +558,66 @@ function TabBar({
 
 // ── Region C: Sidebar ──────────────────────────────────────────
 
-function getSidebarWidth(collapsed: boolean, bp: string) {
-  if (collapsed) return "w-12";
-  return bp === "large" ? "w-72" : "w-60";
-}
-
 const SIDEBAR_MODES = [
   { mode: SidebarMode.Sessions, icon: FolderOpen, label: "sidebar.sessions" as const },
   { mode: SidebarMode.Snippets, icon: Code2, label: "sidebar.snippets" as const },
   { mode: SidebarMode.Tunnels, icon: Lock, label: "sidebar.tunnels" as const },
   { mode: SidebarMode.Network, icon: Radar, label: "sidebar.network" as const },
+  { mode: SidebarMode.RemoteFiles, icon: FolderTree, label: "sidebar.remote_files" as const },
 ];
 
 function Sidebar({
   onNewSession,
   onOpenCredentials,
+  onOpenNetworkTab,
 }: {
   readonly onNewSession: () => void;
   readonly onOpenCredentials: () => void;
+  readonly onOpenNetworkTab: () => void;
 }) {
   const { t } = useTranslation();
   const sidebarMode = useAppStore((s) => s.sidebarMode);
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
+  const sidebarWidth = useAppStore((s) => s.sidebarWidth);
   const setSidebarCollapsed = useAppStore((s) => s.setSidebarCollapsed);
+  const setSidebarWidth = useAppStore((s) => s.setSidebarWidth);
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
   const sessions = useSessionStore((s) => s.sessions);
   const favorites = useSessionStore((s) => s.favorites);
   const openTab = useSessionStore((s) => s.openTab);
   const setSidebarMode = useAppStore((s) => s.setSidebarMode);
   const breakpoint = useBreakpoint();
+
+  // Resize handle state
+  const resizing = useRef(false);
+  const startX = useRef(0);
+  const startWidth = useRef(0);
+
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    resizing.current = true;
+    startX.current = e.clientX;
+    startWidth.current = sidebarWidth;
+
+    const handleMouseMove = (ev: MouseEvent) => {
+      if (!resizing.current) return;
+      const delta = ev.clientX - startX.current;
+      setSidebarWidth(startWidth.current + delta);
+    };
+
+    const handleMouseUp = () => {
+      resizing.current = false;
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }, [sidebarWidth, setSidebarWidth]);
 
   // Auto-collapse on smaller breakpoints
   useEffect(() => {
@@ -578,13 +631,15 @@ function Sidebar({
     return null;
   }
 
+  const totalWidth = sidebarCollapsed ? 48 : 48 + sidebarWidth;
+
   return (
     <nav
-      className={clsx(
-        "flex shrink-0 h-full border-r border-border-subtle bg-surface-secondary transition-all",
-        getSidebarWidth(sidebarCollapsed, breakpoint)
-      )}
-      style={{ transitionDuration: "var(--duration-medium)", transitionTimingFunction: "var(--ease-default)" }}
+      className="flex shrink-0 h-full border-r border-border-subtle bg-surface-secondary relative"
+      style={{
+        width: `${totalWidth}px`,
+        transition: resizing.current ? "none" : "width var(--duration-medium) var(--ease-default)",
+      }}
     >
       {/* Icon rail */}
       <div className="flex flex-col items-center w-12 py-2 gap-1 border-r border-border-subtle shrink-0">
@@ -659,10 +714,31 @@ function Sidebar({
               />
             )}
             {sidebarMode === SidebarMode.Network && (
-              <NetworkExplorer />
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={onOpenNetworkTab}
+                  className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded bg-interactive-default hover:bg-interactive-hover text-text-inverse transition-colors shrink-0"
+                >
+                  <ExternalLink size={13} />
+                  {t("remoteFiles.openNetworkExplorer")}
+                </button>
+                <NetworkExplorer />
+              </div>
+            )}
+            {sidebarMode === SidebarMode.RemoteFiles && (
+              <RemoteFileBrowser />
             )}
           </div>
         </div>
+      )}
+
+      {/* Resize handle */}
+      {!sidebarCollapsed && (
+        // eslint-disable-next-line jsx-a11y/no-static-element-interactions
+        <div
+          className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-accent-primary/40 transition-colors z-10"
+          onMouseDown={handleResizeStart}
+        />
       )}
     </nav>
   );
@@ -768,10 +844,12 @@ function SessionCanvas() {
 
         if (tab.sessionType === SessionType.SSH && session) {
           const username = (session.connection.protocolOptions?.["username"] as string) ?? "root";
+          const sessionHostColor = hostColor(session.connection.host);
           return (
             <div
               key={tab.id}
               className={clsx("absolute inset-0", isActive ? "z-10" : "z-0 hidden")}
+              style={{ borderLeft: `3px solid ${sessionHostColor}` }}
             >
               <SshTerminalTab
                 sessionId={tab.sessionId}
@@ -779,11 +857,23 @@ function SessionCanvas() {
                 host={session.connection.host}
                 port={session.connection.port}
                 username={username}
+                credentialRef={session.credentialRef}
                 auth={(() => {
                   const pw = (session.connection.protocolOptions?.["password"] as string) ?? "";
                   return pw ? { type: "password" as const, password: pw } : { type: "none" as const };
                 })()}
               />
+            </div>
+          );
+        }
+
+        if (tab.sessionType === SessionType.NetworkExplorer) {
+          return (
+            <div
+              key={tab.id}
+              className={clsx("absolute inset-0 overflow-auto p-4", isActive ? "z-10" : "z-0 hidden")}
+            >
+              <NetworkExplorer />
             </div>
           );
         }
@@ -874,6 +964,43 @@ function BottomPanel() {
 
 // ─── Region F: Status Bar ──────────────────────────────────────
 
+function parseRemoteStats(raw: string): import("@/types").RemoteStats {
+  const memTotalMatch = /MemTotal:\s+(\d+)/.exec(raw);
+  const memAvailMatch = /MemAvailable:\s+(\d+)/.exec(raw);
+  const memTotal = Number(memTotalMatch?.[1] ?? 0) / 1024;
+  const memAvail = Number(memAvailMatch?.[1] ?? 0) / 1024;
+
+  const loadMatch = /(\d+\.\d+)\s+\d+\.\d+\s+\d+\.\d+/.exec(raw);
+  const load1 = loadMatch ? Number.parseFloat(loadMatch[1]) : 0;
+
+  const cpuMatch = /^cpu\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/m.exec(raw);
+  let cpuPercent = 0;
+  if (cpuMatch) {
+    const total = cpuMatch.slice(1, 8).reduce((s, v) => s + Number(v), 0);
+    const idle = Number(cpuMatch[4]);
+    cpuPercent = Math.round(((total - idle) / total) * 100);
+  }
+
+  const dfMatch = /\S+\s+(\d+)\s+(\d+)\s+\d+\s+\d+%/.exec(raw);
+  const diskTotal = dfMatch ? Number(dfMatch[1]) / (1024 * 1024 * 1024) : 0;
+  const diskUsed = dfMatch ? Number(dfMatch[2]) / (1024 * 1024 * 1024) : 0;
+
+  return {
+    cpuPercent,
+    memUsedMb: Math.round(memTotal - memAvail),
+    memTotalMb: Math.round(memTotal),
+    diskUsedGb: Math.round(diskUsed * 10) / 10,
+    diskTotalGb: Math.round(diskTotal * 10) / 10,
+    loadAvg1: load1,
+  };
+}
+
+function cpuColor(percent: number): string {
+  if (percent > 80) return "text-status-error";
+  if (percent > 50) return "text-status-warning";
+  return "text-status-connected";
+}
+
 function StatusBar({
   onOpenHelp,
   onOpenShortcuts,
@@ -889,21 +1016,61 @@ function StatusBar({
   const activeTabId = useSessionStore((s) => s.activeTabId);
   const openTabs = useSessionStore((s) => s.openTabs);
   const terminals = useTerminalStore((s) => s.terminals);
+  const remoteMonitorEnabled = useAppStore((s) => s.remoteMonitorEnabled);
+  const remoteStats = useAppStore((s) => s.remoteStats);
+  const setRemoteMonitorEnabled = useAppStore((s) => s.setRemoteMonitorEnabled);
+  const setRemoteStats = useAppStore((s) => s.setRemoteStats);
   const activeTab = openTabs.find((tab) => tab.id === activeTabId);
   const activeProfile = profiles.find((p) => p.id === activeProfileId);
 
-  // Resolve terminal dimensions for the active tab
+  // Resolve terminal dimensions and connection ID for the active tab
   let termCols = 80;
   let termRows = 24;
+  let activeConnectionId: string | null = null;
   if (activeTab) {
     for (const term of terminals.values()) {
       if (term.sessionId === activeTab.sessionId) {
         termCols = term.cols;
         termRows = term.rows;
+        if (term.status === ConnectionStatus.Connected && activeTab.sessionType === SessionType.SSH) {
+          activeConnectionId = term.id;
+        }
         break;
       }
     }
   }
+
+  // Poll remote stats for active SSH connection
+  useEffect(() => {
+    if (!remoteMonitorEnabled || !activeConnectionId) {
+      setRemoteStats(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function poll() {
+      if (cancelled || !activeConnectionId) return;
+      try {
+        const raw = await invoke<string>("ssh_exec", {
+          connectionId: activeConnectionId,
+          command: "cat /proc/stat /proc/meminfo /proc/loadavg 2>/dev/null && df -B1 / 2>/dev/null | tail -1",
+        });
+        if (cancelled) return;
+        setRemoteStats(parseRemoteStats(raw));
+      } catch {
+        if (!cancelled) setRemoteStats(null);
+      }
+    }
+
+    void poll();
+    const interval = setInterval(poll, 5000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [remoteMonitorEnabled, activeConnectionId, setRemoteStats]);
 
   return (
     <footer className="flex items-center h-7 px-3 bg-surface-primary border-t border-border-subtle text-[11px] text-text-secondary no-select shrink-0 gap-4">
@@ -922,6 +1089,44 @@ function StatusBar({
           <span>{t("statusBar.encoding")}</span>
           <span>{termCols} × {termRows}</span>
         </>
+      )}
+      {/* Remote server monitor */}
+      {activeConnectionId && remoteStats && remoteMonitorEnabled && (
+        <div className="flex items-center gap-3 text-[10px] font-mono">
+          <span className="flex items-center gap-1">
+            <span className="text-text-disabled">{t("statusBar.cpu")}</span>
+            <span className={cpuColor(remoteStats.cpuPercent)}>
+              {remoteStats.cpuPercent}%
+            </span>
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="text-text-disabled">{t("statusBar.mem")}</span>
+            <span className={remoteStats.memTotalMb > 0 && remoteStats.memUsedMb / remoteStats.memTotalMb > 0.85 ? "text-status-error" : "text-status-connected"}>
+              {remoteStats.memUsedMb}/{remoteStats.memTotalMb}M
+            </span>
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="text-text-disabled">{t("statusBar.disk")}</span>
+            <span>{remoteStats.diskUsedGb}/{remoteStats.diskTotalGb}G</span>
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="text-text-disabled">{t("statusBar.load")}</span>
+            <span>{remoteStats.loadAvg1.toFixed(2)}</span>
+          </span>
+        </div>
+      )}
+      {activeConnectionId && (
+        <button
+          onClick={() => setRemoteMonitorEnabled(!remoteMonitorEnabled)}
+          className={clsx(
+            "px-1.5 py-0.5 rounded text-[9px] transition-colors",
+            remoteMonitorEnabled
+              ? "bg-accent-primary/20 text-accent-primary"
+              : "text-text-disabled hover:text-text-secondary"
+          )}
+        >
+          {remoteMonitorEnabled ? t("statusBar.monitoring") : t("statusBar.monitorOff")}
+        </button>
       )}
       <div className="flex-1" />
       <span className="flex items-center gap-1">
@@ -1029,6 +1234,8 @@ export default function App() {
         if (settings?.theme) {
           setTheme(settings.theme);
         }
+        // Load saved sessions from backend
+        await useSessionStore.getState().loadSessions();
         // If settings were loaded successfully, first launch is already done
         setFirstLaunchComplete(true);
       } catch {
@@ -1142,6 +1349,24 @@ export default function App() {
     openTab(session);
   }, [addSession, openTab]);
 
+  const handleOpenNetworkTab = useCallback(() => {
+    const now = new Date().toISOString();
+    const session: Session = {
+      id: crypto.randomUUID(),
+      name: t("network.explore"),
+      type: SessionType.NetworkExplorer,
+      group: "",
+      tags: [],
+      connection: { host: "localhost", port: 0 },
+      createdAt: now,
+      updatedAt: now,
+      autoReconnect: false,
+      keepAliveIntervalSeconds: 0,
+    };
+    addSession(session);
+    openTab(session);
+  }, [addSession, openTab]);
+
   // Tab navigation helpers
   const switchToTabByOffset = useCallback(
     (offset: number) => {
@@ -1221,6 +1446,7 @@ export default function App() {
             <Sidebar
               onNewSession={() => { setEditingSession(null); setShowSessionEditor(true); }}
               onOpenCredentials={() => setShowCredentialManager(true)}
+              onOpenNetworkTab={handleOpenNetworkTab}
             />
 
             <div className="flex flex-col flex-1 min-w-0">

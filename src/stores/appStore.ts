@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { SidebarMode, BottomPanelMode, ThemeVariant } from "@/types";
-import type { Profile, BellStyle, CursorStyle, ThemeTokens } from "@/types";
+import type { Profile, BellStyle, CursorStyle, ThemeTokens, RemoteStats } from "@/types";
 
 function getSystemTheme(): ThemeVariant.Dark | ThemeVariant.Light {
   return globalThis.matchMedia("(prefers-color-scheme: dark)").matches
@@ -15,6 +15,7 @@ interface AppState {
 
   sidebarMode: SidebarMode;
   sidebarCollapsed: boolean;
+  sidebarWidth: number;
 
   bottomPanelVisible: boolean;
   bottomPanelMode: BottomPanelMode;
@@ -34,9 +35,15 @@ interface AppState {
   showNotificationHistory: boolean;
   windowWidth: number;
   windowHeight: number;
+
+  remoteMonitorEnabled: boolean;
+  remoteStats: RemoteStats | null;
+  remoteFilesFollowTerminal: boolean;
+
   setShowNotificationHistory: (show: boolean) => void;
   setSidebarMode: (mode: SidebarMode) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
+  setSidebarWidth: (width: number) => void;
   toggleSidebar: () => void;
 
   setBottomPanelVisible: (visible: boolean) => void;
@@ -59,6 +66,10 @@ interface AppState {
   setCursorStyle: (style: CursorStyle) => void;
   setCursorBlink: (blink: boolean) => void;
   setCustomTheme: (name: string | null, tokens: Partial<ThemeTokens> | null) => void;
+
+  setRemoteMonitorEnabled: (enabled: boolean) => void;
+  setRemoteStats: (stats: RemoteStats | null) => void;
+  setRemoteFilesFollowTerminal: (follow: boolean) => void;
 }
 
 const initialTheme = ThemeVariant.Dark;
@@ -76,6 +87,7 @@ export const useAppStore = create<AppState>()(persist((set) => ({
 
   sidebarMode: SidebarMode.Sessions,
   sidebarCollapsed: false,
+  sidebarWidth: 240,
 
   bottomPanelVisible: false,
   bottomPanelMode: BottomPanelMode.AuditLog,
@@ -97,6 +109,10 @@ export const useAppStore = create<AppState>()(persist((set) => ({
   windowWidth: window.innerWidth,
   windowHeight: window.innerHeight,
 
+  remoteMonitorEnabled: true,
+  remoteStats: null,
+  remoteFilesFollowTerminal: true,
+
   setShowNotificationHistory: (show) => set({ showNotificationHistory: show }),
   setBellStyle: (style) => set({ bellStyle: style }),
   setCursorStyle: (style) => set({ cursorStyle: style }),
@@ -106,8 +122,13 @@ export const useAppStore = create<AppState>()(persist((set) => ({
 
   setSidebarMode: (mode) => set({ sidebarMode: mode }),
   setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
+  setSidebarWidth: (width) => set({ sidebarWidth: Math.max(180, Math.min(600, width)) }),
   toggleSidebar: () =>
     set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
+
+  setRemoteMonitorEnabled: (enabled) => set({ remoteMonitorEnabled: enabled }),
+  setRemoteStats: (stats) => set({ remoteStats: stats }),
+  setRemoteFilesFollowTerminal: (follow) => set({ remoteFilesFollowTerminal: follow }),
 
   setBottomPanelVisible: (visible) => set({ bottomPanelVisible: visible }),
   toggleBottomPanel: () =>

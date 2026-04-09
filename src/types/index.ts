@@ -12,6 +12,7 @@ export enum SessionType {
   WebConsole = "web_console",
   KubernetesExec = "kubernetes_exec",
   DockerExec = "docker_exec",
+  NetworkExplorer = "network_explorer",
 }
 
 export enum ConnectionStatus {
@@ -26,6 +27,7 @@ export enum SidebarMode {
   Snippets = "snippets",
   Tunnels = "tunnels",
   Network = "network",
+  RemoteFiles = "remote_files",
 }
 
 export enum BottomPanelMode {
@@ -145,7 +147,7 @@ export interface Session {
   id: string;
   name: string;
   type: SessionType;
-  group: string;
+  group?: string;
   tags: string[];
   icon?: string;
   colorLabel?: string;
@@ -580,6 +582,17 @@ export interface SshAuthSuccessEvent {
   port: number;
   username: string;
   auth_method: string;
+}
+
+// --- Remote Monitoring Types ---
+
+export interface RemoteStats {
+  cpuPercent: number;
+  memUsedMb: number;
+  memTotalMb: number;
+  diskUsedGb: number;
+  diskTotalGb: number;
+  loadAvg1: number;
 }
 
 // --- Recording Types ---
