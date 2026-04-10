@@ -684,6 +684,7 @@
     "aircrackDisclaimerBullet3": "I will use this for education and vulnerability assessment only",
     "aircrackDisclaimerBullet4": "I accept full legal responsibility for my actions",
     "aircrackAcceptDisclaimer": "I Accept — Proceed with Caution",
+    "aircrackAcceptAll": "Accept All",
     "aircrackDecline": "Cancel",
     "aircrackNotInstalled": "aircrack-ng is not installed. Install it with your package manager (e.g., brew install aircrack-ng, apt install aircrack-ng).",
     "aircrackNeedsRoot": "aircrack-ng requires root/sudo privileges for monitor mode and packet injection. Run CrossTerm with elevated permissions.",

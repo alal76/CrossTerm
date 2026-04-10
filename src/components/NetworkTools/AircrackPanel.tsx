@@ -88,6 +88,14 @@ function DisclaimerModal({
               <span>{text}</span>
             </label>
           ))}
+          {!allChecked && (
+            <button
+              onClick={() => setChecks([true, true, true, true])}
+              className="mt-1 self-end text-[11px] font-medium text-red-400 hover:text-red-300"
+            >
+              {t('network.aircrackAcceptAll')}
+            </button>
+          )}
         </div>
 
         {/* Actions */}

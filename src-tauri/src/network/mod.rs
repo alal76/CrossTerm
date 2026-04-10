@@ -1988,6 +1988,71 @@ pub async fn network_aircrack_scan_start(
 
     let scan_id = Uuid::new_v4().to_string();
     let duration = duration_secs.unwrap_or(15);
+
+    // ── macOS: airodump-ng doesn't work with pseudo-monitor mode.
+    //    Fall back to CoreWLAN via the existing platform_wifi_scan(). ──
+    #[cfg(target_os = "macos")]
+    {
+        aircrack_audit(
+            &state, AircrackOpKind::Scan, &interface, None,
+            "(macOS) CoreWLAN scan fallback", "started",
+        );
+
+        let (wifi_networks, _current, _iface) = platform_wifi_scan().await?;
+
+        let networks: Vec<AirodumpNetwork> = wifi_networks
+            .iter()
+            .filter(|n| {
+                // If a specific channel was requested, filter to it
+                channel.map_or(true, |ch| n.channel == ch as u32)
+            })
+            .map(|n| {
+                let privacy = match &n.security {
+                    WifiSecurity::Wpa3Sae => "WPA3".to_string(),
+                    WifiSecurity::Wpa3Transition => "WPA3".to_string(),
+                    WifiSecurity::Wpa3Enterprise => "WPA3".to_string(),
+                    WifiSecurity::Wpa2Psk | WifiSecurity::Wpa2Enterprise => "WPA2".to_string(),
+                    WifiSecurity::WpaPsk => "WPA".to_string(),
+                    WifiSecurity::Wep => "WEP".to_string(),
+                    WifiSecurity::Open => "OPN".to_string(),
+                    WifiSecurity::Unknown(s) => s.clone(),
+                };
+                AirodumpNetwork {
+                    bssid: n.bssid.clone().unwrap_or_default(),
+                    channel: n.channel as i32,
+                    privacy,
+                    cipher: None,
+                    auth: None,
+                    power: n.signal_dbm.unwrap_or(-100),
+                    beacons: 0,
+                    data_frames: 0,
+                    iv_count: 0,
+                    essid: n.ssid.clone(),
+                    wps: None,
+                    clients: 0,
+                }
+            })
+            .collect();
+
+        let count = networks.len();
+        aircrack_audit(
+            &state, AircrackOpKind::Scan, &interface, None,
+            "(macOS) CoreWLAN scan fallback",
+            &format!("completed: {} networks, 0 clients", count),
+        );
+
+        return Ok(AirodumpResult {
+            networks,
+            clients: Vec::new(),
+            scan_id,
+            interface,
+            scan_time_secs: duration,
+        });
+    }
+
+    // ── Linux: use airodump-ng ──
+    #[cfg(not(target_os = "macos"))]
+    {
     let tmp_prefix = format!("/tmp/crossterm_airodump_{}", scan_id);
 
     let mut args = vec![
@@ -2066,6 +2131,7 @@ pub async fn network_aircrack_scan_start(
         interface,
         scan_time_secs: duration,
     })
+    } // #[cfg(not(target_os = "macos"))]
 }
 
 /// Send deauthentication frames to a target.
