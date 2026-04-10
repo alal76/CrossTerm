@@ -22,7 +22,7 @@ describe('NetworkExplorer', () => {
   it('disables scan button when CIDR is empty', () => {
     render(<NetworkExplorer />);
     const buttons = screen.getAllByRole('button');
-    const scanButton = buttons.find((b) => b.textContent?.includes('Network Explore'));
+    const scanButton = buttons.find((b) => b.textContent?.includes('Network Explore') && b.hasAttribute('disabled'));
     expect(scanButton).toBeDisabled();
   });
 
@@ -31,7 +31,7 @@ describe('NetworkExplorer', () => {
     const input = screen.getByPlaceholderText(/Enter CIDR range/);
     fireEvent.change(input, { target: { value: '192.168.1.0/24' } });
     const buttons = screen.getAllByRole('button');
-    const scanButton = buttons.find((b) => b.textContent?.includes('Network Explore'));
+    const scanButton = buttons.find((b) => b.textContent?.includes('Scan') || (b.textContent?.includes('Network Explore') && !b.className.includes('border-b-2')));
     expect(scanButton).not.toBeDisabled();
   });
 
@@ -41,7 +41,7 @@ describe('NetworkExplorer', () => {
     const input = screen.getByPlaceholderText(/Enter CIDR range/);
     fireEvent.change(input, { target: { value: '10.0.0.0/28' } });
     const buttons = screen.getAllByRole('button');
-    const scanButton = buttons.find((b) => b.textContent?.includes('Network Explore'));
+    const scanButton = buttons.find((b) => b.textContent?.includes('Network Explore') && !b.className.includes('border-b-2'));
     fireEvent.click(scanButton!);
 
     expect(mockInvoke).toHaveBeenCalledWith('network_explore_start', {

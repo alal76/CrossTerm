@@ -279,6 +279,7 @@ pub fn run() {
             network::network_fileserver_start,
             network::network_fileserver_stop,
             network::network_fileserver_list,
+            network::network_wifi_scan,
             // RDP
             rdp::rdp_connect,
             rdp::rdp_disconnect,

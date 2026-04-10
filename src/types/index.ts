@@ -555,6 +555,62 @@ export interface ExploreHostFound {
   result: ExploreResult;
 }
 
+// --- WiFi Scan Types ---
+
+export type WifiBand = "band2_4ghz" | "band5ghz" | "band6ghz" | "unknown";
+
+export type WifiSecurity =
+  | "open"
+  | "wep"
+  | "wpa_psk"
+  | "wpa2_psk"
+  | "wpa3_sae"
+  | "wpa3_transition"
+  | "wpa2_enterprise"
+  | "wpa3_enterprise"
+  | { unknown: string };
+
+export interface WifiNetwork {
+  ssid: string;
+  bssid?: string;
+  channel: number;
+  channel_width_mhz?: number;
+  band: WifiBand;
+  frequency_mhz?: number;
+  signal_dbm?: number;
+  noise_dbm?: number;
+  security: WifiSecurity;
+  phy_mode?: string;
+  is_current: boolean;
+}
+
+export interface WifiSecurityIssue {
+  ssid: string;
+  severity: "critical" | "high" | "warning" | "info";
+  issue: string;
+  recommendation: string;
+}
+
+export interface WifiChannelCongestion {
+  channel: number;
+  band: WifiBand;
+  network_count: number;
+  strongest_signal_dbm?: number;
+  weakest_signal_dbm?: number;
+  congestion_level: "low" | "medium" | "high";
+}
+
+export interface WifiScanResult {
+  networks: WifiNetwork[];
+  security_issues: WifiSecurityIssue[];
+  channel_congestion: WifiChannelCongestion[];
+  recommended_channels_2g: number[];
+  recommended_channels_5g: number[];
+  current_network?: WifiNetwork;
+  interface_name?: string;
+  scan_timestamp: string;
+}
+
 // --- SSH Discovery Types ---
 
 export interface SshDiscoverResult {

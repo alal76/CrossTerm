@@ -16,8 +16,10 @@ import {
   ChevronDown,
   ChevronUp,
   Filter,
+  Wifi,
 } from 'lucide-react';
 import type { ExploreResult, ExploreProgress, ExploreHostFound, ServiceFilter } from '@/types';
+import WifiScanner from '@/components/NetworkTools/WifiScanner';
 
 const WELL_KNOWN_SERVICES: { id: ServiceFilter; label: string; port: number }[] = [
   { id: 'ssh', label: 'SSH (22)', port: 22 },
@@ -69,6 +71,7 @@ const SERVICE_PORT_COLORS: Record<string, string> = {
 
 export default function NetworkExplorer() {
   const { t } = useTranslation();
+  const [toolTab, setToolTab] = useState<'explore' | 'wifi'>('explore');
   const [cidr, setCidr] = useState('');
   const [scanning, setScanning] = useState(false);
   const [scanId, setScanId] = useState<string | null>(null);
@@ -189,7 +192,39 @@ export default function NetworkExplorer() {
   }, [results]);
 
   return (
-    <div className="flex flex-col gap-3 p-3 h-full overflow-y-auto">
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* Tool tabs */}
+      <div className="flex items-center gap-1 border-b border-border-subtle px-3 pt-2">
+        <button
+          onClick={() => setToolTab('explore')}
+          className={clsx(
+            'flex items-center gap-1.5 border-b-2 px-3 py-1.5 text-xs font-medium transition-colors',
+            toolTab === 'explore'
+              ? 'border-interactive-default text-text-primary'
+              : 'border-transparent text-text-secondary hover:text-text-primary'
+          )}
+        >
+          <Radar size={14} />
+          {t('network.explore')}
+        </button>
+        <button
+          onClick={() => setToolTab('wifi')}
+          className={clsx(
+            'flex items-center gap-1.5 border-b-2 px-3 py-1.5 text-xs font-medium transition-colors',
+            toolTab === 'wifi'
+              ? 'border-interactive-default text-text-primary'
+              : 'border-transparent text-text-secondary hover:text-text-primary'
+          )}
+        >
+          <Wifi size={14} />
+          {t('network.wifi')}
+        </button>
+      </div>
+
+      {toolTab === 'wifi' ? (
+        <WifiScanner />
+      ) : (
+    <div className="flex flex-col gap-3 p-3 flex-1 overflow-y-auto">
       {/* Header */}
       <div className="flex items-center gap-2">
         <Radar size={20} className="text-accent-primary" />
@@ -436,6 +471,8 @@ export default function NetworkExplorer() {
             {t('network.exploreEmptyState')}
           </p>
         </div>
+      )}
+    </div>
       )}
     </div>
   );

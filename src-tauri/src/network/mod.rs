@@ -812,6 +812,581 @@ pub async fn network_fileserver_list(
     Ok(servers.values().cloned().collect())
 }
 
+// ── WiFi Scan Types ─────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WifiBand {
+    Band2_4GHz,
+    Band5GHz,
+    Band6GHz,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WifiSecurity {
+    Open,
+    Wep,
+    WpaPsk,
+    Wpa2Psk,
+    Wpa3Sae,
+    Wpa3Transition,
+    Wpa2Enterprise,
+    Wpa3Enterprise,
+    Unknown(String),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WifiNetwork {
+    pub ssid: String,
+    pub bssid: Option<String>,
+    pub channel: u32,
+    pub channel_width_mhz: Option<u32>,
+    pub band: WifiBand,
+    pub frequency_mhz: Option<u32>,
+    pub signal_dbm: Option<i32>,
+    pub noise_dbm: Option<i32>,
+    pub security: WifiSecurity,
+    pub phy_mode: Option<String>,
+    pub is_current: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WifiSecurityIssue {
+    pub ssid: String,
+    pub severity: String,
+    pub issue: String,
+    pub recommendation: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WifiChannelCongestion {
+    pub channel: u32,
+    pub band: WifiBand,
+    pub network_count: u32,
+    pub strongest_signal_dbm: Option<i32>,
+    pub weakest_signal_dbm: Option<i32>,
+    pub congestion_level: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WifiScanResult {
+    pub networks: Vec<WifiNetwork>,
+    pub security_issues: Vec<WifiSecurityIssue>,
+    pub channel_congestion: Vec<WifiChannelCongestion>,
+    pub recommended_channels_2g: Vec<u32>,
+    pub recommended_channels_5g: Vec<u32>,
+    pub current_network: Option<WifiNetwork>,
+    pub interface_name: Option<String>,
+    pub scan_timestamp: String,
+}
+
+// ── WiFi Scan Helpers ───────────────────────────────────────────────────
+
+fn parse_band_from_channel(channel: u32, freq_hint: Option<&str>) -> WifiBand {
+    if let Some(hint) = freq_hint {
+        let h = hint.to_lowercase();
+        if h.contains("6ghz") || h.contains("6 ghz") {
+            return WifiBand::Band6GHz;
+        }
+        if h.contains("5ghz") || h.contains("5 ghz") {
+            return WifiBand::Band5GHz;
+        }
+        if h.contains("2ghz") || h.contains("2.4ghz") || h.contains("2 ghz") {
+            return WifiBand::Band2_4GHz;
+        }
+    }
+    match channel {
+        1..=14 => WifiBand::Band2_4GHz,
+        32..=177 => WifiBand::Band5GHz,
+        _ => WifiBand::Unknown,
+    }
+}
+
+fn parse_macos_security(raw: &str) -> WifiSecurity {
+    let r = raw.to_lowercase();
+    if r.contains("wpa3_enterprise") {
+        WifiSecurity::Wpa3Enterprise
+    } else if r.contains("wpa3_transition") {
+        WifiSecurity::Wpa3Transition
+    } else if r.contains("wpa3") || r.contains("sae") {
+        WifiSecurity::Wpa3Sae
+    } else if r.contains("wpa2_enterprise") || r.contains("wpa2_802.1x") {
+        WifiSecurity::Wpa2Enterprise
+    } else if r.contains("wpa2") {
+        WifiSecurity::Wpa2Psk
+    } else if r.contains("wpa_personal") || r.contains("wpa ") {
+        WifiSecurity::WpaPsk
+    } else if r.contains("wep") {
+        WifiSecurity::Wep
+    } else if r.contains("none") || r.is_empty() {
+        WifiSecurity::Open
+    } else {
+        WifiSecurity::Unknown(raw.to_string())
+    }
+}
+
+fn parse_signal_noise(sn: &str) -> (Option<i32>, Option<i32>) {
+    // Format: "-65 dBm / -92 dBm"
+    let parts: Vec<&str> = sn.split('/').collect();
+    let signal = parts.first().and_then(|s| {
+        s.trim().replace("dBm", "").trim().parse::<i32>().ok()
+    });
+    let noise = parts.get(1).and_then(|s| {
+        s.trim().replace("dBm", "").trim().parse::<i32>().ok()
+    });
+    (signal, noise)
+}
+
+fn parse_channel_info(raw: &str) -> (u32, Option<u32>, Option<&str>) {
+    // Format: "36 (5GHz, 80MHz)" or "6 (2GHz, 20MHz)" or just "36"
+    let channel: u32 = raw.split(|c: char| !c.is_ascii_digit())
+        .next()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    let width = if raw.contains("160MHz") {
+        Some(160)
+    } else if raw.contains("80MHz") {
+        Some(80)
+    } else if raw.contains("40MHz") {
+        Some(40)
+    } else if raw.contains("20MHz") {
+        Some(20)
+    } else {
+        None
+    };
+    let freq_hint = if raw.contains('(') {
+        raw.find('(').and_then(|i| raw.get(i..))
+    } else {
+        None
+    };
+    (channel, width, freq_hint)
+}
+
+fn assess_security(networks: &[WifiNetwork]) -> Vec<WifiSecurityIssue> {
+    let mut issues = Vec::new();
+    for net in networks {
+        match &net.security {
+            WifiSecurity::Open => {
+                issues.push(WifiSecurityIssue {
+                    ssid: net.ssid.clone(),
+                    severity: "critical".into(),
+                    issue: "Network has no encryption — all traffic is visible to anyone nearby".into(),
+                    recommendation: "Enable WPA3 or at minimum WPA2 encryption immediately".into(),
+                });
+            }
+            WifiSecurity::Wep => {
+                issues.push(WifiSecurityIssue {
+                    ssid: net.ssid.clone(),
+                    severity: "critical".into(),
+                    issue: "WEP encryption is broken and can be cracked in minutes".into(),
+                    recommendation: "Upgrade to WPA3-SAE or WPA2-AES. Replace the router if it only supports WEP".into(),
+                });
+            }
+            WifiSecurity::WpaPsk => {
+                issues.push(WifiSecurityIssue {
+                    ssid: net.ssid.clone(),
+                    severity: "high".into(),
+                    issue: "WPA (TKIP) has known vulnerabilities and is deprecated".into(),
+                    recommendation: "Upgrade to WPA2-AES or WPA3-SAE".into(),
+                });
+            }
+            WifiSecurity::Wpa2Psk => {
+                // WPA2 is acceptable but WPA3 is better
+                if net.is_current {
+                    issues.push(WifiSecurityIssue {
+                        ssid: net.ssid.clone(),
+                        severity: "info".into(),
+                        issue: "WPA2-PSK is secure but WPA3-SAE offers stronger protection".into(),
+                        recommendation: "Consider upgrading router firmware to enable WPA3 transition mode".into(),
+                    });
+                }
+            }
+            WifiSecurity::Unknown(raw) if !raw.is_empty() => {
+                issues.push(WifiSecurityIssue {
+                    ssid: net.ssid.clone(),
+                    severity: "warning".into(),
+                    issue: format!("Unrecognized security protocol: {}", raw),
+                    recommendation: "Verify the security configuration of this network".into(),
+                });
+            }
+            _ => {}
+        }
+        // Hidden SSID check
+        if net.ssid.is_empty() || net.ssid.chars().all(|c| c == '\0') {
+            issues.push(WifiSecurityIssue {
+                ssid: "(hidden)".into(),
+                severity: "info".into(),
+                issue: "Hidden SSID provides no real security — the network name is still detectable in probe requests".into(),
+                recommendation: "Rely on strong WPA3 encryption instead of SSID hiding".into(),
+            });
+        }
+        // Weak signal on your own network
+        if net.is_current {
+            if let Some(sig) = net.signal_dbm {
+                if sig < -80 {
+                    issues.push(WifiSecurityIssue {
+                        ssid: net.ssid.clone(),
+                        severity: "warning".into(),
+                        issue: format!("Very weak signal ({} dBm) — a potential dead spot", sig),
+                        recommendation: "Consider adding a mesh node or repeater near this location".into(),
+                    });
+                } else if sig < -70 {
+                    issues.push(WifiSecurityIssue {
+                        ssid: net.ssid.clone(),
+                        severity: "info".into(),
+                        issue: format!("Moderate signal ({} dBm) — may experience intermittent performance", sig),
+                        recommendation: "Move closer to the access point or reduce obstructions".into(),
+                    });
+                }
+            }
+        }
+    }
+    issues
+}
+
+fn compute_channel_congestion(networks: &[WifiNetwork]) -> (Vec<WifiChannelCongestion>, Vec<u32>, Vec<u32>) {
+    let mut chan_map: HashMap<(u32, String), Vec<Option<i32>>> = HashMap::new();
+    for net in networks {
+        let band_key = match &net.band {
+            WifiBand::Band2_4GHz => "2.4".to_string(),
+            WifiBand::Band5GHz => "5".to_string(),
+            WifiBand::Band6GHz => "6".to_string(),
+            WifiBand::Unknown => "?".to_string(),
+        };
+        chan_map.entry((net.channel, band_key)).or_default().push(net.signal_dbm);
+    }
+
+    let mut congestion = Vec::new();
+    for ((channel, band_str), signals) in &chan_map {
+        let band = match band_str.as_str() {
+            "2.4" => WifiBand::Band2_4GHz,
+            "5" => WifiBand::Band5GHz,
+            "6" => WifiBand::Band6GHz,
+            _ => WifiBand::Unknown,
+        };
+        let count = signals.len() as u32;
+        let strongest = signals.iter().filter_map(|s| *s).max();
+        let weakest = signals.iter().filter_map(|s| *s).min();
+        let level = match count {
+            0..=1 => "low",
+            2..=3 => "medium",
+            _ => "high",
+        };
+        congestion.push(WifiChannelCongestion {
+            channel: *channel,
+            band,
+            network_count: count,
+            strongest_signal_dbm: strongest,
+            weakest_signal_dbm: weakest,
+            congestion_level: level.to_string(),
+        });
+    }
+    congestion.sort_by_key(|c| c.channel);
+
+    // Recommend least-congested non-overlapping channels
+    let channels_2g = [1u32, 6, 11];
+    let mut rec_2g: Vec<(u32, u32)> = channels_2g.iter().map(|&ch| {
+        let count = chan_map.get(&(ch, "2.4".to_string())).map(|v| v.len() as u32).unwrap_or(0);
+        (ch, count)
+    }).collect();
+    rec_2g.sort_by_key(|&(_, c)| c);
+    let recommended_2g: Vec<u32> = rec_2g.iter().map(|&(ch, _)| ch).collect();
+
+    let channels_5g = [36u32, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 144, 149, 153, 157, 161, 165];
+    let mut rec_5g: Vec<(u32, u32)> = channels_5g.iter().map(|&ch| {
+        let count = chan_map.get(&(ch, "5".to_string())).map(|v| v.len() as u32).unwrap_or(0);
+        (ch, count)
+    }).collect();
+    rec_5g.sort_by_key(|&(_, c)| c);
+    let recommended_5g: Vec<u32> = rec_5g.into_iter().take(5).map(|(ch, _)| ch).collect();
+
+    (congestion, recommended_2g, recommended_5g)
+}
+
+// ── WiFi Scan Platform Implementations ──────────────────────────────────
+
+#[cfg(target_os = "macos")]
+async fn platform_wifi_scan() -> Result<(Vec<WifiNetwork>, Option<WifiNetwork>, Option<String>), NetworkError> {
+    let output = tokio::process::Command::new("system_profiler")
+        .args(["SPAirPortDataType", "-json"])
+        .output()
+        .await
+        .map_err(|e| NetworkError::Io(format!("Failed to run system_profiler: {}", e)))?;
+
+    if !output.status.success() {
+        return Err(NetworkError::Io("system_profiler failed".into()));
+    }
+
+    let data: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|e| NetworkError::Io(format!("Failed to parse system_profiler JSON: {}", e)))?;
+
+    let mut networks = Vec::new();
+    let mut current_net = None;
+    let mut iface_name = None;
+
+    let ifaces = data.pointer("/SPAirPortDataType/0/spairport_airport_interfaces")
+        .and_then(|v| v.as_array());
+
+    if let Some(ifaces) = ifaces {
+        for iface in ifaces {
+            if iface_name.is_none() {
+                iface_name = iface.get("_name").and_then(|v| v.as_str()).map(String::from);
+            }
+
+            // Current network
+            if let Some(current) = iface.get("spairport_current_network_information") {
+                let ssid = current.get("_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let channel_raw = current.get("spairport_network_channel").and_then(|v| v.as_str()).unwrap_or("");
+                let (channel, width, freq_hint) = parse_channel_info(channel_raw);
+                let security = current.get("spairport_security_mode").and_then(|v| v.as_str()).unwrap_or("");
+                let sn = current.get("spairport_signal_noise").and_then(|v| v.as_str()).unwrap_or("");
+                let (signal, noise) = parse_signal_noise(sn);
+                let phy = current.get("spairport_network_phymode").and_then(|v| v.as_str()).map(String::from);
+                let band = parse_band_from_channel(channel, freq_hint);
+
+                let net = WifiNetwork {
+                    ssid,
+                    bssid: None,
+                    channel,
+                    channel_width_mhz: width,
+                    band,
+                    frequency_mhz: None,
+                    signal_dbm: signal,
+                    noise_dbm: noise,
+                    security: parse_macos_security(security),
+                    phy_mode: phy,
+                    is_current: true,
+                };
+                current_net = Some(net.clone());
+                networks.push(net);
+            }
+
+            // Other visible networks
+            if let Some(others) = iface.get("spairport_airport_other_local_wireless_networks").and_then(|v| v.as_array()) {
+                for net_val in others {
+                    let ssid = net_val.get("_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let channel_raw = net_val.get("spairport_network_channel").and_then(|v| v.as_str()).unwrap_or("");
+                    let (channel, width, freq_hint) = parse_channel_info(channel_raw);
+                    let security = net_val.get("spairport_security_mode").and_then(|v| v.as_str()).unwrap_or("");
+                    let sn = net_val.get("spairport_signal_noise").and_then(|v| v.as_str()).unwrap_or("");
+                    let (signal, noise) = parse_signal_noise(sn);
+                    let phy = net_val.get("spairport_network_phymode").and_then(|v| v.as_str()).map(String::from);
+                    let band = parse_band_from_channel(channel, freq_hint);
+
+                    networks.push(WifiNetwork {
+                        ssid,
+                        bssid: None,
+                        channel,
+                        channel_width_mhz: width,
+                        band,
+                        frequency_mhz: None,
+                        signal_dbm: signal,
+                        noise_dbm: noise,
+                        security: parse_macos_security(security),
+                        phy_mode: phy,
+                        is_current: false,
+                    });
+                }
+            }
+        }
+    }
+
+    Ok((networks, current_net, iface_name))
+}
+
+#[cfg(target_os = "linux")]
+async fn platform_wifi_scan() -> Result<(Vec<WifiNetwork>, Option<WifiNetwork>, Option<String>), NetworkError> {
+    // Get current connection info
+    let current_output = tokio::process::Command::new("nmcli")
+        .args(["-t", "-f", "DEVICE,NAME,TYPE", "connection", "show", "--active"])
+        .output()
+        .await
+        .ok();
+
+    let mut current_ssid = String::new();
+    let mut iface_name = None;
+    if let Some(ref out) = current_output {
+        let text = String::from_utf8_lossy(&out.stdout);
+        for line in text.lines() {
+            let fields: Vec<&str> = line.split(':').collect();
+            if fields.len() >= 3 && fields[2] == "802-11-wireless" {
+                iface_name = Some(fields[0].to_string());
+                current_ssid = fields[1].to_string();
+                break;
+            }
+        }
+    }
+
+    // Scan visible networks
+    let output = tokio::process::Command::new("nmcli")
+        .args(["-t", "-f", "SSID,BSSID,CHAN,FREQ,SIGNAL,SECURITY,MODE", "dev", "wifi", "list", "--rescan", "yes"])
+        .output()
+        .await
+        .map_err(|e| NetworkError::Io(format!("Failed to run nmcli: {}", e)))?;
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut networks = Vec::new();
+    let mut current_net = None;
+
+    for line in text.lines() {
+        let fields: Vec<&str> = line.split(':').collect();
+        if fields.len() < 7 { continue; }
+        let ssid = fields[0].to_string();
+        let bssid = Some(fields[1].trim().to_string());
+        let channel: u32 = fields[2].parse().unwrap_or(0);
+        let freq: u32 = fields[3].trim().split_whitespace().next()
+            .and_then(|s| s.parse().ok()).unwrap_or(0);
+        let signal_pct: i32 = fields[4].parse().unwrap_or(0);
+        // Convert percentage to approximate dBm
+        let signal_dbm = if signal_pct > 0 { Some(-100 + signal_pct / 2) } else { None };
+        let security_raw = fields[5];
+        let band = if freq >= 5925 { WifiBand::Band6GHz } else if freq >= 5000 { WifiBand::Band5GHz } else { WifiBand::Band2_4GHz };
+        let security = if security_raw.is_empty() || security_raw == "--" {
+            WifiSecurity::Open
+        } else {
+            let s = security_raw.to_lowercase();
+            if s.contains("wpa3") { WifiSecurity::Wpa3Sae }
+            else if s.contains("wpa2") && s.contains("enterprise") { WifiSecurity::Wpa2Enterprise }
+            else if s.contains("wpa2") { WifiSecurity::Wpa2Psk }
+            else if s.contains("wpa") { WifiSecurity::WpaPsk }
+            else if s.contains("wep") { WifiSecurity::Wep }
+            else { WifiSecurity::Unknown(security_raw.to_string()) }
+        };
+        let is_current = ssid == current_ssid;
+        let net = WifiNetwork {
+            ssid,
+            bssid,
+            channel,
+            channel_width_mhz: None,
+            band,
+            frequency_mhz: Some(freq),
+            signal_dbm,
+            noise_dbm: None,
+            security,
+            phy_mode: None,
+            is_current,
+        };
+        if is_current { current_net = Some(net.clone()); }
+        networks.push(net);
+    }
+
+    Ok((networks, current_net, iface_name))
+}
+
+#[cfg(target_os = "windows")]
+async fn platform_wifi_scan() -> Result<(Vec<WifiNetwork>, Option<WifiNetwork>, Option<String>), NetworkError> {
+    let output = tokio::process::Command::new("netsh")
+        .args(["wlan", "show", "networks", "mode=bssid"])
+        .output()
+        .await
+        .map_err(|e| NetworkError::Io(format!("Failed to run netsh: {}", e)))?;
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut networks = Vec::new();
+    let mut current_ssid = String::new();
+
+    // Get current connection
+    if let Ok(iface_out) = tokio::process::Command::new("netsh")
+        .args(["wlan", "show", "interfaces"])
+        .output()
+        .await
+    {
+        let iface_text = String::from_utf8_lossy(&iface_out.stdout);
+        for line in iface_text.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("SSID") && !trimmed.starts_with("SSID ") {
+                if let Some(val) = trimmed.split(':').nth(1) {
+                    current_ssid = val.trim().to_string();
+                }
+            }
+        }
+    }
+
+    let mut ssid = String::new();
+    let mut bssid = None;
+    let mut signal_pct: i32 = 0;
+    let mut channel: u32 = 0;
+    let mut security = WifiSecurity::Open;
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("SSID") && !trimmed.starts_with("SSID ") {
+            if let Some(val) = trimmed.split(':').nth(1) {
+                ssid = val.trim().to_string();
+            }
+        } else if trimmed.starts_with("BSSID") {
+            // Save previous network if any
+            if bssid.is_some() {
+                let is_current = ssid == current_ssid;
+                let sig = if signal_pct > 0 { Some(-100 + signal_pct / 2) } else { None };
+                let band = parse_band_from_channel(channel, None);
+                let net = WifiNetwork {
+                    ssid: ssid.clone(), bssid: bssid.take(), channel, channel_width_mhz: None,
+                    band, frequency_mhz: None, signal_dbm: sig, noise_dbm: None,
+                    security: security.clone(), phy_mode: None, is_current,
+                };
+                networks.push(net);
+            }
+            bssid = trimmed.split(':').skip(1).next().map(|s| s.trim().to_string());
+            // Reset for this BSSID entry
+            signal_pct = 0;
+            channel = 0;
+        } else if trimmed.starts_with("Signal") {
+            signal_pct = trimmed.replace('%', "").split(':').nth(1)
+                .and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+        } else if trimmed.starts_with("Channel") {
+            channel = trimmed.split(':').nth(1).and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+        } else if trimmed.starts_with("Authentication") {
+            let auth = trimmed.split(':').nth(1).map(|s| s.trim().to_lowercase()).unwrap_or_default();
+            security = if auth.contains("wpa3") { WifiSecurity::Wpa3Sae }
+                else if auth.contains("wpa2") && auth.contains("enterprise") { WifiSecurity::Wpa2Enterprise }
+                else if auth.contains("wpa2") { WifiSecurity::Wpa2Psk }
+                else if auth.contains("wpa") { WifiSecurity::WpaPsk }
+                else if auth.contains("open") { WifiSecurity::Open }
+                else { WifiSecurity::Unknown(auth) };
+        }
+    }
+    // Push last entry
+    if bssid.is_some() || !ssid.is_empty() {
+        let is_current = ssid == current_ssid;
+        let sig = if signal_pct > 0 { Some(-100 + signal_pct / 2) } else { None };
+        let band = parse_band_from_channel(channel, None);
+        networks.push(WifiNetwork {
+            ssid, bssid, channel, channel_width_mhz: None,
+            band, frequency_mhz: None, signal_dbm: sig, noise_dbm: None,
+            security, phy_mode: None, is_current,
+        });
+    }
+
+    let current_net = networks.iter().find(|n| n.is_current).cloned();
+    Ok((networks, current_net, None))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+async fn platform_wifi_scan() -> Result<(Vec<WifiNetwork>, Option<WifiNetwork>, Option<String>), NetworkError> {
+    Err(NetworkError::Io("WiFi scanning not supported on this platform".into()))
+}
+
+#[tauri::command]
+pub async fn network_wifi_scan() -> Result<WifiScanResult, NetworkError> {
+    let (networks, current_net, iface_name) = platform_wifi_scan().await?;
+    let security_issues = assess_security(&networks);
+    let (channel_congestion, recommended_2g, recommended_5g) = compute_channel_congestion(&networks);
+
+    Ok(WifiScanResult {
+        networks,
+        security_issues,
+        channel_congestion,
+        recommended_channels_2g: recommended_2g,
+        recommended_channels_5g: recommended_5g,
+        current_network: current_net,
+        interface_name: iface_name,
+        scan_timestamp: chrono::Utc::now().to_rfc3339(),
+    })
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]
