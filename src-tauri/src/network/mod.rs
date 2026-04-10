@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -406,6 +406,8 @@ pub struct NetworkState {
     pub aircrack_processes: Mutex<HashMap<String, AircrackProcess>>,
     /// Audit log of all aircrack-ng operations
     pub aircrack_audit_log: Mutex<Vec<AircrackAuditEntry>>,
+    /// Interfaces currently in (pseudo-)monitor mode (tracked for macOS)
+    pub monitor_interfaces: Mutex<HashSet<String>>,
 }
 
 impl NetworkState {
@@ -418,6 +420,7 @@ impl NetworkState {
             aircrack_disclaimer_accepted: AtomicBool::new(false),
             aircrack_processes: Mutex::new(HashMap::new()),
             aircrack_audit_log: Mutex::new(Vec::new()),
+            monitor_interfaces: Mutex::new(HashSet::new()),
         }
     }
 }
@@ -1745,6 +1748,8 @@ pub async fn network_aircrack_interfaces(
     // ── macOS: use networksetup + system_profiler ──
     #[cfg(target_os = "macos")]
     {
+        let mon_set = state.monitor_interfaces.lock().unwrap().clone();
+
         // `networksetup -listallhardwareports` gives us port/device/address triples.
         let output = tokio::process::Command::new("networksetup")
             .args(["-listallhardwareports"])
@@ -1766,12 +1771,13 @@ pub async fn network_aircrack_interfaces(
                 if (lower.contains("wi-fi") || lower.contains("wifi") || lower.contains("airport"))
                     && !device_name.is_empty()
                 {
+                    let is_mon = mon_set.contains(&device_name);
                     interfaces.push(WirelessInterface {
                         name: device_name.clone(),
                         driver: Some(port_name.clone()),
                         chipset: Some("Apple Wi-Fi".into()),
-                        monitor_mode: false,
-                        monitor_name: None,
+                        monitor_mode: is_mon,
+                        monitor_name: if is_mon { Some(device_name.clone()) } else { None },
                     });
                 }
                 port_name.clear();
@@ -1863,6 +1869,7 @@ pub async fn network_aircrack_monitor_start(
             &state, AircrackOpKind::MonitorStart, &interface, None,
             &cmd_str, "macOS monitor mode is limited",
         );
+        state.monitor_interfaces.lock().unwrap().insert(interface.clone());
         return Ok(WirelessInterface {
             name: interface.clone(),
             driver: Some("Apple Wi-Fi".into()),
@@ -1933,6 +1940,7 @@ pub async fn network_aircrack_monitor_stop(
             &state, AircrackOpKind::MonitorStop, &interface, None,
             "(macOS) pseudo-monitor stop", "success",
         );
+        state.monitor_interfaces.lock().unwrap().remove(&interface);
     }
 
     #[cfg(not(target_os = "macos"))]
