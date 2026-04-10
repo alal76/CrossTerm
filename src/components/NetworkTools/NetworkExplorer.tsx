@@ -17,9 +17,11 @@ import {
   ChevronUp,
   Filter,
   Wifi,
+  ShieldAlert,
 } from 'lucide-react';
 import type { ExploreResult, ExploreProgress, ExploreHostFound, ServiceFilter } from '@/types';
 import WifiScanner from '@/components/NetworkTools/WifiScanner';
+import AircrackPanel from '@/components/NetworkTools/AircrackPanel';
 
 const WELL_KNOWN_SERVICES: { id: ServiceFilter; label: string; port: number }[] = [
   { id: 'ssh', label: 'SSH (22)', port: 22 },
@@ -71,7 +73,7 @@ const SERVICE_PORT_COLORS: Record<string, string> = {
 
 export default function NetworkExplorer() {
   const { t } = useTranslation();
-  const [toolTab, setToolTab] = useState<'explore' | 'wifi'>('explore');
+  const [toolTab, setToolTab] = useState<'explore' | 'wifi' | 'aircrack'>('explore');
   const [cidr, setCidr] = useState('');
   const [scanning, setScanning] = useState(false);
   const [scanId, setScanId] = useState<string | null>(null);
@@ -219,10 +221,24 @@ export default function NetworkExplorer() {
           <Wifi size={14} />
           {t('network.wifi')}
         </button>
+        <button
+          onClick={() => setToolTab('aircrack')}
+          className={clsx(
+            'flex items-center gap-1.5 border-b-2 px-3 py-1.5 text-xs font-medium transition-colors',
+            toolTab === 'aircrack'
+              ? 'border-red-500 text-red-400'
+              : 'border-transparent text-text-secondary hover:text-text-primary'
+          )}
+        >
+          <ShieldAlert size={14} />
+          {t('network.aircrackTab')}
+        </button>
       </div>
 
       {toolTab === 'wifi' ? (
         <WifiScanner />
+      ) : toolTab === 'aircrack' ? (
+        <AircrackPanel />
       ) : (
     <div className="flex flex-col gap-3 p-3 flex-1 overflow-y-auto">
       {/* Header */}

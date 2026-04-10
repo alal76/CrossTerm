@@ -74,9 +74,9 @@ function securityBadgeColor(sec: WifiSecurity): string {
 
 function bandLabel(band: WifiBand): string {
   const map: Record<WifiBand, string> = {
-    band2_4ghz: '2.4 GHz',
-    band5ghz: '5 GHz',
-    band6ghz: '6 GHz',
+    '2.4GHz': '2.4 GHz',
+    '5GHz': '5 GHz',
+    '6GHz': '6 GHz',
     unknown: '?',
   };
   return map[band];
@@ -295,7 +295,7 @@ export default function WifiScanner() {
 
         {/* Band Filter */}
         <div className="ml-auto flex items-center gap-1">
-          {(['all', 'band2_4ghz', 'band5ghz', 'band6ghz'] as const).map((b) => (
+          {(['all', '2.4GHz', '5GHz', '6GHz'] as const).map((b) => (
             <button
               key={b}
               onClick={() => setBandFilter(b)}
@@ -479,9 +479,9 @@ function ChannelsTab({
 }) {
   const maxCount = Math.max(...congestion.map((c) => c.network_count), 1);
 
-  const band24 = congestion.filter((c) => c.band === 'band2_4ghz');
-  const band5 = congestion.filter((c) => c.band === 'band5ghz');
-  const band6 = congestion.filter((c) => c.band === 'band6ghz');
+  const band24 = congestion.filter((c) => c.band === '2.4GHz');
+  const band5 = congestion.filter((c) => c.band === '5GHz');
+  const band6 = congestion.filter((c) => c.band === '6GHz');
 
   return (
     <div className="flex flex-1 flex-col gap-4 overflow-y-auto">

@@ -7,6 +7,7 @@ use tauri::{AppHandle, Emitter};
 use thiserror::Error;
 use tokio::net::TcpStream;
 use uuid::Uuid;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 // ── Error ───────────────────────────────────────────────────────────────
 
@@ -399,6 +400,12 @@ pub struct NetworkState {
     pub tunnel_rules: Mutex<Vec<TunnelRule>>,
     pub active_tunnels: Mutex<HashMap<String, TunnelStatus>>,
     pub file_servers: Mutex<HashMap<String, FileServerInfo>>,
+    /// Whether the user has accepted the aircrack-ng educational disclaimer
+    pub aircrack_disclaimer_accepted: AtomicBool,
+    /// Running aircrack-ng child processes keyed by operation ID
+    pub aircrack_processes: Mutex<HashMap<String, AircrackProcess>>,
+    /// Audit log of all aircrack-ng operations
+    pub aircrack_audit_log: Mutex<Vec<AircrackAuditEntry>>,
 }
 
 impl NetworkState {
@@ -408,6 +415,9 @@ impl NetworkState {
             tunnel_rules: Mutex::new(Vec::new()),
             active_tunnels: Mutex::new(HashMap::new()),
             file_servers: Mutex::new(HashMap::new()),
+            aircrack_disclaimer_accepted: AtomicBool::new(false),
+            aircrack_processes: Mutex::new(HashMap::new()),
+            aircrack_audit_log: Mutex::new(Vec::new()),
         }
     }
 }
@@ -815,11 +825,14 @@ pub async fn network_fileserver_list(
 // ── WiFi Scan Types ─────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum WifiBand {
+    #[serde(rename = "2.4GHz")]
     Band2_4GHz,
+    #[serde(rename = "5GHz")]
     Band5GHz,
+    #[serde(rename = "6GHz")]
     Band6GHz,
+    #[serde(rename = "unknown")]
     Unknown,
 }
 
@@ -1109,91 +1122,94 @@ fn compute_channel_congestion(networks: &[WifiNetwork]) -> (Vec<WifiChannelConge
 
 #[cfg(target_os = "macos")]
 async fn platform_wifi_scan() -> Result<(Vec<WifiNetwork>, Option<WifiNetwork>, Option<String>), NetworkError> {
-    let output = tokio::process::Command::new("system_profiler")
-        .args(["SPAirPortDataType", "-json"])
+    // Use CoreWLAN via Swift helper script for non-redacted SSIDs.
+    // macOS system_profiler redacts SSIDs in recent versions; CoreWLAN
+    // accessed through the `swift` interpreter inherits the parent app's
+    // Location Services authorisation and returns the real network names.
+    let script = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("resources")
+        .join("wifi-scan.swift");
+
+    let output = tokio::process::Command::new("swift")
+        .arg(&script)
         .output()
         .await
-        .map_err(|e| NetworkError::Io(format!("Failed to run system_profiler: {}", e)))?;
+        .map_err(|e| NetworkError::Io(format!("Failed to run wifi-scan.swift: {}", e)))?;
 
     if !output.status.success() {
-        return Err(NetworkError::Io("system_profiler failed".into()));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(NetworkError::Io(format!("wifi-scan.swift failed: {}", stderr)));
     }
 
-    let data: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .map_err(|e| NetworkError::Io(format!("Failed to parse system_profiler JSON: {}", e)))?;
+    // JSON produced by wifi-scan.swift
+    #[derive(serde::Deserialize)]
+    struct SwiftScanNetwork {
+        ssid: String,
+        bssid: String,
+        channel: u32,
+        channel_width_mhz: u32,
+        band: String,
+        signal_dbm: i32,
+        noise_dbm: i32,
+        security: String,
+        #[allow(dead_code)]
+        phy_mode: Option<String>,
+        is_current: bool,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct SwiftScanOutput {
+        networks: Vec<SwiftScanNetwork>,
+        #[allow(dead_code)]
+        current_ssid: Option<String>,
+        interface_name: Option<String>,
+    }
+
+    let parsed: SwiftScanOutput = serde_json::from_slice(&output.stdout)
+        .map_err(|e| NetworkError::Io(format!("Failed to parse wifi-scan JSON: {}", e)))?;
 
     let mut networks = Vec::new();
     let mut current_net = None;
-    let mut iface_name = None;
 
-    let ifaces = data.pointer("/SPAirPortDataType/0/spairport_airport_interfaces")
-        .and_then(|v| v.as_array());
+    for net in &parsed.networks {
+        let band = match net.band.as_str() {
+            "2.4GHz" => WifiBand::Band2_4GHz,
+            "5GHz" => WifiBand::Band5GHz,
+            "6GHz" => WifiBand::Band6GHz,
+            _ => WifiBand::Unknown,
+        };
+        let security = match net.security.as_str() {
+            "WPA3" => WifiSecurity::Wpa3Sae,
+            "WPA2" => WifiSecurity::Wpa2Psk,
+            "WPA/WPA2" => WifiSecurity::Wpa2Psk,
+            "WPA" => WifiSecurity::WpaPsk,
+            "WEP" => WifiSecurity::Wep,
+            "Open" => WifiSecurity::Open,
+            other => WifiSecurity::Unknown(other.to_string()),
+        };
+        let bssid = if net.bssid.is_empty() { None } else { Some(net.bssid.clone()) };
 
-    if let Some(ifaces) = ifaces {
-        for iface in ifaces {
-            if iface_name.is_none() {
-                iface_name = iface.get("_name").and_then(|v| v.as_str()).map(String::from);
-            }
+        let wifi = WifiNetwork {
+            ssid: net.ssid.clone(),
+            bssid,
+            channel: net.channel,
+            channel_width_mhz: Some(net.channel_width_mhz),
+            band,
+            frequency_mhz: None,
+            signal_dbm: Some(net.signal_dbm),
+            noise_dbm: Some(net.noise_dbm),
+            security,
+            phy_mode: net.phy_mode.clone(),
+            is_current: net.is_current,
+        };
 
-            // Current network
-            if let Some(current) = iface.get("spairport_current_network_information") {
-                let ssid = current.get("_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let channel_raw = current.get("spairport_network_channel").and_then(|v| v.as_str()).unwrap_or("");
-                let (channel, width, freq_hint) = parse_channel_info(channel_raw);
-                let security = current.get("spairport_security_mode").and_then(|v| v.as_str()).unwrap_or("");
-                let sn = current.get("spairport_signal_noise").and_then(|v| v.as_str()).unwrap_or("");
-                let (signal, noise) = parse_signal_noise(sn);
-                let phy = current.get("spairport_network_phymode").and_then(|v| v.as_str()).map(String::from);
-                let band = parse_band_from_channel(channel, freq_hint);
-
-                let net = WifiNetwork {
-                    ssid,
-                    bssid: None,
-                    channel,
-                    channel_width_mhz: width,
-                    band,
-                    frequency_mhz: None,
-                    signal_dbm: signal,
-                    noise_dbm: noise,
-                    security: parse_macos_security(security),
-                    phy_mode: phy,
-                    is_current: true,
-                };
-                current_net = Some(net.clone());
-                networks.push(net);
-            }
-
-            // Other visible networks
-            if let Some(others) = iface.get("spairport_airport_other_local_wireless_networks").and_then(|v| v.as_array()) {
-                for net_val in others {
-                    let ssid = net_val.get("_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    let channel_raw = net_val.get("spairport_network_channel").and_then(|v| v.as_str()).unwrap_or("");
-                    let (channel, width, freq_hint) = parse_channel_info(channel_raw);
-                    let security = net_val.get("spairport_security_mode").and_then(|v| v.as_str()).unwrap_or("");
-                    let sn = net_val.get("spairport_signal_noise").and_then(|v| v.as_str()).unwrap_or("");
-                    let (signal, noise) = parse_signal_noise(sn);
-                    let phy = net_val.get("spairport_network_phymode").and_then(|v| v.as_str()).map(String::from);
-                    let band = parse_band_from_channel(channel, freq_hint);
-
-                    networks.push(WifiNetwork {
-                        ssid,
-                        bssid: None,
-                        channel,
-                        channel_width_mhz: width,
-                        band,
-                        frequency_mhz: None,
-                        signal_dbm: signal,
-                        noise_dbm: noise,
-                        security: parse_macos_security(security),
-                        phy_mode: phy,
-                        is_current: false,
-                    });
-                }
-            }
+        if net.is_current && current_net.is_none() {
+            current_net = Some(wifi.clone());
         }
+        networks.push(wifi);
     }
 
-    Ok((networks, current_net, iface_name))
+    Ok((networks, current_net, parsed.interface_name))
 }
 
 #[cfg(target_os = "linux")]
@@ -1387,11 +1403,920 @@ pub async fn network_wifi_scan() -> Result<WifiScanResult, NetworkError> {
     })
 }
 
+// ── Aircrack-ng Types ───────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AircrackToolStatus {
+    pub aircrack_ng: bool,
+    pub airmon_ng: bool,
+    pub airodump_ng: bool,
+    pub aireplay_ng: bool,
+    pub version: Option<String>,
+    pub needs_root: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WirelessInterface {
+    pub name: String,
+    pub driver: Option<String>,
+    pub chipset: Option<String>,
+    pub monitor_mode: bool,
+    pub monitor_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AircrackOpKind {
+    MonitorStart,
+    MonitorStop,
+    Scan,
+    Deauth,
+    CaptureHandshake,
+    CrackWpa,
+    CrackWep,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AircrackProcess {
+    pub id: String,
+    pub kind: AircrackOpKind,
+    pub interface: String,
+    pub started_at: String,
+    pub target_bssid: Option<String>,
+    pub pid: Option<u32>,
+    pub active: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AircrackAuditEntry {
+    pub timestamp: String,
+    pub operation: AircrackOpKind,
+    pub interface: String,
+    pub target: Option<String>,
+    pub command: String,
+    pub result: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AirodumpNetwork {
+    pub bssid: String,
+    pub channel: i32,
+    pub privacy: String,
+    pub cipher: Option<String>,
+    pub auth: Option<String>,
+    pub power: i32,
+    pub beacons: u32,
+    pub data_frames: u32,
+    pub iv_count: u32,
+    pub essid: String,
+    pub wps: Option<String>,
+    pub clients: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AirodumpClient {
+    pub station_mac: String,
+    pub bssid: String,
+    pub power: i32,
+    pub packets: u32,
+    pub probes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AirodumpResult {
+    pub networks: Vec<AirodumpNetwork>,
+    pub clients: Vec<AirodumpClient>,
+    pub scan_id: String,
+    pub interface: String,
+    pub scan_time_secs: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HandshakeCaptureStatus {
+    pub operation_id: String,
+    pub target_bssid: String,
+    pub target_essid: String,
+    pub handshake_captured: bool,
+    pub capture_file: Option<String>,
+    pub elapsed_secs: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CrackProgress {
+    pub operation_id: String,
+    pub target_bssid: String,
+    pub keys_tested: u64,
+    pub keys_per_second: f64,
+    pub key_found: Option<String>,
+    pub running: bool,
+    pub elapsed_secs: u64,
+}
+
+// ── Aircrack-ng Helpers ─────────────────────────────────────────────────
+
+fn aircrack_audit(
+    state: &NetworkState,
+    op: AircrackOpKind,
+    interface: &str,
+    target: Option<&str>,
+    command: &str,
+    result: &str,
+) {
+    let mut log = state.aircrack_audit_log.lock().unwrap();
+    log.push(AircrackAuditEntry {
+        timestamp: chrono::Utc::now().to_rfc3339(),
+        operation: op,
+        interface: interface.to_string(),
+        target: target.map(String::from),
+        command: command.to_string(),
+        result: result.to_string(),
+    });
+}
+
+fn require_disclaimer(state: &NetworkState) -> Result<(), NetworkError> {
+    if !state.aircrack_disclaimer_accepted.load(Ordering::SeqCst) {
+        return Err(NetworkError::Io(
+            "You must accept the educational disclaimer before using aircrack-ng tools. \
+             These tools are for authorized security testing and education only."
+                .into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Extra search paths for aircrack-ng tools (Homebrew sbin, etc.)
+fn aircrack_search_paths() -> Vec<String> {
+    let mut dirs: Vec<String> = vec![
+        "/opt/homebrew/sbin".into(),
+        "/opt/homebrew/bin".into(),
+        "/usr/local/sbin".into(),
+        "/usr/local/bin".into(),
+        "/usr/sbin".into(),
+        "/usr/bin".into(),
+    ];
+    if let Ok(path) = std::env::var("PATH") {
+        for p in path.split(':') {
+            if !dirs.contains(&p.to_string()) {
+                dirs.push(p.to_string());
+            }
+        }
+    }
+    dirs
+}
+
+/// Resolve the full path for an aircrack tool, searching extra locations.
+fn resolve_tool(name: &str) -> String {
+    for dir in aircrack_search_paths() {
+        let candidate = format!("{}/{}", dir, name);
+        if std::path::Path::new(&candidate).exists() {
+            return candidate;
+        }
+    }
+    name.to_string() // fallback to bare name
+}
+
+async fn check_tool_exists(name: &str) -> bool {
+    // First: try bare `which`
+    let which_ok = tokio::process::Command::new("which")
+        .arg(name)
+        .output()
+        .await
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if which_ok {
+        return true;
+    }
+    // Second: search common install dirs directly
+    for dir in aircrack_search_paths() {
+        let candidate = format!("{}/{}", dir, name);
+        if std::path::Path::new(&candidate).exists() {
+            return true;
+        }
+    }
+    false
+}
+
+async fn get_aircrack_version() -> Option<String> {
+    let output = tokio::process::Command::new(resolve_tool("aircrack-ng"))
+        .arg("--help")
+        .output()
+        .await
+        .ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{}{}", text, stderr);
+    for line in combined.lines() {
+        if line.contains("Aircrack-ng") && (line.contains('.') || line.contains("1.")) {
+            return Some(line.trim().to_string());
+        }
+    }
+    None
+}
+
+fn parse_airodump_csv(csv_path: &str) -> Result<(Vec<AirodumpNetwork>, Vec<AirodumpClient>), NetworkError> {
+    let content = std::fs::read_to_string(csv_path)
+        .map_err(|e| NetworkError::Io(format!("Failed to read airodump CSV: {}", e)))?;
+
+    let mut networks = Vec::new();
+    let mut clients = Vec::new();
+    let mut section = 0; // 0 = header, 1 = APs, 2 = clients
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            section += 1;
+            continue;
+        }
+        if trimmed.starts_with("BSSID") && section <= 1 {
+            section = 1;
+            continue;
+        }
+        if trimmed.starts_with("Station MAC") {
+            section = 2;
+            continue;
+        }
+
+        let fields: Vec<&str> = trimmed.split(',').map(|s| s.trim()).collect();
+
+        if section == 1 && fields.len() >= 14 {
+            let bssid = fields[0].to_string();
+            if bssid.len() < 17 { continue; } // Skip invalid
+            networks.push(AirodumpNetwork {
+                bssid,
+                channel: fields[3].parse().unwrap_or(-1),
+                privacy: fields[5].to_string(),
+                cipher: if fields[6].is_empty() { None } else { Some(fields[6].to_string()) },
+                auth: if fields[7].is_empty() { None } else { Some(fields[7].to_string()) },
+                power: fields[8].parse().unwrap_or(-1),
+                beacons: fields[9].parse().unwrap_or(0),
+                data_frames: fields[10].parse().unwrap_or(0),
+                iv_count: fields[11].parse().unwrap_or(0),
+                essid: fields[13].to_string(),
+                wps: if fields.len() > 14 && !fields[14].is_empty() { Some(fields[14].to_string()) } else { None },
+                clients: 0,
+            });
+        } else if section == 2 && fields.len() >= 6 {
+            let station_mac = fields[0].to_string();
+            if station_mac.len() < 17 { continue; }
+            let bssid = fields[5].to_string();
+            let probes: Vec<String> = if fields.len() > 6 {
+                fields[6].split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+            } else {
+                Vec::new()
+            };
+            clients.push(AirodumpClient {
+                station_mac,
+                bssid: bssid.clone(),
+                power: fields[3].parse().unwrap_or(-1),
+                packets: fields[4].parse().unwrap_or(0),
+                probes,
+            });
+        }
+    }
+
+    // Count clients per network
+    for net in &mut networks {
+        net.clients = clients.iter().filter(|c| c.bssid == net.bssid).count() as u32;
+    }
+
+    Ok((networks, clients))
+}
+
+// ── Aircrack-ng Commands ────────────────────────────────────────────────
+
+/// Check if aircrack-ng suite is installed and available
+#[tauri::command]
+pub async fn network_aircrack_check() -> Result<AircrackToolStatus, NetworkError> {
+    let (aircrack, airmon, airodump, aireplay) = tokio::join!(
+        check_tool_exists("aircrack-ng"),
+        check_tool_exists("airmon-ng"),
+        check_tool_exists("airodump-ng"),
+        check_tool_exists("aireplay-ng"),
+    );
+    let version = get_aircrack_version().await;
+
+    // Check if we need root/sudo
+    let needs_root = if cfg!(unix) {
+        let uid = unsafe { libc::getuid() };
+        uid != 0
+    } else {
+        true
+    };
+
+    Ok(AircrackToolStatus {
+        aircrack_ng: aircrack,
+        airmon_ng: airmon,
+        airodump_ng: airodump,
+        aireplay_ng: aireplay,
+        version,
+        needs_root,
+    })
+}
+
+/// Accept the educational/ethical use disclaimer
+#[tauri::command]
+pub async fn network_aircrack_accept_disclaimer(
+    state: tauri::State<'_, NetworkState>,
+) -> Result<bool, NetworkError> {
+    state.aircrack_disclaimer_accepted.store(true, Ordering::SeqCst);
+
+    // Audit the acceptance
+    aircrack_audit(
+        &state,
+        AircrackOpKind::MonitorStart, // reusing — just an audit marker
+        "none",
+        None,
+        "disclaimer_accepted",
+        "User accepted educational/ethical use disclaimer",
+    );
+
+    Ok(true)
+}
+
+/// List wireless interfaces available for monitor mode
+#[tauri::command]
+pub async fn network_aircrack_interfaces(
+    state: tauri::State<'_, NetworkState>,
+) -> Result<Vec<WirelessInterface>, NetworkError> {
+    require_disclaimer(&state)?;
+
+    let mut interfaces = Vec::new();
+
+    // ── macOS: use networksetup + system_profiler ──
+    #[cfg(target_os = "macos")]
+    {
+        // `networksetup -listallhardwareports` gives us port/device/address triples.
+        let output = tokio::process::Command::new("networksetup")
+            .args(["-listallhardwareports"])
+            .output()
+            .await
+            .map_err(|e| NetworkError::Io(format!("Failed to run networksetup: {}", e)))?;
+        let text = String::from_utf8_lossy(&output.stdout);
+
+        let mut port_name = String::new();
+        let mut device_name = String::new();
+        for line in text.lines() {
+            if let Some(p) = line.strip_prefix("Hardware Port: ") {
+                port_name = p.trim().to_string();
+            } else if let Some(d) = line.strip_prefix("Device: ") {
+                device_name = d.trim().to_string();
+            } else if line.starts_with("Ethernet Address:") || line.trim().is_empty() {
+                // Wi-Fi interfaces show up as "Wi-Fi" or "AirPort"
+                let lower = port_name.to_lowercase();
+                if (lower.contains("wi-fi") || lower.contains("wifi") || lower.contains("airport"))
+                    && !device_name.is_empty()
+                {
+                    interfaces.push(WirelessInterface {
+                        name: device_name.clone(),
+                        driver: Some(port_name.clone()),
+                        chipset: Some("Apple Wi-Fi".into()),
+                        monitor_mode: false,
+                        monitor_name: None,
+                    });
+                }
+                port_name.clear();
+                device_name.clear();
+            }
+        }
+    }
+
+    // ── Linux: use airmon-ng, fallback to iw dev ──
+    #[cfg(not(target_os = "macos"))]
+    {
+        let airmon = resolve_tool("airmon-ng");
+        let output = tokio::process::Command::new(&airmon)
+            .output()
+            .await;
+
+        if let Ok(output) = output {
+            let text = String::from_utf8_lossy(&output.stdout);
+            for line in text.lines().skip(3) {
+                // airmon-ng output: PHY Interface Driver Chipset
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    let name = parts[1].to_string();
+                    let is_mon = name.contains("mon");
+                    interfaces.push(WirelessInterface {
+                        name: name.clone(),
+                        driver: parts.get(2).map(|s| s.to_string()),
+                        chipset: if parts.len() > 3 { Some(parts[3..].join(" ")) } else { None },
+                        monitor_mode: is_mon,
+                        monitor_name: if is_mon { Some(name) } else { None },
+                    });
+                }
+            }
+        }
+
+        // Fallback: try iw dev if airmon-ng returned nothing
+        if interfaces.is_empty() {
+            let iw_out = tokio::process::Command::new("iw")
+                .arg("dev")
+                .output()
+                .await
+                .ok();
+            if let Some(iw) = iw_out {
+                let iw_text = String::from_utf8_lossy(&iw.stdout);
+                let mut current_iface = String::new();
+                for line in iw_text.lines() {
+                    let trimmed = line.trim();
+                    if trimmed.starts_with("Interface") {
+                        current_iface = trimmed.replace("Interface ", "").trim().to_string();
+                    }
+                    if trimmed.starts_with("type") && !current_iface.is_empty() {
+                        let is_mon = trimmed.contains("monitor");
+                        interfaces.push(WirelessInterface {
+                            name: current_iface.clone(),
+                            driver: None,
+                            chipset: None,
+                            monitor_mode: is_mon,
+                            monitor_name: if is_mon { Some(current_iface.clone()) } else { None },
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(interfaces)
+}
+
+/// Enable monitor mode on a wireless interface.
+/// ⚠️ WARNING: This disrupts normal WiFi connectivity on the interface.
+#[tauri::command]
+pub async fn network_aircrack_monitor_start(
+    interface: String,
+    state: tauri::State<'_, NetworkState>,
+) -> Result<WirelessInterface, NetworkError> {
+    require_disclaimer(&state)?;
+
+    // On macOS, monitor mode uses `airport` sniff or is simply not supported
+    // on modern hardware. We try to create a PCAP-based monitor via
+    // `tcpdump` / `en0 sniff` as a best-effort approach.
+    #[cfg(target_os = "macos")]
+    {
+        // macOS doesn't support airmon-ng.  Apple removed the airport CLI,
+        // and modern Apple Silicon Macs don't expose raw monitor mode.
+        // Mark the interface as "pseudo-monitor" so the UI shows it, but
+        // airodump-ng packet capture won't work the Linux way.
+        let cmd_str = format!("(macOS) pseudo-monitor on {}", interface);
+        aircrack_audit(
+            &state, AircrackOpKind::MonitorStart, &interface, None,
+            &cmd_str, "macOS monitor mode is limited",
+        );
+        return Ok(WirelessInterface {
+            name: interface.clone(),
+            driver: Some("Apple Wi-Fi".into()),
+            chipset: Some("macOS – limited monitor support".into()),
+            monitor_mode: true,
+            monitor_name: Some(interface),
+        });
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let airmon = resolve_tool("airmon-ng");
+        let cmd_str = format!("{} start {}", airmon, interface);
+        let output = tokio::process::Command::new(&airmon)
+            .args(["start", &interface])
+            .output()
+            .await
+            .map_err(|e| NetworkError::Io(format!("Failed to start monitor mode: {}", e)))?;
+
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let result_str = if output.status.success() { "success" } else { "failed" };
+        aircrack_audit(&state, AircrackOpKind::MonitorStart, &interface, None, &cmd_str, result_str);
+
+        if !output.status.success() {
+            return Err(NetworkError::Io(format!("airmon-ng start failed: {}", text)));
+        }
+
+        let mon_name = if text.contains("mon") {
+            text.lines()
+                .find_map(|l| {
+                    let parts: Vec<&str> = l.split_whitespace().collect();
+                    parts.iter().find(|p| p.contains("mon")).map(|s| {
+                        s.trim_matches(|c: char| c == '(' || c == ')' || c == '[' || c == ']')
+                            .to_string()
+                    })
+                })
+                .unwrap_or_else(|| format!("{}mon", interface))
+        } else {
+            format!("{}mon", interface)
+        };
+
+        Ok(WirelessInterface {
+            name: mon_name.clone(),
+            driver: None,
+            chipset: None,
+            monitor_mode: true,
+            monitor_name: Some(mon_name),
+        })
+    }
+}
+
+/// Disable monitor mode on a wireless interface.
+#[tauri::command]
+pub async fn network_aircrack_monitor_stop(
+    interface: String,
+    state: tauri::State<'_, NetworkState>,
+) -> Result<String, NetworkError> {
+    require_disclaimer(&state)?;
+
+    #[cfg(target_os = "macos")]
+    {
+        aircrack_audit(
+            &state, AircrackOpKind::MonitorStop, &interface, None,
+            "(macOS) pseudo-monitor stop", "success",
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let airmon = resolve_tool("airmon-ng");
+        let cmd_str = format!("{} stop {}", airmon, interface);
+        let output = tokio::process::Command::new(&airmon)
+            .args(["stop", &interface])
+            .output()
+            .await
+            .map_err(|e| NetworkError::Io(format!("Failed to stop monitor mode: {}", e)))?;
+
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let result_str = if output.status.success() { "success" } else { "failed" };
+        aircrack_audit(&state, AircrackOpKind::MonitorStop, &interface, None, &cmd_str, result_str);
+
+        if !output.status.success() {
+            return Err(NetworkError::Io(format!("airmon-ng stop failed: {}", text)));
+        }
+    }
+
+    // Clean up process tracking
+    let mut procs = state.aircrack_processes.lock().unwrap();
+    procs.retain(|_, p| p.interface != interface);
+
+    Ok(format!("Monitor mode stopped on {}", interface))
+}
+
+/// Start an airodump-ng scan to discover networks and clients.
+/// This runs for the specified duration then returns results.
+/// ⚠️ WARNING: Requires monitor mode interface.
+#[tauri::command]
+pub async fn network_aircrack_scan_start(
+    interface: String,
+    duration_secs: Option<u64>,
+    channel: Option<i32>,
+    state: tauri::State<'_, NetworkState>,
+) -> Result<AirodumpResult, NetworkError> {
+    require_disclaimer(&state)?;
+
+    let scan_id = Uuid::new_v4().to_string();
+    let duration = duration_secs.unwrap_or(15);
+    let tmp_prefix = format!("/tmp/crossterm_airodump_{}", scan_id);
+
+    let mut args = vec![
+        "--write".to_string(),
+        tmp_prefix.clone(),
+        "--write-interval".to_string(),
+        "1".to_string(),
+        "--output-format".to_string(),
+        "csv".to_string(),
+    ];
+    if let Some(ch) = channel {
+        args.push("--channel".to_string());
+        args.push(ch.to_string());
+    }
+    args.push(interface.clone());
+
+    let cmd_str = format!("airodump-ng {}", args.join(" "));
+    aircrack_audit(&state, AircrackOpKind::Scan, &interface, None, &cmd_str, "started");
+
+    let mut child = tokio::process::Command::new(resolve_tool("airodump-ng"))
+        .args(&args)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| NetworkError::Io(format!("Failed to start airodump-ng: {}", e)))?;
+
+    let pid = child.id();
+
+    // Track the process
+    {
+        let mut procs = state.aircrack_processes.lock().unwrap();
+        procs.insert(scan_id.clone(), AircrackProcess {
+            id: scan_id.clone(),
+            kind: AircrackOpKind::Scan,
+            interface: interface.clone(),
+            started_at: chrono::Utc::now().to_rfc3339(),
+            target_bssid: None,
+            pid,
+            active: true,
+        });
+    }
+
+    // Wait for duration then kill
+    tokio::time::sleep(Duration::from_secs(duration)).await;
+    let _ = child.kill().await;
+
+    // Mark as inactive
+    {
+        let mut procs = state.aircrack_processes.lock().unwrap();
+        if let Some(p) = procs.get_mut(&scan_id) {
+            p.active = false;
+        }
+    }
+
+    // Parse results from CSV
+    let csv_path = format!("{}-01.csv", tmp_prefix);
+    let (networks, clients) = if std::path::Path::new(&csv_path).exists() {
+        parse_airodump_csv(&csv_path)?
+    } else {
+        (Vec::new(), Vec::new())
+    };
+
+    // Clean up temp files
+    for ext in &["csv", "cap", "kismet.csv", "kismet.netxml", "log.csv"] {
+        let path = format!("{}-01.{}", tmp_prefix, ext);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    aircrack_audit(&state, AircrackOpKind::Scan, &interface, None, &cmd_str,
+        &format!("completed: {} networks, {} clients", networks.len(), clients.len()));
+
+    Ok(AirodumpResult {
+        networks,
+        clients,
+        scan_id,
+        interface,
+        scan_time_secs: duration,
+    })
+}
+
+/// Send deauthentication frames to a target.
+/// ⚠️ DANGEROUS: This disconnects the target client from the network.
+/// For authorized testing and education ONLY.
+#[tauri::command]
+pub async fn network_aircrack_deauth(
+    interface: String,
+    target_bssid: String,
+    client_mac: Option<String>,
+    count: Option<u32>,
+    state: tauri::State<'_, NetworkState>,
+) -> Result<String, NetworkError> {
+    require_disclaimer(&state)?;
+
+    let deauth_count = count.unwrap_or(5); // Default to 5, NOT continuous
+    let mut args = vec![
+        "--deauth".to_string(),
+        deauth_count.to_string(),
+        "-a".to_string(),
+        target_bssid.clone(),
+    ];
+    if let Some(ref client) = client_mac {
+        args.push("-c".to_string());
+        args.push(client.clone());
+    }
+    args.push(interface.clone());
+
+    let cmd_str = format!("aireplay-ng {}", args.join(" "));
+    let target_desc = format!("bssid={} client={}", target_bssid, client_mac.as_deref().unwrap_or("broadcast"));
+    aircrack_audit(&state, AircrackOpKind::Deauth, &interface, Some(&target_desc), &cmd_str, "started");
+
+    let output = tokio::process::Command::new(resolve_tool("aireplay-ng"))
+        .args(&args)
+        .output()
+        .await
+        .map_err(|e| NetworkError::Io(format!("Failed to run aireplay-ng: {}", e)))?;
+
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let result_str = if output.status.success() { "completed" } else { "failed" };
+    aircrack_audit(&state, AircrackOpKind::Deauth, &interface, Some(&target_desc), &cmd_str, result_str);
+
+    Ok(format!("Sent {} deauth frames to {} ({})", deauth_count, target_bssid, result_str))
+}
+
+/// Capture a WPA handshake by monitoring and optionally deauthing.
+/// ⚠️ WARNING: May send deauth frames. For authorized testing only.
+#[tauri::command]
+pub async fn network_aircrack_capture_handshake(
+    interface: String,
+    target_bssid: String,
+    target_channel: i32,
+    send_deauth: Option<bool>,
+    timeout_secs: Option<u64>,
+    state: tauri::State<'_, NetworkState>,
+) -> Result<HandshakeCaptureStatus, NetworkError> {
+    require_disclaimer(&state)?;
+
+    let op_id = Uuid::new_v4().to_string();
+    let timeout = timeout_secs.unwrap_or(60);
+    let tmp_prefix = format!("/tmp/crossterm_handshake_{}", op_id);
+
+    // Start airodump-ng on specific channel/bssid to capture handshake
+    let mut dump_args = vec![
+        "--bssid".to_string(),
+        target_bssid.clone(),
+        "--channel".to_string(),
+        target_channel.to_string(),
+        "--write".to_string(),
+        tmp_prefix.clone(),
+        "--output-format".to_string(),
+        "cap".to_string(),
+        interface.clone(),
+    ];
+
+    let cmd_str = format!("airodump-ng {}", dump_args.join(" "));
+    aircrack_audit(&state, AircrackOpKind::CaptureHandshake, &interface, Some(&target_bssid), &cmd_str, "started");
+
+    let mut dump_child = tokio::process::Command::new(resolve_tool("airodump-ng"))
+        .args(&dump_args)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| NetworkError::Io(format!("Failed to start airodump-ng: {}", e)))?;
+
+    // Optionally send a deauth to speed up handshake capture
+    if send_deauth.unwrap_or(false) {
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        let deauth_args = vec![
+            "--deauth", "3",
+            "-a", &target_bssid,
+            &interface,
+        ];
+        let _ = tokio::process::Command::new(resolve_tool("aireplay-ng"))
+            .args(&deauth_args)
+            .output()
+            .await;
+        aircrack_audit(&state, AircrackOpKind::Deauth, &interface, Some(&target_bssid),
+            &format!("aireplay-ng --deauth 3 -a {} {}", target_bssid, interface), "sent 3 deauth frames for handshake capture");
+    }
+
+    // Wait for timeout
+    tokio::time::sleep(Duration::from_secs(timeout)).await;
+    let _ = dump_child.kill().await;
+
+    // Check if handshake was captured
+    let cap_file = format!("{}-01.cap", tmp_prefix);
+    let handshake_captured = if std::path::Path::new(&cap_file).exists() {
+        // Use aircrack-ng to verify handshake exists in capture
+        let verify = tokio::process::Command::new(resolve_tool("aircrack-ng"))
+            .arg(&cap_file)
+            .output()
+            .await
+            .ok();
+        verify.map(|o| {
+            let text = String::from_utf8_lossy(&o.stdout);
+            text.contains("1 handshake") || text.contains("handshake")
+        }).unwrap_or(false)
+    } else {
+        false
+    };
+
+    let result_str = if handshake_captured { "handshake captured" } else { "no handshake" };
+    aircrack_audit(&state, AircrackOpKind::CaptureHandshake, &interface, Some(&target_bssid), &cmd_str, result_str);
+
+    Ok(HandshakeCaptureStatus {
+        operation_id: op_id,
+        target_bssid,
+        target_essid: String::new(), // Filled by frontend
+        handshake_captured,
+        capture_file: if handshake_captured { Some(cap_file) } else { None },
+        elapsed_secs: timeout,
+    })
+}
+
+/// Attempt to crack a WPA handshake using a wordlist.
+/// ⚠️ For educational use — demonstrates why strong passwords matter.
+#[tauri::command]
+pub async fn network_aircrack_crack_start(
+    capture_file: String,
+    target_bssid: String,
+    wordlist_path: String,
+    state: tauri::State<'_, NetworkState>,
+) -> Result<CrackProgress, NetworkError> {
+    require_disclaimer(&state)?;
+
+    // Validate paths exist
+    if !std::path::Path::new(&capture_file).exists() {
+        return Err(NetworkError::Io("Capture file not found".into()));
+    }
+    if !std::path::Path::new(&wordlist_path).exists() {
+        return Err(NetworkError::Io("Wordlist file not found".into()));
+    }
+
+    let op_id = Uuid::new_v4().to_string();
+    let cmd_str = format!("aircrack-ng -b {} -w {} {}", target_bssid, wordlist_path, capture_file);
+    aircrack_audit(&state, AircrackOpKind::CrackWpa, "n/a", Some(&target_bssid), &cmd_str, "started");
+
+    let start = Instant::now();
+    let output = tokio::process::Command::new(resolve_tool("aircrack-ng"))
+        .args(["-b", &target_bssid, "-w", &wordlist_path, &capture_file])
+        .output()
+        .await
+        .map_err(|e| NetworkError::Io(format!("Failed to run aircrack-ng: {}", e)))?;
+
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Parse output for key found
+    let key_found = text.lines()
+        .find(|l| l.contains("KEY FOUND!"))
+        .map(|l| {
+            l.split('[')
+                .nth(1)
+                .and_then(|s| s.split(']').next())
+                .unwrap_or("")
+                .trim()
+                .to_string()
+        });
+
+    // Parse keys tested
+    let keys_tested = text.lines()
+        .find_map(|l| {
+            if l.contains("keys tested") {
+                l.split_whitespace().next().and_then(|s| s.parse::<u64>().ok())
+            } else {
+                None
+            }
+        })
+        .unwrap_or(0);
+
+    let elapsed = start.elapsed().as_secs();
+    let kps = if elapsed > 0 { keys_tested as f64 / elapsed as f64 } else { 0.0 };
+
+    let result_str = if key_found.is_some() { "KEY FOUND" } else { "key not found" };
+    aircrack_audit(&state, AircrackOpKind::CrackWpa, "n/a", Some(&target_bssid), &cmd_str, result_str);
+
+    Ok(CrackProgress {
+        operation_id: op_id,
+        target_bssid,
+        keys_tested,
+        keys_per_second: kps,
+        key_found,
+        running: false,
+        elapsed_secs: elapsed,
+    })
+}
+
+/// Get the full audit log of all aircrack-ng operations
+#[tauri::command]
+pub async fn network_aircrack_audit_log(
+    state: tauri::State<'_, NetworkState>,
+) -> Result<Vec<AircrackAuditEntry>, NetworkError> {
+    require_disclaimer(&state)?;
+    let log = state.aircrack_audit_log.lock().unwrap();
+    Ok(log.clone())
+}
+
+/// Stop all running aircrack-ng processes
+#[tauri::command]
+pub async fn network_aircrack_stop_all(
+    state: tauri::State<'_, NetworkState>,
+) -> Result<String, NetworkError> {
+    let mut procs = state.aircrack_processes.lock().unwrap();
+    let mut killed = 0;
+    for (_, proc) in procs.iter_mut() {
+        if proc.active {
+            if let Some(pid) = proc.pid {
+                #[cfg(unix)]
+                unsafe { libc::kill(pid as i32, libc::SIGTERM); }
+                proc.active = false;
+                killed += 1;
+            }
+        }
+    }
+    Ok(format!("Stopped {} aircrack-ng processes", killed))
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_wifi_band_serde_values() {
+        assert_eq!(serde_json::to_string(&WifiBand::Band2_4GHz).unwrap(), "\"2.4GHz\"");
+        assert_eq!(serde_json::to_string(&WifiBand::Band5GHz).unwrap(), "\"5GHz\"");
+        assert_eq!(serde_json::to_string(&WifiBand::Band6GHz).unwrap(), "\"6GHz\"");
+        assert_eq!(serde_json::to_string(&WifiBand::Unknown).unwrap(), "\"unknown\"");
+    }
 
     #[test]
     fn test_wol_packet_format() {

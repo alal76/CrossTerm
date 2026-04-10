@@ -888,6 +888,7 @@ dependencies = [
  "futures",
  "hex",
  "keyring",
+ "libc",
  "log",
  "portable-pty",
  "rand 0.8.5",

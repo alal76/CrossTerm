@@ -133,6 +133,16 @@ async fn open_sftp(
         .unwrap()
 }
 
+/// Write data to a remote file via SFTP, creating it if it doesn't exist.
+/// `SftpSession::write()` uses WRITE-only flags and can't create new files;
+/// `create()` uses CREATE|TRUNCATE|WRITE which works for new files.
+async fn sftp_write_file(sftp: &russh_sftp::client::SftpSession, path: &str, data: &[u8]) {
+    use tokio::io::AsyncWriteExt;
+    let mut file = sftp.create(path).await.unwrap_or_else(|e| panic!("create {path}: {e}"));
+    file.write_all(data).await.unwrap_or_else(|e| panic!("write_all {path}: {e}"));
+    file.shutdown().await.unwrap_or_else(|e| panic!("shutdown {path}: {e}"));
+}
+
 // ── SSH Integration Tests ──────────────────────────────────────────────────
 
 /// IT-SSH-01: Start OpenSSH container. Connect with password.
@@ -458,7 +468,7 @@ async fn test_sftp_upload_download_roundtrip() {
     };
 
     let remote_path = "/tmp/crossterm_test_roundtrip.bin";
-    sftp.write(remote_path, &data).await.expect("upload file");
+    sftp_write_file(&sftp, remote_path, &data).await;
 
     let downloaded = sftp.read(remote_path).await.expect("download file");
 
@@ -533,7 +543,7 @@ async fn test_sftp_large_file_100mb() {
     };
 
     let remote_path = "/tmp/crossterm_test_100mb.bin";
-    sftp.write(remote_path, &data).await.expect("upload 100MB file");
+    sftp_write_file(&sftp, remote_path, &data).await;
 
     let downloaded = sftp.read(remote_path).await.expect("download 100MB file");
 
@@ -561,7 +571,7 @@ async fn test_sftp_permission_change() {
     let sftp = open_sftp(&handle).await;
 
     let remote_path = "/tmp/crossterm_test_chmod.txt";
-    sftp.write(remote_path, b"permission test").await.expect("upload file");
+    sftp_write_file(&sftp, remote_path, b"permission test").await;
 
     // chmod 755 via SSH exec (reliable cross-platform approach)
     ssh_exec_cmd(&handle, &format!("chmod 755 {remote_path}")).await;
@@ -591,7 +601,7 @@ async fn test_sftp_rename_and_delete() {
     let renamed = "/tmp/crossterm_test_rename_new.txt";
 
     // Upload
-    sftp.write(original, b"rename test data").await.expect("upload original");
+    sftp_write_file(&sftp, original, b"rename test data").await;
 
     // Rename
     sftp.rename(original, renamed).await.expect("rename file");
@@ -627,7 +637,7 @@ async fn test_sftp_transfer_cancel() {
     // Upload a file via SFTP, then drop the session (simulating cancel)
     {
         let sftp = open_sftp(&handle).await;
-        sftp.write(remote_path, b"partial data to cancel").await.expect("write file");
+        sftp_write_file(&sftp, remote_path, b"partial data to cancel").await;
         // SFTP session dropped here — simulates cancellation
     }
 
@@ -714,7 +724,7 @@ async fn test_sftp_special_characters() {
     let content = b"unicode filename test content";
 
     // Upload
-    sftp.write(&remote_path, content).await.expect("upload unicode-named file");
+    sftp_write_file(&sftp, &remote_path, content).await;
 
     // Verify it appears in directory listing with correct name
     let mut names = Vec::new();
@@ -746,18 +756,19 @@ async fn test_vault_persistence_across_restarts() {
     use app_lib::vault::{CredentialCreateRequest, CredentialType, Vault};
     use serde_json::json;
 
-    // Use a unique profile id so tests don't collide
+    // Use unique ids so tests don't collide
+    let vault_id = uuid::Uuid::new_v4().to_string();
     let profile_id = uuid::Uuid::new_v4().to_string();
 
     // Phase 1: Create vault and add a credential
     {
         let vault = Vault::new();
         vault
-            .create(&profile_id, "master-pass-123")
+            .create(&vault_id, &profile_id, "Test Vault", "master-pass-123", true)
             .expect("create vault");
         // create() leaves vault unlocked
         let _id = vault
-            .credential_create(CredentialCreateRequest {
+            .credential_create(&vault_id, CredentialCreateRequest {
                 name: "Test Server".to_string(),
                 credential_type: CredentialType::Password,
                 username: Some("admin".to_string()),
@@ -773,16 +784,16 @@ async fn test_vault_persistence_across_restarts() {
     {
         let vault = Vault::new();
         vault
-            .unlock(&profile_id, "master-pass-123")
+            .unlock(&vault_id, "master-pass-123")
             .expect("unlock after restart");
-        let creds = vault.credential_list().expect("list after restart");
+        let creds = vault.credential_list(&vault_id).expect("list after restart");
         assert!(!creds.is_empty(), "credentials should survive restart");
         assert_eq!(creds[0].name, "Test Server");
         assert_eq!(creds[0].username.as_deref(), Some("admin"));
     }
 
     // Cleanup
-    let db_path = Vault::db_path(&profile_id);
+    let db_path = Vault::db_path(&vault_id);
     if let Some(parent) = db_path.parent() {
         let _ = std::fs::remove_dir_all(parent);
     }
@@ -795,22 +806,23 @@ async fn test_vault_corrupted_db() {
     // IT-V-02: Corrupt vault DB and verify graceful error handling (no panic)
     use app_lib::vault::Vault;
 
+    let vault_id = uuid::Uuid::new_v4().to_string();
     let profile_id = uuid::Uuid::new_v4().to_string();
 
     // Create a valid vault first
     {
         let vault = Vault::new();
-        vault.create(&profile_id, "test-pass").expect("create vault");
+        vault.create(&vault_id, &profile_id, "Corrupt Test", "test-pass", true).expect("create vault");
     }
 
     // Corrupt the DB file with garbage bytes
-    let db_path = Vault::db_path(&profile_id);
+    let db_path = Vault::vault_db_path(&vault_id);
     std::fs::write(&db_path, b"GARBAGE_CORRUPTED_DATA_NOT_SQLITE_HEADER_12345")
         .expect("write garbage to db");
 
     // Attempt to unlock — should return an error, NOT panic
     let vault = Vault::new();
-    let result = vault.unlock(&profile_id, "test-pass");
+    let result = vault.unlock(&vault_id, "test-pass");
     assert!(result.is_err(), "opening corrupted DB should fail gracefully");
 
     // Cleanup
@@ -828,19 +840,22 @@ async fn test_vault_concurrent_credential_access() {
     use serde_json::json;
     use std::sync::Arc;
 
+    let vault_id = uuid::Uuid::new_v4().to_string();
     let profile_id = uuid::Uuid::new_v4().to_string();
     let vault = Arc::new(Vault::new());
     vault
-        .create(&profile_id, "concurrent-pass")
+        .create(&vault_id, &profile_id, "Concurrent Test", "concurrent-pass", true)
         .expect("create vault");
     // create() leaves vault unlocked
 
+    let vault_id_shared = vault_id.clone();
     let mut handles = Vec::new();
     for i in 0..20 {
         let vault = vault.clone();
+        let vid = vault_id_shared.clone();
         handles.push(tokio::spawn(async move {
             vault
-                .credential_create(CredentialCreateRequest {
+                .credential_create(&vid, CredentialCreateRequest {
                     name: format!("cred-{i}"),
                     credential_type: CredentialType::Password,
                     username: Some(format!("user-{i}")),
@@ -856,7 +871,7 @@ async fn test_vault_concurrent_credential_access() {
         h.await.expect("task join");
     }
 
-    let creds = vault.credential_list().expect("list all");
+    let creds = vault.credential_list(&vault_id).expect("list all");
     assert_eq!(creds.len(), 20, "all 20 credentials should exist");
 
     // Verify no duplicate names
@@ -866,7 +881,7 @@ async fn test_vault_concurrent_credential_access() {
     assert_eq!(names.len(), 20, "all names should be unique");
 
     // Cleanup
-    let db_path = Vault::db_path(&profile_id);
+    let db_path = Vault::db_path(&vault_id);
     if let Some(parent) = db_path.parent() {
         let _ = std::fs::remove_dir_all(parent);
     }

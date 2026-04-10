@@ -64,6 +64,9 @@ dirs = "5"
 # OS Credential Store
 keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
 
+# System
+libc = "0.2"
+
 # Clipboard
 arboard = "3"
 

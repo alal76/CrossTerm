@@ -1314,6 +1314,19 @@ mod tests {
         SftpSession::new(channel.into_stream()).await.unwrap()
     }
 
+    /// Helper: write data to a remote file, creating it if necessary.
+    /// `SftpSession::write()` uses WRITE-only flags and fails for new files,
+    /// so we use `create()` + `write_all()` which uses CREATE|TRUNCATE|WRITE.
+    async fn sftp_write_file(sftp: &SftpSession, path: &str, data: &[u8]) {
+        let mut file = sftp.create(path).await
+            .unwrap_or_else(|e| panic!("create {path} failed: {e}"));
+        use tokio::io::AsyncWriteExt;
+        file.write_all(data).await
+            .unwrap_or_else(|e| panic!("write {path} failed: {e}"));
+        file.shutdown().await
+            .unwrap_or_else(|e| panic!("close {path} failed: {e}"));
+    }
+
     async fn sftp_test_exec(
         handle: &client::Handle<TestHandler>,
         cmd: &str,
@@ -1357,9 +1370,7 @@ mod tests {
         let sftp = sftp_test_open(&handle).await;
 
         // Create a known file so we can verify listing
-        sftp.write("/tmp/sftp_list_test.txt", b"list test")
-            .await
-            .unwrap();
+        sftp_write_file(&sftp, "/tmp/sftp_list_test.txt", b"list test").await;
 
         let entries: Vec<_> = sftp.read_dir("/tmp").await.expect("should list /tmp").into_iter().collect();
         let found = entries.iter().any(|e| e.file_name() == "sftp_list_test.txt");
@@ -1387,9 +1398,7 @@ mod tests {
         let sftp = sftp_test_open(&handle).await;
 
         let test_content = b"Hello from CrossTerm SFTP read test!";
-        sftp.write("/tmp/sftp_read_test.txt", test_content)
-            .await
-            .unwrap();
+        sftp_write_file(&sftp, "/tmp/sftp_read_test.txt", test_content).await;
 
         let data = sftp
             .read("/tmp/sftp_read_test.txt")
@@ -1411,9 +1420,7 @@ mod tests {
         let sftp = sftp_test_open(&handle).await;
 
         let content = b"SFTP write test payload 12345";
-        sftp.write("/tmp/sftp_write_test.txt", content)
-            .await
-            .expect("should write file");
+        sftp_write_file(&sftp, "/tmp/sftp_write_test.txt", content).await;
 
         let readback = sftp.read("/tmp/sftp_write_test.txt").await.unwrap();
         assert_eq!(readback, content);
@@ -1435,9 +1442,7 @@ mod tests {
         let handle = sftp_test_connect().await;
         let sftp = sftp_test_open(&handle).await;
 
-        sftp.write("/tmp/sftp_delete_test.txt", b"to be deleted")
-            .await
-            .unwrap();
+        sftp_write_file(&sftp, "/tmp/sftp_delete_test.txt", b"to be deleted").await;
         sftp.metadata("/tmp/sftp_delete_test.txt")
             .await
             .expect("file should exist before delete");
@@ -1499,7 +1504,7 @@ mod tests {
         let _ = sftp.remove_file(old_path).await;
         let _ = sftp.remove_file(new_path).await;
 
-        sftp.write(old_path, content).await.unwrap();
+        sftp_write_file(&sftp, old_path, content).await;
         sftp.rename(old_path, new_path)
             .await
             .expect("rename should succeed");
@@ -1529,7 +1534,7 @@ mod tests {
         let sftp = sftp_test_open(&handle).await;
         let path = "/tmp/sftp_chmod_test.txt";
 
-        sftp.write(path, b"chmod test").await.unwrap();
+        sftp_write_file(&sftp, path, b"chmod test").await;
 
         // Use SSH exec to change permissions
         sftp_test_exec(&handle, &format!("chmod 755 {}", path)).await;
@@ -1559,7 +1564,7 @@ mod tests {
         let content = b"stat test content with known size";
         let path = "/tmp/sftp_stat_test.txt";
 
-        sftp.write(path, content).await.unwrap();
+        sftp_write_file(&sftp, path, content).await;
 
         let attrs = sftp.metadata(path).await.expect("stat should succeed");
         assert_eq!(
@@ -1594,9 +1599,7 @@ mod tests {
         hasher.update(&data);
         let original_hash = hasher.finalize();
 
-        sftp.write(path, &data)
-            .await
-            .expect("large file upload should succeed");
+        sftp_write_file(&sftp, path, &data).await;
 
         let downloaded = sftp
             .read(path)
@@ -1627,9 +1630,7 @@ mod tests {
         let total_size = 512 * 1024; // 512 KB
         let data = vec![0xABu8; total_size];
 
-        sftp.write(path, &data)
-            .await
-            .expect("upload should succeed");
+        sftp_write_file(&sftp, path, &data).await;
 
         let attrs = sftp.metadata(path).await.unwrap();
         assert_eq!(attrs.size.unwrap_or(0), total_size as u64);
@@ -1650,7 +1651,7 @@ mod tests {
         let path = "/tmp/sftp_cancel_test.bin";
         let partial_data = vec![0xCDu8; 1024];
 
-        sftp.write(path, &partial_data).await.unwrap();
+        sftp_write_file(&sftp, path, &partial_data).await;
 
         let attrs = sftp.metadata(path).await.unwrap();
         assert_eq!(attrs.size.unwrap_or(0), 1024);
@@ -1680,7 +1681,7 @@ mod tests {
 
         // Write first half (simulating partial transfer)
         let half = &full_data[..2048];
-        sftp.write(path, half).await.unwrap();
+        sftp_write_file(&sftp, path, half).await;
         let attrs = sftp.metadata(path).await.unwrap();
         assert_eq!(
             attrs.size.unwrap_or(0),
@@ -1689,7 +1690,7 @@ mod tests {
         );
 
         // "Resume" by writing the full file (SFTP write overwrites)
-        sftp.write(path, &full_data).await.unwrap();
+        sftp_write_file(&sftp, path, &full_data).await;
         let attrs = sftp.metadata(path).await.unwrap();
         assert_eq!(
             attrs.size.unwrap_or(0),
@@ -1719,7 +1720,7 @@ mod tests {
         let _ = sftp.remove_file(link_path).await;
         let _ = sftp.remove_file(target_path).await;
 
-        sftp.write(target_path, content).await.unwrap();
+        sftp_write_file(&sftp, target_path, content).await;
 
         // Create symlink via SSH exec (reliable across sftp lib versions)
         sftp_test_exec(
@@ -1766,9 +1767,13 @@ mod tests {
             let path = format!("/tmp/sftp_concurrent_{}.txt", i);
             let content = format!("concurrent file {} content", i);
             task_handles.push(tokio::spawn(async move {
-                sftp.write(&path, content.as_bytes())
-                    .await
+                use tokio::io::AsyncWriteExt;
+                let mut file = sftp.create(&path).await
+                    .unwrap_or_else(|e| panic!("create {} failed: {}", path, e));
+                file.write_all(content.as_bytes()).await
                     .unwrap_or_else(|e| panic!("write {} failed: {}", path, e));
+                file.shutdown().await
+                    .unwrap_or_else(|e| panic!("close {} failed: {}", path, e));
                 let readback = sftp
                     .read(&path)
                     .await

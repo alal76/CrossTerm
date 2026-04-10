@@ -557,7 +557,7 @@ export interface ExploreHostFound {
 
 // --- WiFi Scan Types ---
 
-export type WifiBand = "band2_4ghz" | "band5ghz" | "band6ghz" | "unknown";
+export type WifiBand = "2.4GHz" | "5GHz" | "6GHz" | "unknown";
 
 export type WifiSecurity =
   | "open"
@@ -609,6 +609,93 @@ export interface WifiScanResult {
   current_network?: WifiNetwork;
   interface_name?: string;
   scan_timestamp: string;
+}
+
+// --- Aircrack-ng Types ---
+
+export interface AircrackToolStatus {
+  aircrack_ng: boolean;
+  airmon_ng: boolean;
+  airodump_ng: boolean;
+  aireplay_ng: boolean;
+  version?: string;
+  needs_root: boolean;
+}
+
+export interface WirelessInterface {
+  name: string;
+  driver?: string;
+  chipset?: string;
+  monitor_mode: boolean;
+  monitor_name?: string;
+}
+
+export type AircrackOpKind =
+  | "monitor_start"
+  | "monitor_stop"
+  | "scan"
+  | "deauth"
+  | "capture_handshake"
+  | "crack_wpa"
+  | "crack_wep";
+
+export interface AircrackAuditEntry {
+  timestamp: string;
+  operation: AircrackOpKind;
+  interface: string;
+  target?: string;
+  command: string;
+  result: string;
+}
+
+export interface AirodumpNetwork {
+  bssid: string;
+  channel: number;
+  privacy: string;
+  cipher?: string;
+  auth?: string;
+  power: number;
+  beacons: number;
+  data_frames: number;
+  iv_count: number;
+  essid: string;
+  wps?: string;
+  clients: number;
+}
+
+export interface AirodumpClient {
+  station_mac: string;
+  bssid: string;
+  power: number;
+  packets: number;
+  probes: string[];
+}
+
+export interface AirodumpResult {
+  networks: AirodumpNetwork[];
+  clients: AirodumpClient[];
+  scan_id: string;
+  interface: string;
+  scan_time_secs: number;
+}
+
+export interface HandshakeCaptureStatus {
+  operation_id: string;
+  target_bssid: string;
+  target_essid: string;
+  handshake_captured: boolean;
+  capture_file?: string;
+  elapsed_secs: number;
+}
+
+export interface CrackProgress {
+  operation_id: string;
+  target_bssid: string;
+  keys_tested: number;
+  keys_per_second: number;
+  key_found?: string;
+  running: boolean;
+  elapsed_secs: number;
 }
 
 // --- SSH Discovery Types ---
