@@ -399,72 +399,59 @@ export default function NetworkExplorer() {
         </div>
       )}
 
-      {/* Results list */}
+      {/* Results table */}
       {filteredResults.length > 0 && (
-        <div className="flex flex-col gap-1.5">
-          {filteredResults.map((result) => (
-            <div
-              key={result.ip}
-              className="rounded-md border border-border-subtle bg-surface-primary p-3 hover:border-border-default transition-colors"
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex items-center gap-2 min-w-0">
-                  <Monitor size={14} className="text-text-secondary shrink-0" />
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-text-primary">
-                        {result.ip}
-                      </span>
-                      {result.os_guess && (
-                        <span className="rounded bg-surface-elevated px-1.5 py-0.5 text-[10px] text-text-secondary">
-                          {result.os_guess}
+        <div className="overflow-auto rounded-md border border-border-default">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border-subtle bg-surface-secondary">
+                <th className="px-3 py-2 text-left font-medium text-text-secondary">{t('network.ip')}</th>
+                <th className="px-3 py-2 text-left font-medium text-text-secondary">{t('network.hostname')}</th>
+                <th className="px-3 py-2 text-left font-medium text-text-secondary">{t('network.os')}</th>
+                <th className="px-3 py-2 text-left font-medium text-text-secondary">{t('network.openPorts')}</th>
+                <th className="px-3 py-2 text-left font-medium text-text-secondary">{t('network.responseTime')}</th>
+                <th className="px-3 py-2 text-left font-medium text-text-secondary">{t('network.sessionType')}</th>
+                <th className="px-3 py-2 text-right font-medium text-text-secondary"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredResults.map((result) => (
+                <tr key={result.ip} className="border-b border-border-subtle last:border-0 hover:bg-surface-secondary">
+                  <td className="px-3 py-2 text-text-primary">{result.ip}</td>
+                  <td className="px-3 py-2 text-text-secondary">{result.hostname ?? '—'}</td>
+                  <td className="px-3 py-2 text-text-secondary">{result.os_guess ?? '—'}</td>
+                  <td className="px-3 py-2">
+                    <div className="flex flex-wrap gap-1">
+                      {result.open_ports.map((p) => (
+                        <span
+                          key={p.port}
+                          className={clsx(
+                            'rounded bg-surface-elevated px-1.5 py-0.5 text-xs text-text-secondary',
+                            SERVICE_PORT_COLORS[p.service_name] ?? ''
+                          )}
+                        >
+                          {p.port}/{p.service_name}
                         </span>
-                      )}
-                      {result.suggested_session_type && (
-                        <span className="text-xs">
-                          {SESSION_ICON[result.suggested_session_type] ?? ''}
-                        </span>
-                      )}
+                      ))}
                     </div>
-                    {result.hostname && (
-                      <span className="text-xs text-text-secondary truncate block">
-                        {result.hostname}
-                      </span>
+                  </td>
+                  <td className="px-3 py-2 text-text-secondary">{result.response_time_ms.toFixed(0)}ms</td>
+                  <td className="px-3 py-2 text-text-secondary">{result.suggested_session_type ? SESSION_ICON[result.suggested_session_type] ?? result.suggested_session_type : '—'}</td>
+                  <td className="px-3 py-2 text-right">
+                    {result.suggested_session_type && (
+                      <button
+                        onClick={() => handleConnect(result)}
+                        className="flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-accent-primary hover:bg-surface-elevated transition-colors"
+                      >
+                        <PlugZap size={12} />
+                        {t('network.connect')}
+                      </button>
                     )}
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-1 shrink-0">
-                  <span className="text-[10px] text-text-disabled tabular-nums">
-                    {result.response_time_ms.toFixed(0)}ms
-                  </span>
-                  {result.suggested_session_type && (
-                    <button
-                      onClick={() => handleConnect(result)}
-                      className="flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-accent-primary hover:bg-surface-elevated transition-colors"
-                    >
-                      <PlugZap size={12} />
-                      {t('network.connect')}
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex flex-wrap gap-1 mt-2">
-                {result.open_ports.map((p) => (
-                  <span
-                    key={p.port}
-                    className={clsx(
-                      'rounded px-1.5 py-0.5 text-[11px] font-medium',
-                      SERVICE_PORT_COLORS[p.service_name] ?? 'bg-surface-elevated text-text-secondary'
-                    )}
-                  >
-                    {p.port}/{p.service_name}
-                  </span>
-                ))}
-              </div>
-            </div>
-          ))}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 

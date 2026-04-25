@@ -1,3 +1,34 @@
+/// Analyze WiFi details for a given network using helper functions.
+#[tauri::command]
+pub fn network_analyze_wifi_details(
+    ssid: String,
+    bssid: String,
+    channel_raw: String,
+    signal_noise_raw: Option<String>,
+    security_raw: Option<String>,
+) -> serde_json::Value {
+    let (channel, channel_width, freq_hint) = parse_channel_info(&channel_raw);
+    let band = parse_band_from_channel(channel, freq_hint);
+    let (signal_dbm, noise_dbm) = signal_noise_raw
+        .as_deref()
+        .map(parse_signal_noise)
+        .unwrap_or((None, None));
+    let security = security_raw
+        .as_deref()
+        .map(parse_macos_security)
+        .unwrap_or(WifiSecurity::Unknown("unknown".to_string()));
+
+    serde_json::json!({
+        "ssid": ssid,
+        "bssid": bssid,
+        "channel": channel,
+        "channel_width_mhz": channel_width,
+        "band": format!("{:?}", band),
+        "signal_dbm": signal_dbm,
+        "noise_dbm": noise_dbm,
+        "security": format!("{:?}", security),
+    })
+}
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
@@ -1175,37 +1206,24 @@ async fn platform_wifi_scan() -> Result<(Vec<WifiNetwork>, Option<WifiNetwork>, 
     let mut current_net = None;
 
     for net in &parsed.networks {
-        let band = match net.band.as_str() {
-            "2.4GHz" => WifiBand::Band2_4GHz,
-            "5GHz" => WifiBand::Band5GHz,
-            "6GHz" => WifiBand::Band6GHz,
-            _ => WifiBand::Unknown,
-        };
-        let security = match net.security.as_str() {
-            "WPA3" => WifiSecurity::Wpa3Sae,
-            "WPA2" => WifiSecurity::Wpa2Psk,
-            "WPA/WPA2" => WifiSecurity::Wpa2Psk,
-            "WPA" => WifiSecurity::WpaPsk,
-            "WEP" => WifiSecurity::Wep,
-            "Open" => WifiSecurity::Open,
-            other => WifiSecurity::Unknown(other.to_string()),
-        };
+        let (channel, channel_width, freq_hint) = parse_channel_info(&format!("{}", net.channel));
+        let band = parse_band_from_channel(channel, freq_hint);
+        let security = parse_macos_security(&net.security);
         let bssid = if net.bssid.is_empty() { None } else { Some(net.bssid.clone()) };
-
+        let (signal_dbm, noise_dbm) = (Some(net.signal_dbm), Some(net.noise_dbm));
         let wifi = WifiNetwork {
             ssid: net.ssid.clone(),
             bssid,
-            channel: net.channel,
-            channel_width_mhz: Some(net.channel_width_mhz),
+            channel,
+            channel_width_mhz: channel_width.or(Some(net.channel_width_mhz)),
             band,
             frequency_mhz: None,
-            signal_dbm: Some(net.signal_dbm),
-            noise_dbm: Some(net.noise_dbm),
+            signal_dbm,
+            noise_dbm,
             security,
             phy_mode: net.phy_mode.clone(),
             is_current: net.is_current,
         };
-
         if net.is_current && current_net.is_none() {
             current_net = Some(wifi.clone());
         }
@@ -1261,18 +1279,9 @@ async fn platform_wifi_scan() -> Result<(Vec<WifiNetwork>, Option<WifiNetwork>, 
         // Convert percentage to approximate dBm
         let signal_dbm = if signal_pct > 0 { Some(-100 + signal_pct / 2) } else { None };
         let security_raw = fields[5];
-        let band = if freq >= 5925 { WifiBand::Band6GHz } else if freq >= 5000 { WifiBand::Band5GHz } else { WifiBand::Band2_4GHz };
-        let security = if security_raw.is_empty() || security_raw == "--" {
-            WifiSecurity::Open
-        } else {
-            let s = security_raw.to_lowercase();
-            if s.contains("wpa3") { WifiSecurity::Wpa3Sae }
-            else if s.contains("wpa2") && s.contains("enterprise") { WifiSecurity::Wpa2Enterprise }
-            else if s.contains("wpa2") { WifiSecurity::Wpa2Psk }
-            else if s.contains("wpa") { WifiSecurity::WpaPsk }
-            else if s.contains("wep") { WifiSecurity::Wep }
-            else { WifiSecurity::Unknown(security_raw.to_string()) }
-        };
+        let (channel, channel_width, freq_hint) = parse_channel_info(&fields[2]);
+        let band = parse_band_from_channel(channel, freq_hint);
+        let security = parse_macos_security(security_raw);
         let is_current = ssid == current_ssid;
         let net = WifiNetwork {
             ssid,
@@ -1339,12 +1348,13 @@ async fn platform_wifi_scan() -> Result<(Vec<WifiNetwork>, Option<WifiNetwork>, 
             // Save previous network if any
             if bssid.is_some() {
                 let is_current = ssid == current_ssid;
-                let sig = if signal_pct > 0 { Some(-100 + signal_pct / 2) } else { None };
-                let band = parse_band_from_channel(channel, None);
+                let (channel, channel_width, freq_hint) = parse_channel_info(&format!("{}", channel));
+                let band = parse_band_from_channel(channel, freq_hint);
+                let sec = security.clone();
                 let net = WifiNetwork {
-                    ssid: ssid.clone(), bssid: bssid.take(), channel, channel_width_mhz: None,
-                    band, frequency_mhz: None, signal_dbm: sig, noise_dbm: None,
-                    security: security.clone(), phy_mode: None, is_current,
+                    ssid: ssid.clone(), bssid: bssid.take(), channel, channel_width_mhz: channel_width,
+                    band, frequency_mhz: None, signal_dbm: if signal_pct > 0 { Some(-100 + signal_pct / 2) } else { None }, noise_dbm: None,
+                    security: sec, phy_mode: None, is_current,
                 };
                 networks.push(net);
             }
@@ -1359,22 +1369,17 @@ async fn platform_wifi_scan() -> Result<(Vec<WifiNetwork>, Option<WifiNetwork>, 
             channel = trimmed.split(':').nth(1).and_then(|s| s.trim().parse().ok()).unwrap_or(0);
         } else if trimmed.starts_with("Authentication") {
             let auth = trimmed.split(':').nth(1).map(|s| s.trim().to_lowercase()).unwrap_or_default();
-            security = if auth.contains("wpa3") { WifiSecurity::Wpa3Sae }
-                else if auth.contains("wpa2") && auth.contains("enterprise") { WifiSecurity::Wpa2Enterprise }
-                else if auth.contains("wpa2") { WifiSecurity::Wpa2Psk }
-                else if auth.contains("wpa") { WifiSecurity::WpaPsk }
-                else if auth.contains("open") { WifiSecurity::Open }
-                else { WifiSecurity::Unknown(auth) };
+            security = parse_macos_security(&auth);
         }
     }
     // Push last entry
     if bssid.is_some() || !ssid.is_empty() {
         let is_current = ssid == current_ssid;
-        let sig = if signal_pct > 0 { Some(-100 + signal_pct / 2) } else { None };
-        let band = parse_band_from_channel(channel, None);
+        let (channel, channel_width, freq_hint) = parse_channel_info(&format!("{}", channel));
+        let band = parse_band_from_channel(channel, freq_hint);
         networks.push(WifiNetwork {
-            ssid, bssid, channel, channel_width_mhz: None,
-            band, frequency_mhz: None, signal_dbm: sig, noise_dbm: None,
+            ssid, bssid, channel, channel_width_mhz: channel_width,
+            band, frequency_mhz: None, signal_dbm: if signal_pct > 0 { Some(-100 + signal_pct / 2) } else { None }, noise_dbm: None,
             security, phy_mode: None, is_current,
         });
     }

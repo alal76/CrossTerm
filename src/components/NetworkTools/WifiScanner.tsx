@@ -371,6 +371,27 @@ function NetworksTab({
   onSortChange: (s: 'signal' | 'channel' | 'ssid') => void;
   t: (key: string) => string;
 }) {
+  const [details, setDetails] = useState<Record<string, unknown> | { error?: string } | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const handleShowDetails = async (net: WifiNetwork) => {
+    setDetailsLoading(true);
+    setDetailsOpen(true);
+    try {
+      const res = await invoke('network_analyze_wifi_details', {
+        ssid: net.ssid,
+        bssid: net.bssid ?? '',
+        channelRaw: String(net.channel),
+        signalNoiseRaw: typeof net.noise_dbm === 'number' ? `${net.signal_dbm ?? ''} / ${net.noise_dbm}` : undefined,
+        securityRaw: typeof net.security === 'string' ? net.security : undefined,
+      });
+      setDetails(res);
+    } catch (e) {
+      setDetails({ error: String(e) });
+    } finally {
+      setDetailsLoading(false);
+    }
+  };
   return (
     <div className="flex flex-1 flex-col gap-2 overflow-y-auto">
       {/* Sort controls */}
@@ -387,7 +408,11 @@ function NetworksTab({
                 : 'bg-surface-elevated hover:text-text-primary'
             )}
           >
-            {s === 'signal' ? t('network.wifiSignal') : s === 'channel' ? t('network.wifiChannel') : t('network.wifiSSID')}
+            {(() => {
+              if (s === 'signal') return t('network.wifiSignal');
+              if (s === 'channel') return t('network.wifiChannel');
+              return t('network.wifiSSID');
+            })()}
           </button>
         ))}
       </div>
@@ -411,7 +436,7 @@ function NetworksTab({
               <div className="flex flex-col items-center gap-0.5" style={{ minWidth: 36 }}>
                 <SigIcon size={16} className={sq.color} />
                 <span className={clsx('text-[10px] font-medium', sq.color)}>
-                  {net.signal_dbm !== undefined ? `${net.signal_dbm}` : '—'}
+                  {typeof net.signal_dbm === 'number' ? `${net.signal_dbm}` : '—'}
                 </span>
               </div>
 
@@ -426,6 +451,12 @@ function NetworksTab({
                       {t('network.wifiCurrentNetwork')}
                     </span>
                   )}
+                  <button
+                    className="ml-2 rounded bg-surface-elevated px-2 py-0.5 text-[10px] text-text-secondary hover:bg-surface-overlay"
+                    onClick={() => handleShowDetails(net)}
+                  >
+                    {t('network.wifiAdvancedDetails')}
+                  </button>
                 </div>
                 <div className="flex items-center gap-2 text-[11px] text-text-secondary">
                   <span>Ch {net.channel}</span>
@@ -460,6 +491,27 @@ function NetworksTab({
           );
         })}
       </div>
+
+      {/* Advanced Details Modal */}
+      {detailsOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="rounded-lg bg-surface-primary p-6 shadow-xl min-w-[320px] max-w-[90vw]">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-base font-semibold text-text-primary">{t('network.wifiAdvancedDetails')}</h3>
+              <button onClick={() => setDetailsOpen(false)} className="text-text-secondary hover:text-text-primary">✕</button>
+            </div>
+            {detailsLoading && (
+              <div className="flex items-center gap-2 text-text-secondary"><Loader2 size={16} className="animate-spin" /> {t('loading')}</div>
+            )}
+            {!detailsLoading && details && !details.error && (
+              <pre className="text-xs text-text-primary whitespace-pre-wrap break-all">{JSON.stringify(details, null, 2)}</pre>
+            )}
+            {!detailsLoading && details?.error && (
+              <div className="text-xs text-status-error">{details.error || t('error')}</div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -471,12 +523,12 @@ function ChannelsTab({
   recommended2g,
   recommended5g,
   t,
-}: {
+}: Readonly<{
   congestion: WifiChannelCongestion[];
   recommended2g: number[];
   recommended5g: number[];
   t: (key: string) => string;
-}) {
+}>) {
   const maxCount = Math.max(...congestion.map((c) => c.network_count), 1);
 
   const band24 = congestion.filter((c) => c.band === '2.4GHz');
@@ -533,13 +585,13 @@ function ChannelBandSection({
   maxCount,
   recommended,
   t,
-}: {
+}: Readonly<{
   title: string;
   channels: WifiChannelCongestion[];
   maxCount: number;
   recommended: number[];
   t: (key: string) => string;
-}) {
+}>) {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
@@ -584,10 +636,10 @@ function ChannelBandSection({
 function SecurityTab({
   issues,
   t,
-}: {
+}: Readonly<{
   issues: WifiSecurityIssue[];
   t: (key: string) => string;
-}) {
+}>) {
   const grouped = useMemo(() => {
     const groups: Record<string, WifiSecurityIssue[]> = {
       critical: [],
