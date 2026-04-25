@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -13,12 +13,15 @@ export default function NetworkScanner() {
   const [scanId, setScanId] = useState<string | null>(null);
   const [results, setResults] = useState<ScanResult[]>([]);
   const [progress, setProgress] = useState({ scanned: 0, total: 0 });
+  // Ref keeps the current scan ID in sync for listeners without causing
+  // effect teardown/re-registration on every scan start.
+  const scanIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const unlistenHost = listen<{ scan_id: string; result: ScanResult }>(
       'network:scan_host_found',
       (event) => {
-        if (event.payload.scan_id === scanId) {
+        if (event.payload.scan_id === scanIdRef.current) {
           setResults((prev) => [...prev, event.payload.result]);
         }
       }
@@ -29,11 +32,11 @@ export default function NetworkScanner() {
       hosts_scanned: number;
       total_hosts: number;
     }>('network:scan_progress', (event) => {
-      if (event.payload.scan_id === scanId) {
-        setProgress({
-          scanned: event.payload.hosts_scanned,
+      if (event.payload.scan_id === scanIdRef.current) {
+        setProgress((prev) => ({
+          scanned: Math.max(prev.scanned, event.payload.hosts_scanned),
           total: event.payload.total_hosts,
-        });
+        }));
         if (event.payload.hosts_scanned >= event.payload.total_hosts) {
           setScanning(false);
         }
@@ -44,7 +47,7 @@ export default function NetworkScanner() {
       unlistenHost.then((fn) => fn());
       unlistenProgress.then((fn) => fn());
     };
-  }, [scanId]);
+  }, []); // register once; scanIdRef keeps it current
 
   const handleScan = useCallback(async () => {
     if (!cidr.trim()) return;
@@ -56,6 +59,7 @@ export default function NetworkScanner() {
       const id = await invoke<string>('network_scan_start', {
         target: { cidr: cidr.trim() },
       });
+      scanIdRef.current = id;
       setScanId(id);
     } catch {
       setScanning(false);

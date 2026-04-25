@@ -184,7 +184,10 @@ pub struct StubVncBackend;
 
 impl VncBackend for StubVncBackend {
     fn connect(&self, _id: &str, _config: &VncConfig) -> Result<(), VncError> {
-        Ok(())
+        Err(VncError::ConnectionFailed(
+            "VNC remote desktop rendering is not yet implemented. \
+             Connect via SSH for command-line access.".into(),
+        ))
     }
 
     fn disconnect(&self, _id: &str) -> Result<(), VncError> {

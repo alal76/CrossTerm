@@ -31,14 +31,15 @@ pub fn network_analyze_wifi_details(
 }
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
-use std::sync::Mutex;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 use thiserror::Error;
-use tokio::net::TcpStream;
+use tokio::net::{TcpStream, UdpSocket};
+use tokio::sync::Semaphore;
 use uuid::Uuid;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 // ── Error ───────────────────────────────────────────────────────────────
 
@@ -283,6 +284,13 @@ fn parse_cidr(cidr: &str) -> Result<Vec<Ipv4Addr>, NetworkError> {
         return Ok(vec![base_ip]);
     }
 
+    // Reject prefixes broader than /16 (65 536 hosts) — prevents OOM and runaway scans.
+    if host_bits > 16 {
+        return Err(NetworkError::InvalidCidr(format!(
+            "/{prefix_len} is too broad; maximum scan range is /16 (65 536 hosts)"
+        )));
+    }
+
     let mask = !((1u32 << host_bits) - 1);
     let network = ip_u32 & mask;
     let count = 1u32 << host_bits;
@@ -386,28 +394,57 @@ async fn check_port(ip: IpAddr, port: u16, timeout: Duration) -> Option<OpenPort
 
 /// Attempt reverse DNS lookup for an IP address.
 async fn reverse_dns(ip: IpAddr) -> Option<String> {
-    let addr = SocketAddr::new(ip, 0);
-    match tokio::net::lookup_host(format!("{ip}:0")).await {
-        Ok(_) => {
-            // tokio's lookup_host doesn't do reverse DNS directly;
-            // use DNS crate or system resolver via blocking task
-            tokio::task::spawn_blocking(move || {
-                // Attempt reverse lookup via getaddrinfo hint
-                dns_lookup_reverse(addr.ip())
-            })
-            .await
-            .ok()
-            .flatten()
-        }
-        Err(_) => None,
-    }
+    tokio::task::spawn_blocking(move || dns_lookup_reverse(ip))
+        .await
+        .ok()
+        .flatten()
 }
 
-/// System-level reverse DNS
-fn dns_lookup_reverse(_ip: IpAddr) -> Option<String> {
-    // On most systems we can attempt getnameinfo. For simplicity, return None
-    // as full reverse DNS requires the `dns-lookup` crate. Scan still works.
-    None
+/// System-level reverse DNS via getnameinfo(3).
+fn dns_lookup_reverse(ip: IpAddr) -> Option<String> {
+    use std::ffi::CStr;
+    use std::mem;
+
+    let mut host = [0i8; 256];
+
+    let ret = match ip {
+        IpAddr::V4(v4) => unsafe {
+            let mut sin: libc::sockaddr_in = mem::zeroed();
+            sin.sin_family = libc::AF_INET as libc::sa_family_t;
+            // from_ne_bytes: bytes in memory match the octets directly (network order)
+            sin.sin_addr.s_addr = u32::from_ne_bytes(v4.octets());
+            libc::getnameinfo(
+                &sin as *const libc::sockaddr_in as *const libc::sockaddr,
+                mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
+                host.as_mut_ptr(),
+                host.len() as libc::socklen_t,
+                std::ptr::null_mut(),
+                0,
+                libc::NI_NAMEREQD,
+            )
+        },
+        IpAddr::V6(v6) => unsafe {
+            let mut sin6: libc::sockaddr_in6 = mem::zeroed();
+            sin6.sin6_family = libc::AF_INET6 as libc::sa_family_t;
+            sin6.sin6_addr.s6_addr = v6.octets();
+            libc::getnameinfo(
+                &sin6 as *const libc::sockaddr_in6 as *const libc::sockaddr,
+                mem::size_of::<libc::sockaddr_in6>() as libc::socklen_t,
+                host.as_mut_ptr(),
+                host.len() as libc::socklen_t,
+                std::ptr::null_mut(),
+                0,
+                libc::NI_NAMEREQD,
+            )
+        },
+    };
+
+    if ret == 0 {
+        let cstr = unsafe { CStr::from_ptr(host.as_ptr()) };
+        Some(cstr.to_string_lossy().into_owned())
+    } else {
+        None
+    }
 }
 
 /// Guess OS from open ports heuristic.
@@ -476,57 +513,56 @@ pub async fn network_scan_start(
 
     let scan_id_clone = scan_id.clone();
 
-    // Spawn async scan task
     tokio::spawn(async move {
+        const MAX_CONCURRENT: usize = 25;
+        let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT));
+        let hosts_scanned = Arc::new(AtomicU32::new(0));
         let timeout = Duration::from_millis(1500);
-        for (scan_idx, addr) in addresses.into_iter().enumerate() {
+        let mut tasks = tokio::task::JoinSet::new();
+
+        for addr in addresses {
             let ip = IpAddr::V4(addr);
-            let start = Instant::now();
+            let app = app.clone();
+            let scan_id = scan_id_clone.clone();
+            let sem = Arc::clone(&semaphore);
+            let counter = Arc::clone(&hosts_scanned);
 
-            // Check ports concurrently
-            let mut port_futures = Vec::new();
-            for &port in DEFAULT_PORTS {
-                port_futures.push(check_port(ip, port, timeout));
-            }
-            let port_results = futures::future::join_all(port_futures).await;
-            let open_ports: Vec<OpenPort> = port_results.into_iter().flatten().collect();
-            let response_time = start.elapsed().as_secs_f64() * 1000.0;
+            tasks.spawn(async move {
+                let _permit = sem.acquire_owned().await.unwrap();
+                let start = Instant::now();
 
-            if !open_ports.is_empty() {
-                let hostname = reverse_dns(ip).await;
-                let os_guess = guess_os(&open_ports);
+                let port_futures: Vec<_> = DEFAULT_PORTS.iter().map(|&p| check_port(ip, p, timeout)).collect();
+                let port_results = futures::future::join_all(port_futures).await;
+                let open_ports: Vec<OpenPort> = port_results.into_iter().flatten().collect();
+                let response_time = start.elapsed().as_secs_f64() * 1000.0;
 
-                let result = ScanResult {
-                    ip: ip.to_string(),
-                    hostname,
-                    mac_address: None, // MAC detection requires raw sockets / ARP
-                    open_ports,
-                    os_guess,
-                    response_time_ms: response_time,
-                };
+                if !open_ports.is_empty() {
+                    let hostname = reverse_dns(ip).await;
+                    let os_guess = guess_os(&open_ports);
+                    let result = ScanResult {
+                        ip: ip.to_string(),
+                        hostname,
+                        mac_address: None,
+                        open_ports,
+                        os_guess,
+                        response_time_ms: response_time,
+                    };
+                    let _ = app.emit("network:scan_host_found", ScanHostFound {
+                        scan_id: scan_id.clone(),
+                        result,
+                    });
+                }
 
-                // Emit host found event
-                let _ = app.emit(
-                    "network:scan_host_found",
-                    ScanHostFound {
-                        scan_id: scan_id_clone.clone(),
-                        result: result.clone(),
-                    },
-                );
-
-                // Store result — we access app state via the handle
-                // Note: scan results are stored via the event; frontend collects them
-            }
-
-            let _ = app.emit(
-                "network:scan_progress",
-                ScanProgress {
-                    scan_id: scan_id_clone.clone(),
-                    hosts_scanned: scan_idx as u32 + 1,
+                let scanned = counter.fetch_add(1, Ordering::Relaxed) + 1;
+                let _ = app.emit("network:scan_progress", ScanProgress {
+                    scan_id,
+                    hosts_scanned: scanned,
                     total_hosts,
-                },
-            );
+                });
+            });
         }
+
+        while tasks.join_next().await.is_some() {}
     });
 
     Ok(scan_id)
@@ -573,55 +609,62 @@ pub async fn network_explore_start(
     let scan_id_clone = scan_id.clone();
 
     tokio::spawn(async move {
-        let mut hosts_found: u32 = 0;
-        for (scan_idx, addr) in addresses.into_iter().enumerate() {
+        const MAX_CONCURRENT: usize = 25;
+        let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT));
+        let hosts_scanned = Arc::new(AtomicU32::new(0));
+        let hosts_found = Arc::new(AtomicU32::new(0));
+        let ports = Arc::new(ports);
+        let mut tasks = tokio::task::JoinSet::new();
+
+        for addr in addresses {
             let ip = IpAddr::V4(addr);
-            let start = Instant::now();
+            let app = app.clone();
+            let scan_id = scan_id_clone.clone();
+            let sem = Arc::clone(&semaphore);
+            let counter = Arc::clone(&hosts_scanned);
+            let found_counter = Arc::clone(&hosts_found);
+            let ports = Arc::clone(&ports);
 
-            // Check all requested ports concurrently
-            let mut port_futures = Vec::with_capacity(ports.len());
-            for &port in &ports {
-                port_futures.push(check_port(ip, port, timeout));
-            }
-            let port_results = futures::future::join_all(port_futures).await;
-            let open_ports: Vec<OpenPort> = port_results.into_iter().flatten().collect();
-            let response_time = start.elapsed().as_secs_f64() * 1000.0;
+            tasks.spawn(async move {
+                let _permit = sem.acquire_owned().await.unwrap();
+                let start = Instant::now();
 
-            if !open_ports.is_empty() {
-                let hostname = reverse_dns(ip).await;
-                let os_guess = guess_os(&open_ports);
-                let suggested_session_type = suggest_session_type(&open_ports);
+                let port_futures: Vec<_> = ports.iter().map(|&p| check_port(ip, p, timeout)).collect();
+                let port_results = futures::future::join_all(port_futures).await;
+                let open_ports: Vec<OpenPort> = port_results.into_iter().flatten().collect();
+                let response_time = start.elapsed().as_secs_f64() * 1000.0;
 
-                let result = ExploreResult {
-                    ip: ip.to_string(),
-                    hostname,
-                    mac_address: None,
-                    open_ports,
-                    os_guess,
-                    response_time_ms: response_time,
-                    suggested_session_type,
-                };
-
-                hosts_found += 1;
-                let _ = app.emit(
-                    "network:explore_host_found",
-                    ExploreHostFound {
-                        scan_id: scan_id_clone.clone(),
+                if !open_ports.is_empty() {
+                    let hostname = reverse_dns(ip).await;
+                    let os_guess = guess_os(&open_ports);
+                    let suggested_session_type = suggest_session_type(&open_ports);
+                    let result = ExploreResult {
+                        ip: ip.to_string(),
+                        hostname,
+                        mac_address: None,
+                        open_ports,
+                        os_guess,
+                        response_time_ms: response_time,
+                        suggested_session_type,
+                    };
+                    found_counter.fetch_add(1, Ordering::Relaxed);
+                    let _ = app.emit("network:explore_host_found", ExploreHostFound {
+                        scan_id: scan_id.clone(),
                         result,
-                    },
-                );
-            }
+                    });
+                }
 
-            let _ = app.emit(
-                "network:explore_progress",
-                ExploreProgress {
-                    scan_id: scan_id_clone.clone(),
-                    hosts_scanned: scan_idx as u32 + 1,
+                let scanned = counter.fetch_add(1, Ordering::Relaxed) + 1;
+                let _ = app.emit("network:explore_progress", ExploreProgress {
+                    scan_id,
+                    hosts_scanned: scanned,
                     total_hosts,
-                    hosts_found,
-                },
-            );
+                    hosts_found: found_counter.load(Ordering::Relaxed),
+                });
+            });
         }
+
+        while tasks.join_next().await.is_some() {}
     });
 
     Ok(scan_id)
@@ -670,17 +713,19 @@ pub async fn network_wol_send(target: WolTarget) -> Result<(), NetworkError> {
         .broadcast_ip
         .unwrap_or_else(|| "255.255.255.255".to_string());
 
-    let socket = UdpSocket::bind("0.0.0.0:0").map_err(|e| NetworkError::Io(e.to_string()))?;
-    socket
-        .set_broadcast(true)
-        .map_err(|e| NetworkError::Io(e.to_string()))?;
-
     let dest: SocketAddr = format!("{broadcast_addr}:9")
         .parse()
         .map_err(|e: std::net::AddrParseError| NetworkError::Io(e.to_string()))?;
 
+    let socket = UdpSocket::bind("0.0.0.0:0")
+        .await
+        .map_err(|e| NetworkError::Io(e.to_string()))?;
+    socket
+        .set_broadcast(true)
+        .map_err(|e| NetworkError::Io(e.to_string()))?;
     socket
         .send_to(&packet, dest)
+        .await
         .map_err(|e| NetworkError::Io(e.to_string()))?;
 
     Ok(())
@@ -1206,7 +1251,8 @@ async fn platform_wifi_scan() -> Result<(Vec<WifiNetwork>, Option<WifiNetwork>, 
     let mut current_net = None;
 
     for net in &parsed.networks {
-        let (channel, channel_width, freq_hint) = parse_channel_info(&format!("{}", net.channel));
+        let channel_str = format!("{}", net.channel);
+        let (channel, channel_width, freq_hint) = parse_channel_info(&channel_str);
         let band = parse_band_from_channel(channel, freq_hint);
         let security = parse_macos_security(&net.security);
         let bssid = if net.bssid.is_empty() { None } else { Some(net.bssid.clone()) };

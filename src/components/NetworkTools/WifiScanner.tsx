@@ -143,8 +143,11 @@ export default function WifiScanner() {
   const [autoRefresh, setAutoRefresh] = useState(false);
   const autoRefreshRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const scanningRef = useRef(false);
 
   const doScan = useCallback(async () => {
+    if (scanningRef.current) return; // prevent concurrent scans from stacked intervals
+    scanningRef.current = true;
     setScanning(true);
     setError(null);
     try {
@@ -155,6 +158,7 @@ export default function WifiScanner() {
       setError(msg);
     } finally {
       setScanning(false);
+      scanningRef.current = false;
     }
   }, []);
 
@@ -371,14 +375,27 @@ function NetworksTab({
   onSortChange: (s: 'signal' | 'channel' | 'ssid') => void;
   t: (key: string) => string;
 }) {
-  const [details, setDetails] = useState<Record<string, unknown> | { error?: string } | null>(null);
+  type WifiDetails = {
+    ssid: string;
+    bssid: string;
+    channel: number;
+    channel_width_mhz: number | null;
+    band: string;
+    signal_dbm: number | null;
+    noise_dbm: number | null;
+    security: string;
+  };
+  const [details, setDetails] = useState<WifiDetails | null>(null);
+  const [detailsError, setDetailsError] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const handleShowDetails = async (net: WifiNetwork) => {
     setDetailsLoading(true);
     setDetailsOpen(true);
+    setDetails(null);
+    setDetailsError(null);
     try {
-      const res = await invoke('network_analyze_wifi_details', {
+      const res = await invoke<WifiDetails>('network_analyze_wifi_details', {
         ssid: net.ssid,
         bssid: net.bssid ?? '',
         channelRaw: String(net.channel),
@@ -387,7 +404,7 @@ function NetworksTab({
       });
       setDetails(res);
     } catch (e) {
-      setDetails({ error: String(e) });
+      setDetailsError(String(e));
     } finally {
       setDetailsLoading(false);
     }
@@ -496,19 +513,33 @@ function NetworksTab({
       {detailsOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="rounded-lg bg-surface-primary p-6 shadow-xl min-w-[320px] max-w-[90vw]">
-            <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center justify-between mb-4">
               <h3 className="text-base font-semibold text-text-primary">{t('network.wifiAdvancedDetails')}</h3>
               <button onClick={() => setDetailsOpen(false)} className="text-text-secondary hover:text-text-primary">✕</button>
             </div>
-            {detailsLoading && (
+            {detailsLoading ? (
               <div className="flex items-center gap-2 text-text-secondary"><Loader2 size={16} className="animate-spin" /> {t('loading')}</div>
-            )}
-            {!detailsLoading && details && !details.error && (
-              <pre className="text-xs text-text-primary whitespace-pre-wrap break-all">{JSON.stringify(details, null, 2)}</pre>
-            )}
-            {!detailsLoading && details?.error && (
-              <div className="text-xs text-status-error">{details.error || t('error')}</div>
-            )}
+            ) : detailsError ? (
+              <div className="text-xs text-status-error">{detailsError}</div>
+            ) : details ? (
+              <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-sm">
+                {([
+                  ['SSID', details.ssid || '(hidden)'],
+                  ['BSSID', details.bssid || '—'],
+                  ['Channel', String(details.channel ?? '—')],
+                  ['Width', details.channel_width_mhz != null ? `${details.channel_width_mhz} MHz` : '—'],
+                  ['Band', details.band],
+                  ['Signal', details.signal_dbm != null ? `${details.signal_dbm} dBm` : '—'],
+                  ['Noise', details.noise_dbm != null ? `${details.noise_dbm} dBm` : '—'],
+                  ['Security', details.security],
+                ] as [string, string][]).map(([label, value]) => (
+                  <>
+                    <dt key={`dt-${label}`} className="text-text-secondary font-medium whitespace-nowrap">{label}</dt>
+                    <dd key={`dd-${label}`} className="text-text-primary">{value}</dd>
+                  </>
+                ))}
+              </dl>
+            ) : null}
           </div>
         </div>
       )}

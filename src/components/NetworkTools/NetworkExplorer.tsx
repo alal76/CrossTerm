@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -20,6 +20,8 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 import type { ExploreResult, ExploreProgress, ExploreHostFound, ServiceFilter } from '@/types';
+import { SessionType } from '@/types';
+import { useSessionStore } from '@/stores/sessionStore';
 import WifiScanner from '@/components/NetworkTools/WifiScanner';
 import AircrackPanel from '@/components/NetworkTools/AircrackPanel';
 
@@ -71,8 +73,13 @@ const SERVICE_PORT_COLORS: Record<string, string> = {
   smb: 'bg-red-500/20 text-red-400',
 };
 
+const SERVICE_DEFAULT_PORTS: Record<string, number> = {
+  ssh: 22, sftp: 22, rdp: 3389, vnc: 5900, telnet: 23, ftp: 21,
+};
+
 export default function NetworkExplorer() {
   const { t } = useTranslation();
+  const { addSession, openTab } = useSessionStore();
   const [toolTab, setToolTab] = useState<'explore' | 'wifi' | 'aircrack'>('explore');
   const [cidr, setCidr] = useState('');
   const [scanning, setScanning] = useState(false);
@@ -86,12 +93,13 @@ export default function NetworkExplorer() {
   const [showFilters, setShowFilters] = useState(false);
   const [filterService, setFilterService] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'ip' | 'ports' | 'response'>('ip');
+  const scanIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const unlistenHost = listen<ExploreHostFound>(
       'network:explore_host_found',
       (event) => {
-        if (event.payload.scan_id === scanId) {
+        if (event.payload.scan_id === scanIdRef.current) {
           setResults((prev) => [...prev, event.payload.result]);
         }
       }
@@ -100,7 +108,7 @@ export default function NetworkExplorer() {
     const unlistenProgress = listen<ExploreProgress>(
       'network:explore_progress',
       (event) => {
-        if (event.payload.scan_id === scanId) {
+        if (event.payload.scan_id === scanIdRef.current) {
           setProgress(event.payload);
           if (event.payload.hosts_scanned >= event.payload.total_hosts) {
             setScanning(false);
@@ -113,7 +121,7 @@ export default function NetworkExplorer() {
       unlistenHost.then((fn) => fn());
       unlistenProgress.then((fn) => fn());
     };
-  }, [scanId]);
+  }, []); // register once; scanIdRef keeps it current
 
   const toggleService = useCallback((svc: string) => {
     setSelectedServices((prev) => {
@@ -140,6 +148,7 @@ export default function NetworkExplorer() {
       const id = await invoke<string>('network_explore_start', {
         target: { cidr: cidr.trim(), services, extra_ports },
       });
+      scanIdRef.current = id;
       setScanId(id);
     } catch {
       setScanning(false);

@@ -735,13 +735,21 @@ pub async fn sftp_upload_throttled(
             let mut offset = 0usize;
 
             let session_locked = session.lock().await;
+            // Open a single remote file handle so sequential writes append rather than
+            // each call rewriting from byte 0 (sftp.write() always creates/truncates).
+            let mut file = session_locked.sftp
+                .create(&remote_path)
+                .await
+                .map_err(|e| SftpError::Sftp(e.to_string()))?;
+
             while offset < data.len() {
                 let end = (offset + chunk_size).min(data.len());
-                session_locked
-                    .sftp
-                    .write(&remote_path, &data[offset..end])
-                    .await
-                    .map_err(|e| SftpError::Sftp(e.to_string()))?;
+                {
+                    use tokio::io::AsyncWriteExt;
+                    file.write_all(&data[offset..end])
+                        .await
+                        .map_err(|e| SftpError::Sftp(e.to_string()))?;
+                }
 
                 offset = end;
 
@@ -760,6 +768,10 @@ pub async fn sftp_upload_throttled(
                 if offset < data.len() {
                     tokio::time::sleep(interval).await;
                 }
+            }
+            {
+                use tokio::io::AsyncWriteExt;
+                file.flush().await.map_err(|e| SftpError::Sftp(e.to_string()))?;
             }
         } else {
             let session_locked = session.lock().await;

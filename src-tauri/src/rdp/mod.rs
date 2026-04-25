@@ -248,7 +248,10 @@ pub struct StubRdpBackend;
 
 impl RdpBackend for StubRdpBackend {
     fn connect(&self, _id: &str, _config: &RdpConfig) -> Result<(), RdpError> {
-        Ok(())
+        Err(RdpError::ConnectionFailed(
+            "RDP remote desktop rendering is not yet implemented. \
+             Connect via SSH for command-line access.".into(),
+        ))
     }
 
     fn disconnect(&self, _id: &str) -> Result<(), RdpError> {
