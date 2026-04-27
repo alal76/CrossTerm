@@ -806,6 +806,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_custom_shell() {
         // UT-T-06: Create terminal with /bin/sh. Verify shell spawned.
         let manager = TerminalManager::new();
