@@ -833,6 +833,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_custom_env() {
         // UT-T-07: Create terminal with FOO=bar in environment.
         // Write `echo $FOO\n`. Assert "bar" in output.
@@ -867,6 +868,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_custom_cwd() {
         // UT-T-08: Create terminal with cwd=/tmp. Write `pwd\n`.
         // Assert "/tmp" or "/private/tmp" in output (macOS resolves /tmp → /private/tmp).

@@ -131,7 +131,7 @@ jobs:
         run: |
           cargo install cargo-cyclonedx --locked
           cargo cyclonedx --format json --override-filename sbom-rust
-          mv sbom-rust.cdx.json ../sbom-rust.cdx.json
+          mv sbom-rust.json ../sbom-rust.cdx.json
           cd ..
           npx @cyclonedx/cyclonedx-npm --output-file sbom-npm.cdx.json
 
