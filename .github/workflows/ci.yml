@@ -104,17 +104,11 @@ jobs:
         run: npm test
 
       # BLD-02: Use Tauri CLI for actual installers (.dmg, .msi, .AppImage)
+      # CI builds use ad-hoc signing (APPLE_SIGNING_IDENTITY='-'); signed
+      # release artifacts are produced only by the release workflow.
       - name: Build Tauri installers
         env:
-          # macOS code signing
-          APPLE_CERTIFICATE: ${{ runner.os == 'macOS' && secrets.APPLE_CERTIFICATE || '' }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
-          APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && secrets.APPLE_SIGNING_IDENTITY || '' }}
-          APPLE_ID: ${{ runner.os == 'macOS' && secrets.APPLE_ID || '' }}
-          APPLE_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_PASSWORD || '' }}
-          APPLE_TEAM_ID: ${{ runner.os == 'macOS' && secrets.APPLE_TEAM_ID || '' }}
-          # Windows code signing
-          TAURI_SIGNING_PRIVATE_KEY: ${{ runner.os == 'Windows' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          APPLE_SIGNING_IDENTITY: '-'
         run: npx tauri build
 
       - name: Upload build artifacts
@@ -136,7 +130,8 @@ jobs:
         working-directory: src-tauri
         run: |
           cargo install cargo-cyclonedx --locked
-          cargo cyclonedx --format json --output-file ../sbom-rust.cdx.json
+          cargo cyclonedx --format json --override-filename sbom-rust
+          mv sbom-rust.cdx.json ../sbom-rust.cdx.json
           cd ..
           npx @cyclonedx/cyclonedx-npm --output-file sbom-npm.cdx.json
 
