@@ -1,4 +1,4 @@
-# CrossTerm — Copilot Instructions
+# CrossTerm — Development Guidelines
 
 ## Project Overview
 
