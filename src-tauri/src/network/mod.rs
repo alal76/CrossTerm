@@ -1,4 +1,5 @@
 /// Analyze WiFi details for a given network using helper functions.
+#[allow(dead_code)]
 #[tauri::command]
 pub fn network_analyze_wifi_details(
     ssid: String,
@@ -607,7 +608,7 @@ pub async fn network_explore_start(
     ports.dedup();
 
     // Validate port range
-    if ports.iter().any(|&p| p == 0) {
+    if ports.contains(&0) {
         return Err(NetworkError::InvalidCidr("Port 0 is not valid".to_string()));
     }
 
@@ -1024,6 +1025,7 @@ fn parse_macos_security(raw: &str) -> WifiSecurity {
     }
 }
 
+#[allow(dead_code)]
 fn parse_signal_noise(sn: &str) -> (Option<i32>, Option<i32>) {
     // Format: "-65 dBm / -92 dBm"
     let parts: Vec<&str> = sn.split('/').collect();
@@ -1232,6 +1234,7 @@ async fn platform_wifi_scan() -> Result<(Vec<WifiNetwork>, Option<WifiNetwork>, 
         bssid: String,
         channel: u32,
         channel_width_mhz: u32,
+        #[allow(dead_code)]
         band: String,
         signal_dbm: i32,
         noise_dbm: i32,
@@ -1323,14 +1326,13 @@ async fn platform_wifi_scan() -> Result<(Vec<WifiNetwork>, Option<WifiNetwork>, 
         if fields.len() < 7 { continue; }
         let ssid = fields[0].to_string();
         let bssid = Some(fields[1].trim().to_string());
-        let channel: u32 = fields[2].parse().unwrap_or(0);
         let freq: u32 = fields[3].trim().split_whitespace().next()
             .and_then(|s| s.parse().ok()).unwrap_or(0);
         let signal_pct: i32 = fields[4].parse().unwrap_or(0);
         // Convert percentage to approximate dBm
         let signal_dbm = if signal_pct > 0 { Some(-100 + signal_pct / 2) } else { None };
         let security_raw = fields[5];
-        let (channel, channel_width, freq_hint) = parse_channel_info(&fields[2]);
+        let (channel, _channel_width, freq_hint) = parse_channel_info(&fields[2]);
         let band = parse_band_from_channel(channel, freq_hint);
         let security = parse_macos_security(security_raw);
         let is_current = ssid == current_ssid;
@@ -1674,6 +1676,7 @@ async fn get_aircrack_version() -> Option<String> {
     None
 }
 
+#[allow(dead_code)]
 fn parse_airodump_csv(csv_path: &str) -> Result<(Vec<AirodumpNetwork>, Vec<AirodumpClient>), NetworkError> {
     let content = std::fs::read_to_string(csv_path)
         .map_err(|e| NetworkError::Io(format!("Failed to read airodump CSV: {}", e)))?;
@@ -1926,13 +1929,13 @@ pub async fn network_aircrack_monitor_start(
             &cmd_str, "macOS monitor mode is limited",
         );
         state.monitor_interfaces.lock().unwrap().insert(interface.clone());
-        return Ok(WirelessInterface {
+        Ok(WirelessInterface {
             name: interface.clone(),
             driver: Some("Apple Wi-Fi".into()),
             chipset: Some("macOS – limited monitor support".into()),
             monitor_mode: true,
             monitor_name: Some(interface),
-        });
+        })
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -2097,13 +2100,13 @@ pub async fn network_aircrack_scan_start(
             &format!("completed: {} networks, 0 clients", count),
         );
 
-        return Ok(AirodumpResult {
+        Ok(AirodumpResult {
             networks,
             clients: Vec::new(),
             scan_id,
             interface,
             scan_time_secs: duration,
-        });
+        })
     }
 
     // ── Linux: use airodump-ng ──
@@ -2226,12 +2229,6 @@ pub async fn network_aircrack_deauth(
         .await
         .map_err(|e| NetworkError::Io(format!("Failed to run aireplay-ng: {}", e)))?;
 
-    let text = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-
     let result_str = if output.status.success() { "completed" } else { "failed" };
     aircrack_audit(&state, AircrackOpKind::Deauth, &interface, Some(&target_desc), &cmd_str, result_str);
 
@@ -2256,7 +2253,7 @@ pub async fn network_aircrack_capture_handshake(
     let tmp_prefix = format!("/tmp/crossterm_handshake_{}", op_id);
 
     // Start airodump-ng on specific channel/bssid to capture handshake
-    let mut dump_args = vec![
+    let dump_args = vec![
         "--bssid".to_string(),
         target_bssid.clone(),
         "--channel".to_string(),

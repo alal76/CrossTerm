@@ -89,6 +89,9 @@ jobs:
       - name: Audit npm dependencies
         run: npm audit --audit-level=high
 
+      - name: Build frontend
+        run: npm run build
+
       - name: Clippy (deny warnings)
         working-directory: src-tauri
         run: cargo clippy -- -D warnings
@@ -99,9 +102,6 @@ jobs:
 
       - name: Run frontend tests
         run: npm test
-
-      - name: Build frontend
-        run: npm run build
 
       # BLD-02: Use Tauri CLI for actual installers (.dmg, .msi, .AppImage)
       - name: Build Tauri installers
@@ -208,6 +208,9 @@ jobs:
 
       - name: Audit npm dependencies
         run: npm audit --audit-level=high
+
+      - name: Build frontend
+        run: npm run build
 
       - name: Clippy (deny warnings)
         run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings

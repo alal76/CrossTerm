@@ -558,6 +558,7 @@ async fn ssh_try_auth(
 
 /// Drive keyboard-interactive auth, emitting prompt events and waiting for
 /// frontend responses via a oneshot channel stored in `pending_responses`.
+#[allow(clippy::type_complexity)]
 async fn ssh_keyboard_interactive_auth(
     handle: &mut client::Handle<SshClientHandler>,
     username: &str,
@@ -1203,7 +1204,7 @@ pub async fn ssh_auth_respond(
         .write()
         .await
         .remove(&connection_id)
-        .ok_or_else(|| SshError::NotFound(connection_id))?;
+        .ok_or(SshError::NotFound(connection_id))?;
     tx.send(responses).map_err(|_| SshError::AuthFailed)?;
     Ok(())
 }

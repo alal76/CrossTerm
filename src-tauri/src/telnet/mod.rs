@@ -58,7 +58,8 @@ struct TelnetDataEvent {
 
 // ── Connection inner ────────────────────────────────────────────────────
 
-struct TelnetConnectionInner {
+pub(crate) struct TelnetConnectionInner {
+    #[allow(dead_code)]
     config: TelnetConfig,
     writer: TokioMutex<tokio::net::tcp::OwnedWriteHalf>,
     naws_accepted: AtomicBool,
@@ -103,7 +104,6 @@ fn process_buffer(
         // buf[i] == IAC
         if i + 1 >= buf.len() {
             // Incomplete sequence at end of buffer; skip IAC
-            i += 1;
             break;
         }
 
@@ -132,7 +132,6 @@ fn process_buffer(
             WILL | WONT | DO | DONT => {
                 if i + 2 >= buf.len() {
                     // Incomplete; skip
-                    i += 2;
                     break;
                 }
                 let option = buf[i + 2];

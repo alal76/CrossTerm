@@ -219,6 +219,7 @@ impl VaultRegistry {
             .collect()
     }
 
+    #[allow(dead_code)]
     fn find(&self, vault_id: &str) -> Option<&VaultInfo> {
         self.vaults.iter().find(|v| v.id == vault_id)
     }
@@ -227,6 +228,7 @@ impl VaultRegistry {
         self.vaults.iter_mut().find(|v| v.id == vault_id)
     }
 
+    #[allow(dead_code)]
     fn default_for_profile(&self, profile_id: &str) -> Option<&VaultInfo> {
         self.vaults
             .iter()
@@ -342,6 +344,7 @@ impl Vault {
     }
 
     /// Return the legacy database path (for migration).
+    #[allow(dead_code)]
     pub fn db_path(profile_id: &str) -> PathBuf {
         let base = dirs::data_dir()
             .unwrap_or_else(|| PathBuf::from("."))
@@ -369,12 +372,8 @@ impl Vault {
         registry
             .list_for_profile(profile_id)
             .into_iter()
-            .map(|mut v| {
-                // The frontend can use is_default to know the lock state implicitly,
-                // but we don't modify the VaultInfo struct here — lock state is checked
-                // via vault_is_locked(vault_id).
-                let _ = open.get(&v.id); // just to suppress unused
-                v
+            .inspect(|v| {
+                let _ = open.get(&v.id);
             })
             .collect()
     }

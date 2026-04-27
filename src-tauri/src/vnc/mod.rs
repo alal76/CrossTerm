@@ -515,7 +515,7 @@ pub fn vnc_set_view_only(
     view_only: bool,
 ) -> Result<(), VncError> {
     let mut conns = state.connections.lock().unwrap();
-    let conn = conns.get_mut(&connection_id).ok_or_else(|| VncError::NotFound(connection_id))?;
+    let conn = conns.get_mut(&connection_id).ok_or(VncError::NotFound(connection_id))?;
     conn.view_only = view_only;
     Ok(())
 }
@@ -540,7 +540,7 @@ pub fn vnc_set_scaling(
     mode: VncScalingMode,
 ) -> Result<(), VncError> {
     let mut conns = state.connections.lock().unwrap();
-    let conn = conns.get_mut(&connection_id).ok_or_else(|| VncError::NotFound(connection_id))?;
+    let conn = conns.get_mut(&connection_id).ok_or(VncError::NotFound(connection_id))?;
     conn.scaling_mode = mode;
     Ok(())
 }
