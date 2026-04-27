@@ -1,6 +1,6 @@
 [package]
 name = "crossterm-app"
-version = "0.1.0"
+version = "0.2.0"
 description = "CrossTerm - Cross-Platform Terminal Emulator & Remote Access Suite"
 authors = ["Abhishek Lal"]
 license = "AGPL-3.0-only"
