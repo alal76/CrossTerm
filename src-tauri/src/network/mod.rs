@@ -481,6 +481,7 @@ pub struct NetworkState {
     /// Audit log of all aircrack-ng operations
     pub aircrack_audit_log: Mutex<Vec<AircrackAuditEntry>>,
     /// Interfaces currently in (pseudo-)monitor mode (tracked for macOS)
+    #[allow(dead_code)]
     pub monitor_interfaces: Mutex<HashSet<String>>,
 }
 
@@ -1091,16 +1092,14 @@ fn assess_security(networks: &[WifiNetwork]) -> Vec<WifiSecurityIssue> {
                     recommendation: "Upgrade to WPA2-AES or WPA3-SAE".into(),
                 });
             }
-            WifiSecurity::Wpa2Psk => {
-                // WPA2 is acceptable but WPA3 is better
-                if net.is_current {
-                    issues.push(WifiSecurityIssue {
-                        ssid: net.ssid.clone(),
-                        severity: "info".into(),
-                        issue: "WPA2-PSK is secure but WPA3-SAE offers stronger protection".into(),
-                        recommendation: "Consider upgrading router firmware to enable WPA3 transition mode".into(),
-                    });
-                }
+            // WPA2 is acceptable but WPA3 is better; only flag when it's the current network
+            WifiSecurity::Wpa2Psk if net.is_current => {
+                issues.push(WifiSecurityIssue {
+                    ssid: net.ssid.clone(),
+                    severity: "info".into(),
+                    issue: "WPA2-PSK is secure but WPA3-SAE offers stronger protection".into(),
+                    recommendation: "Consider upgrading router firmware to enable WPA3 transition mode".into(),
+                });
             }
             WifiSecurity::Unknown(raw) if !raw.is_empty() => {
                 issues.push(WifiSecurityIssue {
@@ -1326,13 +1325,13 @@ async fn platform_wifi_scan() -> Result<(Vec<WifiNetwork>, Option<WifiNetwork>, 
         if fields.len() < 7 { continue; }
         let ssid = fields[0].to_string();
         let bssid = Some(fields[1].trim().to_string());
-        let freq: u32 = fields[3].trim().split_whitespace().next()
+        let freq: u32 = fields[3].split_whitespace().next()
             .and_then(|s| s.parse().ok()).unwrap_or(0);
         let signal_pct: i32 = fields[4].parse().unwrap_or(0);
         // Convert percentage to approximate dBm
         let signal_dbm = if signal_pct > 0 { Some(-100 + signal_pct / 2) } else { None };
         let security_raw = fields[5];
-        let (channel, _channel_width, freq_hint) = parse_channel_info(&fields[2]);
+        let (channel, _channel_width, freq_hint) = parse_channel_info(fields[2]);
         let band = parse_band_from_channel(channel, freq_hint);
         let security = parse_macos_security(security_raw);
         let is_current = ssid == current_ssid;

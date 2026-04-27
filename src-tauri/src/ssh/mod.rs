@@ -340,11 +340,8 @@ impl client::Handler for SshClientHandler {
                 tokio::select! {
                     msg = ch.wait() => {
                         match msg {
-                            Some(ChannelMsg::Data { data }) => {
-                                if tcp_write.write_all(&data).await.is_err() {
-                                    break;
-                                }
-                            }
+                            Some(ChannelMsg::Data { data })
+                                if tcp_write.write_all(&data).await.is_err() => { break; }
                             Some(ChannelMsg::Eof | ChannelMsg::Close) | None => break,
                             _ => {}
                         }
@@ -1324,11 +1321,8 @@ pub async fn ssh_port_forward_add(
                             tokio::select! {
                                 msg = ch.wait() => {
                                     match msg {
-                                        Some(ChannelMsg::Data { data }) => {
-                                            if tcp_write.write_all(&data).await.is_err() {
-                                                break;
-                                            }
-                                        }
+                                        Some(ChannelMsg::Data { data })
+                                            if tcp_write.write_all(&data).await.is_err() => { break; }
                                         Some(ChannelMsg::Eof | ChannelMsg::Close) | None => break,
                                         _ => {}
                                     }
@@ -1501,11 +1495,8 @@ pub async fn ssh_port_forward_add(
                             tokio::select! {
                                 msg = ch.wait() => {
                                     match msg {
-                                        Some(ChannelMsg::Data { data }) => {
-                                            if writer.write_all(&data).await.is_err() {
-                                                break;
-                                            }
-                                        }
+                                        Some(ChannelMsg::Data { data })
+                                            if writer.write_all(&data).await.is_err() => { break; }
                                         Some(ChannelMsg::Eof | ChannelMsg::Close) | None => break,
                                         _ => {}
                                     }

@@ -515,10 +515,9 @@ fn rdp_thread(
                                 Ok(outputs) => {
                                     for out in outputs {
                                         match out {
-                                            ActiveStageOutput::ResponseFrame(frame) => {
-                                                if framed.write_all(&frame).is_err() {
-                                                    break 'outer;
-                                                }
+                                            ActiveStageOutput::ResponseFrame(frame)
+                                                if framed.write_all(&frame).is_err() => {
+                                                break 'outer;
                                             }
                                             ActiveStageOutput::GraphicsUpdate(rect) => {
                                                 emit_frame(&app, &conn_id, &image, &rect);
@@ -542,10 +541,9 @@ fn rdp_thread(
                             Ok(outputs) => {
                                 for out in outputs {
                                     match out {
-                                        ActiveStageOutput::ResponseFrame(frame) => {
-                                            if framed.write_all(&frame).is_err() {
-                                                break 'outer;
-                                            }
+                                        ActiveStageOutput::ResponseFrame(frame)
+                                            if framed.write_all(&frame).is_err() => {
+                                            break 'outer;
                                         }
                                         ActiveStageOutput::GraphicsUpdate(rect) => {
                                             emit_frame(&app, &conn_id, &image, &rect);
