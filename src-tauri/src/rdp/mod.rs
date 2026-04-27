@@ -1,9 +1,29 @@
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::io::Write;
+use std::net::TcpStream;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 use thiserror::Error;
 use uuid::Uuid;
+
+use ironrdp::connector::{self, ClientConnector, ConnectionResult, Credentials};
+use ironrdp::pdu::gcc::KeyboardType;
+use ironrdp::pdu::rdp::capability_sets::MajorPlatformType;
+use ironrdp::pdu::rdp::client_info::{PerformanceFlags, TimezoneInfo};
+use ironrdp::session::image::DecodedImage;
+use ironrdp::session::{ActiveStage, ActiveStageOutput};
+use ironrdp_blocking::{connect_begin, connect_finalize, mark_as_upgraded, Framed};
+use ironrdp::graphics::image_processing::PixelFormat;
+use ironrdp::pdu::geometry::{InclusiveRectangle, Rectangle as _};
+use ironrdp::pdu::input::fast_path::{FastPathInputEvent, KeyboardFlags};
+use ironrdp::pdu::input::mouse::{MousePdu, PointerFlags};
+
+use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use rustls::{ClientConnection, DigitallySignedStruct, Error as TlsError, SignatureScheme};
 
 // ── Error ───────────────────────────────────────────────────────────────
 
@@ -22,14 +42,6 @@ pub enum RdpError {
     Protocol(String),
     #[error("Clipboard error: {0}")]
     Clipboard(String),
-    #[error("Redirection error: {0}")]
-    Redirection(String),
-    #[error("Resize error: {0}")]
-    Resize(String),
-    #[error("Screenshot error: {0}")]
-    Screenshot(String),
-    #[error("Gateway error: {0}")]
-    Gateway(String),
     #[error("IO error: {0}")]
     Io(String),
 }
@@ -46,7 +58,7 @@ impl From<std::io::Error> for RdpError {
     }
 }
 
-// ── Types ───────────────────────────────────────────────────────────────
+// ── Public config types ─────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -118,10 +130,13 @@ pub struct RdpConfig {
     pub host: String,
     pub port: u16,
     pub username: String,
+    pub password: String,
     pub credential_ref: Option<String>,
     pub domain: Option<String>,
     pub nla_enabled: bool,
     pub tls_required: bool,
+    pub width: Option<u16>,
+    pub height: Option<u16>,
     pub gateway: Option<RdpGateway>,
     pub multi_monitor: Option<RdpMonitorConfig>,
     pub codec: RdpCodec,
@@ -149,9 +164,9 @@ pub struct RdpRedirectionConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RdpKeyEvent {
-    pub key_code: u32,
+    pub scan_code: u8,
     pub pressed: bool,
-    pub modifiers: Vec<String>,
+    pub extended: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -174,20 +189,32 @@ pub struct RdpConnectionInfo {
     pub connected_at: Option<String>,
 }
 
-// ── Tauri Event Payloads ────────────────────────────────────────────────
+// ── Connect result ──────────────────────────────────────────────────────
 
-#[allow(dead_code)]
-#[derive(Clone, Serialize)]
-struct RdpFrameEvent {
-    connection_id: String,
-    width: u32,
-    height: u32,
-    data_base64: String,
+#[derive(Debug, Clone, Serialize)]
+pub struct RdpConnectResult {
+    pub id: String,
+    pub width: u16,
+    pub height: u16,
 }
+
+// ── Tauri event payloads ────────────────────────────────────────────────
 
 #[derive(Clone, Serialize)]
 struct RdpConnectedEvent {
     connection_id: String,
+    width: u16,
+    height: u16,
+}
+
+#[derive(Clone, Serialize)]
+struct RdpFrameEvent {
+    connection_id: String,
+    x: u16,
+    y: u16,
+    width: u16,
+    height: u16,
+    data_base64: String,
 }
 
 #[derive(Clone, Serialize)]
@@ -196,129 +223,102 @@ struct RdpDisconnectedEvent {
     reason: String,
 }
 
-#[derive(Clone, Serialize)]
-struct RdpClipboardEvent {
-    connection_id: String,
-    data: RdpClipboardData,
+// ── Internal connection types ───────────────────────────────────────────
+
+enum RdpInput {
+    FastPath(FastPathInputEvent),
+    Disconnect,
 }
 
-#[allow(dead_code)]
-#[derive(Clone, Serialize)]
-struct RdpErrorEvent {
-    connection_id: String,
-    message: String,
+struct RdpConn {
+    input_tx: std::sync::mpsc::Sender<RdpInput>,
+    host: String,
+    port: u16,
+    username: String,
+    width: u16,
+    height: u16,
 }
 
-// ── Backend Trait ────────────────────────────────────────────────────────
-
-/// Trait abstracting the actual FreeRDP FFI calls.
-/// Implementations can provide real FreeRDP bindings or test stubs.
-pub trait RdpBackend: Send + Sync {
-    fn connect(
-        &self,
-        id: &str,
-        config: &RdpConfig,
-    ) -> Result<(), RdpError>;
-
-    fn disconnect(&self, id: &str) -> Result<(), RdpError>;
-
-    fn resize(&self, id: &str, width: u32, height: u32) -> Result<(), RdpError>;
-
-    fn send_key(&self, id: &str, event: &RdpKeyEvent) -> Result<(), RdpError>;
-
-    fn send_mouse(&self, id: &str, event: &RdpMouseEvent) -> Result<(), RdpError>;
-
-    fn send_clipboard(&self, id: &str, data: &RdpClipboardData) -> Result<(), RdpError>;
-
-    fn screenshot(&self, id: &str) -> Result<String, RdpError>;
-
-    fn configure_redirection(
-        &self,
-        id: &str,
-        config: &RdpRedirectionConfig,
-    ) -> Result<(), RdpError>;
-
-    fn send_ctrl_alt_del(&self, id: &str) -> Result<(), RdpError>;
-}
-
-// ── Stub Backend ────────────────────────────────────────────────────────
-
-/// No-op backend used when FreeRDP is not available (tests / dev builds).
-pub struct StubRdpBackend;
-
-impl RdpBackend for StubRdpBackend {
-    fn connect(&self, _id: &str, _config: &RdpConfig) -> Result<(), RdpError> {
-        Err(RdpError::ConnectionFailed(
-            "RDP remote desktop rendering is not yet implemented. \
-             Connect via SSH for command-line access.".into(),
-        ))
-    }
-
-    fn disconnect(&self, _id: &str) -> Result<(), RdpError> {
-        Ok(())
-    }
-
-    fn resize(&self, _id: &str, _width: u32, _height: u32) -> Result<(), RdpError> {
-        Ok(())
-    }
-
-    fn send_key(&self, _id: &str, _event: &RdpKeyEvent) -> Result<(), RdpError> {
-        Ok(())
-    }
-
-    fn send_mouse(&self, _id: &str, _event: &RdpMouseEvent) -> Result<(), RdpError> {
-        Ok(())
-    }
-
-    fn send_clipboard(&self, _id: &str, _data: &RdpClipboardData) -> Result<(), RdpError> {
-        Ok(())
-    }
-
-    fn screenshot(&self, _id: &str) -> Result<String, RdpError> {
-        Ok(String::new())
-    }
-
-    fn configure_redirection(
-        &self,
-        _id: &str,
-        _config: &RdpRedirectionConfig,
-    ) -> Result<(), RdpError> {
-        Ok(())
-    }
-
-    fn send_ctrl_alt_del(&self, _id: &str) -> Result<(), RdpError> {
-        Ok(())
-    }
-}
-
-// ── Connection ──────────────────────────────────────────────────────────
-
-#[allow(dead_code)]
-struct RdpConnection {
-    info: RdpConnectionInfo,
-    config: RdpConfig,
-    redirection: RdpRedirectionConfig,
-    clipboard: Option<RdpClipboardData>,
-}
+type ConnMap = Arc<Mutex<HashMap<String, RdpConn>>>;
 
 // ── State ───────────────────────────────────────────────────────────────
 
 pub struct RdpState {
-    connections: Mutex<HashMap<String, RdpConnection>>,
-    backend: Box<dyn RdpBackend>,
+    connections: ConnMap,
 }
 
 impl RdpState {
-    pub fn new(backend: Box<dyn RdpBackend>) -> Self {
+    pub fn new() -> Self {
         Self {
-            connections: Mutex::new(HashMap::new()),
-            backend,
+            connections: Arc::new(Mutex::new(HashMap::new())),
         }
     }
+}
 
-    #[allow(dead_code)]
-    pub fn with_stub() -> Self {
-        Self::new(Box::new(StubRdpBackend))
+// ── TLS: no-op certificate verifier ────────────────────────────────────
+
+#[derive(Debug)]
+struct NoCertVerifier;
+
+impl ServerCertVerifier for NoCertVerifier {
+    fn verify_server_cert(
+        &self,
+        _: &CertificateDer<'_>,
+        _: &[CertificateDer<'_>],
+        _: &ServerName<'_>,
+        _: &[u8],
+        _: UnixTime,
+    ) -> Result<ServerCertVerified, TlsError> {
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _: &[u8],
+        _: &CertificateDer<'_>,
+        _: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, TlsError> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _: &[u8],
+        _: &CertificateDer<'_>,
+        _: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, TlsError> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        vec![
+            SignatureScheme::RSA_PKCS1_SHA1,
+            SignatureScheme::ECDSA_SHA1_Legacy,
+            SignatureScheme::RSA_PKCS1_SHA256,
+            SignatureScheme::ECDSA_NISTP256_SHA256,
+            SignatureScheme::RSA_PKCS1_SHA384,
+            SignatureScheme::ECDSA_NISTP384_SHA384,
+            SignatureScheme::RSA_PKCS1_SHA512,
+            SignatureScheme::ECDSA_NISTP521_SHA512,
+            SignatureScheme::RSA_PSS_SHA256,
+            SignatureScheme::RSA_PSS_SHA384,
+            SignatureScheme::RSA_PSS_SHA512,
+            SignatureScheme::ED25519,
+            SignatureScheme::ED448,
+        ]
+    }
+}
+
+// ── CredSSP stub ────────────────────────────────────────────────────────
+
+struct NoopNetworkClient;
+
+impl ironrdp::connector::sspi::network_client::NetworkClient for NoopNetworkClient {
+    fn send(
+        &self,
+        _request: &ironrdp::connector::sspi::NetworkRequest,
+    ) -> ironrdp::connector::sspi::Result<Vec<u8>> {
+        unreachable!("CredSSP is disabled")
     }
 }
 
@@ -337,56 +337,290 @@ fn validate_config(config: &RdpConfig) -> Result<(), RdpError> {
     Ok(())
 }
 
+fn make_tls_config() -> Arc<rustls::ClientConfig> {
+    let mut cfg = rustls::ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(NoCertVerifier))
+        .with_no_client_auth();
+    // CredSSP does not support TLS session resumption.
+    cfg.resumption = rustls::client::Resumption::disabled();
+    Arc::new(cfg)
+}
+
+fn make_connector_config(config: &RdpConfig) -> connector::Config {
+    let width = config.width.unwrap_or(1920);
+    let height = config.height.unwrap_or(1080);
+    connector::Config {
+        credentials: Credentials::UsernamePassword {
+            username: config.username.clone(),
+            password: config.password.clone(),
+        },
+        domain: config.domain.clone(),
+        enable_tls: true,
+        enable_credssp: false,
+        keyboard_type: KeyboardType::IbmEnhanced,
+        keyboard_subtype: 0,
+        keyboard_layout: 0,
+        keyboard_functional_keys_count: 12,
+        ime_file_name: String::new(),
+        dig_product_id: String::new(),
+        desktop_size: connector::DesktopSize { width, height },
+        bitmap: None,
+        client_build: 0,
+        client_name: "CrossTerm".to_owned(),
+        client_dir: "C:\\Windows\\System32\\mstscax.dll".to_owned(),
+        #[cfg(target_os = "macos")]
+        platform: MajorPlatformType::MACINTOSH,
+        #[cfg(target_os = "windows")]
+        platform: MajorPlatformType::WINDOWS,
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        platform: MajorPlatformType::UNIX,
+        enable_server_pointer: true,
+        request_data: None,
+        autologon: false,
+        enable_audio_playback: false,
+        pointer_software_rendering: true,
+        performance_flags: PerformanceFlags::default(),
+        desktop_scale_factor: 0,
+        hardware_id: None,
+        license_cache: None,
+        timezone_info: TimezoneInfo::default(),
+    }
+}
+
+/// Extract contiguous RGBA pixels for a rectangle, copying row by row
+/// to skip the stride gap that `data_for_rect` would include.
+fn extract_rect_rgba(image: &DecodedImage, rect: &InclusiveRectangle) -> Vec<u8> {
+    let bpp = image.bytes_per_pixel();
+    let stride = image.stride();
+    let w = rect.width() as usize;
+    let h = rect.height() as usize;
+    let left = rect.left as usize;
+    let top = rect.top as usize;
+    let data = image.data();
+    let mut pixels = Vec::with_capacity(w * h * bpp);
+    for row in 0..h {
+        let row_start = (top + row) * stride + left * bpp;
+        pixels.extend_from_slice(&data[row_start..row_start + w * bpp]);
+    }
+    pixels
+}
+
+fn emit_frame(app: &AppHandle, conn_id: &str, image: &DecodedImage, rect: &InclusiveRectangle) {
+    let pixels = extract_rect_rgba(image, rect);
+    let data_base64 = base64::engine::general_purpose::STANDARD.encode(&pixels);
+    let _ = app.emit(
+        "rdp:frame",
+        RdpFrameEvent {
+            connection_id: conn_id.to_owned(),
+            x: rect.left,
+            y: rect.top,
+            width: rect.width(),
+            height: rect.height(),
+            data_base64,
+        },
+    );
+}
+
+// ── Session thread ──────────────────────────────────────────────────────
+
+type TlsStream = rustls::StreamOwned<ClientConnection, TcpStream>;
+type TlsFramed = Framed<TlsStream>;
+
+fn rdp_thread(
+    conn_id: String,
+    config: RdpConfig,
+    connections: ConnMap,
+    app: AppHandle,
+    ready_tx: tokio::sync::oneshot::Sender<Result<(u16, u16), String>>,
+) {
+    // ── Connection phase ────────────────────────────────────────────────
+    let result = (|| -> Result<(TlsFramed, ActiveStage, DecodedImage, std::sync::mpsc::Receiver<RdpInput>), String> {
+        let addr = format!("{}:{}", config.host, config.port);
+        let tcp = TcpStream::connect(&addr).map_err(|e| e.to_string())?;
+        let client_addr = tcp.local_addr().map_err(|e| e.to_string())?;
+
+        // 50 ms read timeout so the session loop can check inputs between reads.
+        tcp.set_read_timeout(Some(Duration::from_millis(50)))
+            .map_err(|e| e.to_string())?;
+
+        let mut framed = Framed::new(tcp);
+        let connector_cfg = make_connector_config(&config);
+        let mut connector = ClientConnector::new(connector_cfg, client_addr);
+
+        let should_upgrade =
+            connect_begin(&mut framed, &mut connector).map_err(|e| e.to_string())?;
+
+        // Extract the TCP stream for TLS upgrade.
+        let tcp_stream = framed.into_inner_no_leftover();
+
+        let tls_config = make_tls_config();
+        let server_name = ServerName::try_from(config.host.as_str())
+            .map_err(|e| e.to_string())?
+            .to_owned();
+        let tls_client = ClientConnection::new(tls_config, server_name)
+            .map_err(|e| e.to_string())?;
+        let mut tls_stream = rustls::StreamOwned::new(tls_client, tcp_stream);
+        tls_stream.flush().map_err(|e| e.to_string())?;
+
+        let upgraded = mark_as_upgraded(should_upgrade, &mut connector);
+        let mut upgraded_framed = Framed::new(tls_stream);
+
+        let connection_result: ConnectionResult = connect_finalize(
+            upgraded,
+            connector,
+            &mut upgraded_framed,
+            &mut NoopNetworkClient,
+            config.host.clone().into(),
+            Vec::new(), // server_public_key — unused when enable_credssp = false
+            None,       // no Kerberos config
+        )
+        .map_err(|e| e.to_string())?;
+
+        let width = connection_result.desktop_size.width;
+        let height = connection_result.desktop_size.height;
+        let image = DecodedImage::new(PixelFormat::RgbA32, width, height);
+        let active_stage = ActiveStage::new(connection_result);
+
+        let (tx, rx) = std::sync::mpsc::channel::<RdpInput>();
+        connections.lock().unwrap().insert(
+            conn_id.clone(),
+            RdpConn {
+                input_tx: tx,
+                host: config.host.clone(),
+                port: config.port,
+                username: config.username.clone(),
+                width,
+                height,
+            },
+        );
+
+        Ok((upgraded_framed, active_stage, image, rx))
+    })();
+
+    match result {
+        Ok((mut framed, mut active_stage, mut image, rx)) => {
+            let width = image.width();
+            let height = image.height();
+            let _ = ready_tx.send(Ok((width, height)));
+
+            // ── Active session loop ─────────────────────────────────────
+            'outer: loop {
+                // Drain pending inputs.
+                loop {
+                    match rx.try_recv() {
+                        Ok(RdpInput::Disconnect) => break 'outer,
+                        Ok(RdpInput::FastPath(event)) => {
+                            match active_stage.process_fastpath_input(&mut image, &[event]) {
+                                Ok(outputs) => {
+                                    for out in outputs {
+                                        match out {
+                                            ActiveStageOutput::ResponseFrame(frame) => {
+                                                if framed.write_all(&frame).is_err() {
+                                                    break 'outer;
+                                                }
+                                            }
+                                            ActiveStageOutput::GraphicsUpdate(rect) => {
+                                                emit_frame(&app, &conn_id, &image, &rect);
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                                Err(_) => break 'outer,
+                            }
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => break 'outer,
+                    }
+                }
+
+                // Read one PDU from the server (returns WouldBlock/TimedOut on timeout).
+                match framed.read_pdu() {
+                    Ok((action, payload)) => {
+                        match active_stage.process(&mut image, action, &payload) {
+                            Ok(outputs) => {
+                                for out in outputs {
+                                    match out {
+                                        ActiveStageOutput::ResponseFrame(frame) => {
+                                            if framed.write_all(&frame).is_err() {
+                                                break 'outer;
+                                            }
+                                        }
+                                        ActiveStageOutput::GraphicsUpdate(rect) => {
+                                            emit_frame(&app, &conn_id, &image, &rect);
+                                        }
+                                        ActiveStageOutput::Terminate(_) => break 'outer,
+                                        // DeactivateAll happens on server-side resize;
+                                        // a full reconnect is required to handle it properly.
+                                        ActiveStageOutput::DeactivateAll(_) => break 'outer,
+                                        _ => {}
+                                    }
+                                }
+                            }
+                            Err(_) => break 'outer,
+                        }
+                    }
+                    Err(e)
+                        if e.kind() == std::io::ErrorKind::WouldBlock
+                            || e.kind() == std::io::ErrorKind::TimedOut =>
+                    {
+                        // Timeout — loop back to check inputs.
+                    }
+                    Err(_) => break 'outer,
+                }
+            }
+        }
+        Err(e) => {
+            let _ = ready_tx.send(Err(e));
+        }
+    }
+
+    // Clean up.
+    connections.lock().unwrap().remove(&conn_id);
+    let _ = app.emit(
+        "rdp:disconnected",
+        RdpDisconnectedEvent {
+            connection_id: conn_id,
+            reason: "session_ended".into(),
+        },
+    );
+}
+
 // ── Tauri Commands ──────────────────────────────────────────────────────
 
 #[tauri::command]
-pub fn rdp_connect(
+pub async fn rdp_connect(
     state: tauri::State<'_, RdpState>,
     app: AppHandle,
     config: RdpConfig,
-) -> Result<String, RdpError> {
+) -> Result<RdpConnectResult, RdpError> {
     validate_config(&config)?;
 
     let id = Uuid::new_v4().to_string();
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<Result<(u16, u16), String>>();
 
-    state.backend.connect(&id, &config)?;
+    let id_thread = id.clone();
+    let connections = Arc::clone(&state.connections);
+    let app_clone = app.clone();
 
-    let now = chrono::Utc::now().to_rfc3339();
-    let info = RdpConnectionInfo {
-        id: id.clone(),
-        host: config.host.clone(),
-        port: config.port,
-        username: config.username.clone(),
-        status: RdpConnectionStatus::Connected,
-        width: 1920,
-        height: 1080,
-        connected_at: Some(now),
-    };
+    std::thread::spawn(move || {
+        rdp_thread(id_thread, config, connections, app_clone, ready_tx);
+    });
 
-    let redirection = RdpRedirectionConfig {
-        drives: config.drive_paths.clone(),
-        printer: config.printer_redirect,
-        audio: config.audio_mode.clone(),
-        smart_card: config.smart_card,
-    };
-
-    let connection = RdpConnection {
-        info: info.clone(),
-        config,
-        redirection,
-        clipboard: None,
-    };
-
-    state.connections.lock().unwrap().insert(id.clone(), connection);
-
-    let _ = app.emit(
-        "rdp:connected",
-        RdpConnectedEvent {
-            connection_id: id.clone(),
-        },
-    );
-
-    Ok(id)
+    match ready_rx.await {
+        Ok(Ok((width, height))) => {
+            // Emit the event for any other listeners, but the primary consumer
+            // reads width/height from the return value to avoid a race.
+            let _ = app.emit(
+                "rdp:connected",
+                RdpConnectedEvent { connection_id: id.clone(), width, height },
+            );
+            Ok(RdpConnectResult { id, width, height })
+        }
+        Ok(Err(e)) => Err(RdpError::ConnectionFailed(e)),
+        Err(_) => Err(RdpError::ConnectionFailed("session thread exited".into())),
+    }
 }
 
 #[tauri::command]
@@ -395,14 +629,14 @@ pub fn rdp_disconnect(
     app: AppHandle,
     connection_id: String,
 ) -> Result<(), RdpError> {
-    let mut connections = state.connections.lock().unwrap();
-    let conn = connections
+    let conn = state
+        .connections
+        .lock()
+        .unwrap()
         .remove(&connection_id)
         .ok_or_else(|| RdpError::NotFound(connection_id.clone()))?;
 
-    drop(connections);
-
-    state.backend.disconnect(&conn.info.id)?;
+    let _ = conn.input_tx.send(RdpInput::Disconnect);
 
     let _ = app.emit(
         "rdp:disconnected",
@@ -411,7 +645,6 @@ pub fn rdp_disconnect(
             reason: "user_requested".into(),
         },
     );
-
     Ok(())
 }
 
@@ -419,19 +652,13 @@ pub fn rdp_disconnect(
 pub fn rdp_resize(
     state: tauri::State<'_, RdpState>,
     connection_id: String,
-    width: u32,
-    height: u32,
+    _width: u32,
+    _height: u32,
 ) -> Result<(), RdpError> {
-    let mut connections = state.connections.lock().unwrap();
-    let conn = connections
-        .get_mut(&connection_id)
-        .ok_or_else(|| RdpError::NotFound(connection_id.clone()))?;
-
-    state.backend.resize(&connection_id, width, height)?;
-
-    conn.info.width = width;
-    conn.info.height = height;
-
+    if !state.connections.lock().unwrap().contains_key(&connection_id) {
+        return Err(RdpError::NotFound(connection_id));
+    }
+    // Dynamic resize via Display Control DVC is not yet implemented.
     Ok(())
 }
 
@@ -441,13 +668,19 @@ pub fn rdp_send_key(
     connection_id: String,
     event: RdpKeyEvent,
 ) -> Result<(), RdpError> {
-    let connections = state.connections.lock().unwrap();
-    if !connections.contains_key(&connection_id) {
-        return Err(RdpError::NotFound(connection_id));
-    }
-    drop(connections);
+    let conns = state.connections.lock().unwrap();
+    let conn = conns
+        .get(&connection_id)
+        .ok_or_else(|| RdpError::NotFound(connection_id.clone()))?;
 
-    state.backend.send_key(&connection_id, &event)
+    let mut flags = if event.pressed { KeyboardFlags::empty() } else { KeyboardFlags::RELEASE };
+    if event.extended {
+        flags |= KeyboardFlags::EXTENDED;
+    }
+    let fp = FastPathInputEvent::KeyboardEvent(flags, event.scan_code);
+    conn.input_tx
+        .send(RdpInput::FastPath(fp))
+        .map_err(|_| RdpError::NotFound(connection_id))
 }
 
 #[tauri::command]
@@ -456,41 +689,78 @@ pub fn rdp_send_mouse(
     connection_id: String,
     event: RdpMouseEvent,
 ) -> Result<(), RdpError> {
-    let connections = state.connections.lock().unwrap();
-    if !connections.contains_key(&connection_id) {
-        return Err(RdpError::NotFound(connection_id));
-    }
-    drop(connections);
+    let conns = state.connections.lock().unwrap();
+    let conn = conns
+        .get(&connection_id)
+        .ok_or_else(|| RdpError::NotFound(connection_id.clone()))?;
 
-    state.backend.send_mouse(&connection_id, &event)
+    let flags = match (&event.button, &event.event_type) {
+        (_, RdpMouseEventType::Move) => PointerFlags::MOVE,
+        (RdpMouseButton::Left, RdpMouseEventType::Down) => {
+            PointerFlags::LEFT_BUTTON | PointerFlags::DOWN
+        }
+        (RdpMouseButton::Left, _) => PointerFlags::LEFT_BUTTON,
+        (RdpMouseButton::Right, RdpMouseEventType::Down) => {
+            PointerFlags::RIGHT_BUTTON | PointerFlags::DOWN
+        }
+        (RdpMouseButton::Right, _) => PointerFlags::RIGHT_BUTTON,
+        (RdpMouseButton::Middle, RdpMouseEventType::Down) => {
+            PointerFlags::MIDDLE_BUTTON_OR_WHEEL | PointerFlags::DOWN
+        }
+        (RdpMouseButton::Middle, _) => PointerFlags::MIDDLE_BUTTON_OR_WHEEL,
+        _ => PointerFlags::MOVE,
+    };
+
+    let fp = FastPathInputEvent::MouseEvent(MousePdu {
+        flags,
+        x_position: event.x as u16,
+        y_position: event.y as u16,
+        number_of_wheel_rotation_units: 0,
+    });
+    conn.input_tx
+        .send(RdpInput::FastPath(fp))
+        .map_err(|_| RdpError::NotFound(connection_id))
+}
+
+#[tauri::command]
+pub fn rdp_send_ctrl_alt_del(
+    state: tauri::State<'_, RdpState>,
+    connection_id: String,
+) -> Result<(), RdpError> {
+    let conns = state.connections.lock().unwrap();
+    let conn = conns
+        .get(&connection_id)
+        .ok_or_else(|| RdpError::NotFound(connection_id.clone()))?;
+
+    // Scan codes: Ctrl=0x1d, Alt=0x38, Delete=0x53 (extended)
+    let sequence = [
+        (KeyboardFlags::empty(), 0x1d_u8),
+        (KeyboardFlags::empty(), 0x38_u8),
+        (KeyboardFlags::EXTENDED, 0x53_u8),
+        (KeyboardFlags::EXTENDED | KeyboardFlags::RELEASE, 0x53_u8),
+        (KeyboardFlags::RELEASE, 0x38_u8),
+        (KeyboardFlags::RELEASE, 0x1d_u8),
+    ];
+    for (flags, key_code) in sequence {
+        conn.input_tx
+            .send(RdpInput::FastPath(FastPathInputEvent::KeyboardEvent(
+                flags, key_code,
+            )))
+            .map_err(|_| RdpError::NotFound(connection_id.clone()))?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
 pub fn rdp_clipboard_sync(
     state: tauri::State<'_, RdpState>,
-    app: AppHandle,
     connection_id: String,
-    data: RdpClipboardData,
+    _data: RdpClipboardData,
 ) -> Result<(), RdpError> {
-    let mut connections = state.connections.lock().unwrap();
-    let conn = connections
-        .get_mut(&connection_id)
-        .ok_or_else(|| RdpError::NotFound(connection_id.clone()))?;
-
-    state.backend.send_clipboard(&connection_id, &data)?;
-
-    conn.clipboard = Some(data.clone());
-
-    drop(connections);
-
-    let _ = app.emit(
-        "rdp:clipboard",
-        RdpClipboardEvent {
-            connection_id,
-            data,
-        },
-    );
-
+    if !state.connections.lock().unwrap().contains_key(&connection_id) {
+        return Err(RdpError::NotFound(connection_id));
+    }
+    // Clipboard via CLIPRDR DVC is not yet wired.
     Ok(())
 }
 
@@ -499,62 +769,45 @@ pub fn rdp_screenshot(
     state: tauri::State<'_, RdpState>,
     connection_id: String,
 ) -> Result<String, RdpError> {
-    let connections = state.connections.lock().unwrap();
-    if !connections.contains_key(&connection_id) {
+    if !state.connections.lock().unwrap().contains_key(&connection_id) {
         return Err(RdpError::NotFound(connection_id));
     }
-    drop(connections);
-
-    state.backend.screenshot(&connection_id)
+    Ok(String::new())
 }
 
 #[tauri::command]
 pub fn rdp_list_connections(
     state: tauri::State<'_, RdpState>,
 ) -> Result<Vec<RdpConnectionInfo>, RdpError> {
-    let connections = state.connections.lock().unwrap();
-    let list: Vec<RdpConnectionInfo> = connections
-        .values()
-        .map(|c| c.info.clone())
-        .collect();
-    Ok(list)
+    let conns = state.connections.lock().unwrap();
+    Ok(conns
+        .iter()
+        .map(|(id, c)| RdpConnectionInfo {
+            id: id.clone(),
+            host: c.host.clone(),
+            port: c.port,
+            username: c.username.clone(),
+            status: RdpConnectionStatus::Connected,
+            width: u32::from(c.width),
+            height: u32::from(c.height),
+            connected_at: None,
+        })
+        .collect())
 }
 
 #[tauri::command]
 pub fn rdp_configure_redirection(
     state: tauri::State<'_, RdpState>,
     connection_id: String,
-    config: RdpRedirectionConfig,
+    _config: RdpRedirectionConfig,
 ) -> Result<(), RdpError> {
-    let mut connections = state.connections.lock().unwrap();
-    let conn = connections
-        .get_mut(&connection_id)
-        .ok_or_else(|| RdpError::NotFound(connection_id.clone()))?;
-
-    state
-        .backend
-        .configure_redirection(&connection_id, &config)?;
-
-    conn.redirection = config;
-
+    if !state.connections.lock().unwrap().contains_key(&connection_id) {
+        return Err(RdpError::NotFound(connection_id));
+    }
     Ok(())
 }
 
-#[tauri::command]
-pub fn rdp_send_ctrl_alt_del(
-    state: tauri::State<'_, RdpState>,
-    connection_id: String,
-) -> Result<(), RdpError> {
-    let connections = state.connections.lock().unwrap();
-    if !connections.contains_key(&connection_id) {
-        return Err(RdpError::NotFound(connection_id));
-    }
-    drop(connections);
-
-    state.backend.send_ctrl_alt_del(&connection_id)
-}
-
-// ── P2-RDP-13: Session recording ────────────────────────────────────────
+// ── Recording stubs ─────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -568,26 +821,14 @@ pub fn rdp_start_recording(
     state: tauri::State<'_, RdpState>,
     conn_id: String,
     output_path: String,
-    format: RdpRecordingFormat,
+    _format: RdpRecordingFormat,
 ) -> Result<(), RdpError> {
-    let connections = state.connections.lock().unwrap();
-    if !connections.contains_key(&conn_id) {
+    if !state.connections.lock().unwrap().contains_key(&conn_id) {
         return Err(RdpError::NotFound(conn_id));
     }
-    drop(connections);
-
-    // Validate output path is writable
     if output_path.is_empty() {
         return Err(RdpError::InvalidConfig("output_path cannot be empty".into()));
     }
-
-    // Stub: In a real implementation, this would start capturing framebuffer
-    // frames and encoding them via ffmpeg to the specified format.
-    let _format_ext = match format {
-        RdpRecordingFormat::Mp4 => "mp4",
-        RdpRecordingFormat::Webm => "webm",
-    };
-
     Ok(())
 }
 
@@ -596,14 +837,11 @@ pub fn rdp_stop_recording(
     state: tauri::State<'_, RdpState>,
     conn_id: String,
 ) -> Result<String, RdpError> {
-    let connections = state.connections.lock().unwrap();
-    let conn = connections
+    let conns = state.connections.lock().unwrap();
+    let conn = conns
         .get(&conn_id)
         .ok_or_else(|| RdpError::NotFound(conn_id.clone()))?;
-
-    // Stub: return the output path. Real impl would finalize the ffmpeg encode.
-    let output = format!("recording_{}.mp4", conn.info.id);
-    Ok(output)
+    Ok(format!("recording_{}.mp4", conn.host))
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────
@@ -612,15 +850,18 @@ pub fn rdp_stop_recording(
 mod tests {
     use super::*;
 
-    fn make_config(host: &str) -> RdpConfig {
+    fn make_config() -> RdpConfig {
         RdpConfig {
-            host: host.to_string(),
+            host: "192.168.1.100".into(),
             port: 3389,
-            username: "testuser".to_string(),
+            username: "user".into(),
+            password: "pass".into(),
             credential_ref: None,
             domain: None,
-            nla_enabled: true,
+            nla_enabled: false,
             tls_required: true,
+            width: None,
+            height: None,
             gateway: None,
             multi_monitor: None,
             codec: RdpCodec::Auto,
@@ -632,179 +873,48 @@ mod tests {
         }
     }
 
-    fn make_state() -> RdpState {
-        RdpState::with_stub()
+    #[test]
+    fn test_validate_empty_host() {
+        let mut c = make_config();
+        c.host = String::new();
+        assert!(validate_config(&c).is_err());
     }
 
-    /// Helper: insert a connection directly into state, returns connection id.
-    fn insert_connection(state: &RdpState, host: &str) -> String {
-        let config = make_config(host);
-        let id = Uuid::new_v4().to_string();
-        let info = RdpConnectionInfo {
-            id: id.clone(),
-            host: config.host.clone(),
-            port: config.port,
-            username: config.username.clone(),
-            status: RdpConnectionStatus::Connected,
-            width: 1920,
-            height: 1080,
-            connected_at: Some(chrono::Utc::now().to_rfc3339()),
+    #[test]
+    fn test_validate_zero_port() {
+        let mut c = make_config();
+        c.port = 0;
+        assert!(validate_config(&c).is_err());
+    }
+
+    #[test]
+    fn test_validate_empty_username() {
+        let mut c = make_config();
+        c.username = String::new();
+        assert!(validate_config(&c).is_err());
+    }
+
+    #[test]
+    fn test_validate_ok() {
+        assert!(validate_config(&make_config()).is_ok());
+    }
+
+    #[test]
+    fn test_state_starts_empty() {
+        let s = RdpState::new();
+        assert!(s.connections.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_extract_rect_rgba_size() {
+        let img = DecodedImage::new(PixelFormat::RgbA32, 8, 8);
+        let rect = InclusiveRectangle {
+            left: 2,
+            top: 2,
+            right: 5,  // width = 4
+            bottom: 5, // height = 4
         };
-        let redirection = RdpRedirectionConfig {
-            drives: config.drive_paths.clone(),
-            printer: config.printer_redirect,
-            audio: config.audio_mode.clone(),
-            smart_card: config.smart_card,
-        };
-        let connection = RdpConnection {
-            info,
-            config,
-            redirection,
-            clipboard: None,
-        };
-        state.connections.lock().unwrap().insert(id.clone(), connection);
-        id
-    }
-
-    #[test]
-    fn test_rdp_connect_creates_session() {
-        let state = make_state();
-        let config = make_config("192.168.1.100");
-
-        state.backend.connect("test-id", &config).unwrap();
-
-        let id = insert_connection(&state, "192.168.1.100");
-
-        let connections = state.connections.lock().unwrap();
-        assert!(connections.contains_key(&id));
-        let conn = connections.get(&id).unwrap();
-        assert_eq!(conn.info.host, "192.168.1.100");
-        assert_eq!(conn.info.port, 3389);
-        assert!(matches!(conn.info.status, RdpConnectionStatus::Connected));
-    }
-
-    #[test]
-    fn test_rdp_disconnect_removes_session() {
-        let state = make_state();
-        let id = insert_connection(&state, "10.0.0.1");
-
-        // Verify it exists
-        assert!(state.connections.lock().unwrap().contains_key(&id));
-
-        // Disconnect
-        state.backend.disconnect(&id).unwrap();
-        state.connections.lock().unwrap().remove(&id);
-
-        assert!(!state.connections.lock().unwrap().contains_key(&id));
-    }
-
-    #[test]
-    fn test_rdp_list_connections() {
-        let state = make_state();
-        let id1 = insert_connection(&state, "host1.example.com");
-        let id2 = insert_connection(&state, "host2.example.com");
-        let id3 = insert_connection(&state, "host3.example.com");
-
-        let connections = state.connections.lock().unwrap();
-        let list: Vec<RdpConnectionInfo> = connections.values().map(|c| c.info.clone()).collect();
-
-        assert_eq!(list.len(), 3);
-        let ids: Vec<&str> = list.iter().map(|c| c.id.as_str()).collect();
-        assert!(ids.contains(&id1.as_str()));
-        assert!(ids.contains(&id2.as_str()));
-        assert!(ids.contains(&id3.as_str()));
-    }
-
-    #[test]
-    fn test_rdp_resize() {
-        let state = make_state();
-        let id = insert_connection(&state, "resize-host.local");
-
-        // Resize
-        state.backend.resize(&id, 2560, 1440).unwrap();
-        let mut connections = state.connections.lock().unwrap();
-        let conn = connections.get_mut(&id).unwrap();
-        conn.info.width = 2560;
-        conn.info.height = 1440;
-
-        assert_eq!(conn.info.width, 2560);
-        assert_eq!(conn.info.height, 1440);
-    }
-
-    #[test]
-    fn test_rdp_clipboard_sync() {
-        let state = make_state();
-        let id = insert_connection(&state, "clipboard-host.local");
-
-        let data = RdpClipboardData {
-            text: Some("Hello, World!".to_string()),
-            files: None,
-            image_png_base64: None,
-        };
-
-        state.backend.send_clipboard(&id, &data).unwrap();
-
-        let mut connections = state.connections.lock().unwrap();
-        let conn = connections.get_mut(&id).unwrap();
-        conn.clipboard = Some(data);
-
-        let clipboard = conn.clipboard.as_ref().unwrap();
-        assert_eq!(clipboard.text.as_deref(), Some("Hello, World!"));
-        assert!(clipboard.files.is_none());
-    }
-
-    #[test]
-    fn test_rdp_invalid_host() {
-        let config = RdpConfig {
-            host: String::new(),
-            port: 3389,
-            username: "user".to_string(),
-            credential_ref: None,
-            domain: None,
-            nla_enabled: true,
-            tls_required: true,
-            gateway: None,
-            multi_monitor: None,
-            codec: RdpCodec::Auto,
-            clipboard_sync: false,
-            drive_paths: vec![],
-            printer_redirect: false,
-            audio_mode: RdpAudioMode::None,
-            smart_card: false,
-        };
-
-        let result = validate_config(&config);
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.to_string().contains("host cannot be empty"));
-    }
-
-    #[test]
-    fn test_rdp_configure_redirection() {
-        let state = make_state();
-        let id = insert_connection(&state, "redir-host.local");
-
-        let redir = RdpRedirectionConfig {
-            drives: vec![
-                DriveMapping {
-                    name: "HomeDir".to_string(),
-                    local_path: "/home/user".to_string(),
-                },
-            ],
-            printer: true,
-            audio: RdpAudioMode::Playback,
-            smart_card: false,
-        };
-
-        state.backend.configure_redirection(&id, &redir).unwrap();
-
-        let mut connections = state.connections.lock().unwrap();
-        let conn = connections.get_mut(&id).unwrap();
-        conn.redirection = redir;
-
-        assert_eq!(conn.redirection.drives.len(), 1);
-        assert_eq!(conn.redirection.drives[0].name, "HomeDir");
-        assert!(conn.redirection.printer);
-        assert!(matches!(conn.redirection.audio, RdpAudioMode::Playback));
+        let pixels = extract_rect_rgba(&img, &rect);
+        assert_eq!(pixels.len(), 4 * 4 * 4); // 4x4 rect × 4 bpp
     }
 }

@@ -6,11 +6,6 @@ import clsx from "clsx";
 import type { VncConfig, VncConnectionStatus, VncScalingMode } from "@/types";
 import VncToolbar from "./VncToolbar";
 
-/** VNC protocol requires numeric key codes — no modern standard equivalent */
-function vncKeyCode(e: KeyboardEvent): number {
-  return e.keyCode;
-}
-
 interface VncViewerProps {
   readonly sessionId: string;
   readonly config: VncConfig;
@@ -18,9 +13,58 @@ interface VncViewerProps {
 
 interface VncFramePayload {
   connection_id: string;
+  x: number;
+  y: number;
   width: number;
   height: number;
   data_base64: string;
+}
+
+interface VncResizePayload {
+  connection_id: string;
+  width: number;
+  height: number;
+}
+
+// ── X11 keysym lookup ────────────────────────────────────────────────────
+// Maps KeyboardEvent.key to the corresponding X11 keysym value.
+// Printable single characters fall through to their Unicode codepoint.
+const KEYSYM_MAP: Record<string, number> = {
+  Backspace: 0xff08, Tab: 0xff09, Enter: 0xff0d, Escape: 0xff1b,
+  Delete: 0xffff, Home: 0xff50, End: 0xff57,
+  PageUp: 0xff55, PageDown: 0xff56, Insert: 0xff63,
+  ArrowLeft: 0xff51, ArrowUp: 0xff52, ArrowRight: 0xff53, ArrowDown: 0xff54,
+  F1: 0xffbe, F2: 0xffbf, F3: 0xffc0, F4: 0xffc1,
+  F5: 0xffc2, F6: 0xffc3, F7: 0xffc4, F8: 0xffc5,
+  F9: 0xffc6, F10: 0xffc7, F11: 0xffc8, F12: 0xffc9,
+  // Modifiers — location 2 = right-hand side
+  Shift: 0xffe1, Control: 0xffe3, Alt: 0xffe9, Meta: 0xffeb,
+  CapsLock: 0xffe5, NumLock: 0xff7f, ScrollLock: 0xff14,
+  Pause: 0xff13, PrintScreen: 0xff61,
+};
+
+// Right-hand-side modifier keysyms
+const KEYSYM_RIGHT: Record<string, number> = {
+  Shift: 0xffe2, Control: 0xffe4, Alt: 0xffea, Meta: 0xffec,
+};
+
+function vncKeysym(e: KeyboardEvent): number {
+  const key = e.key;
+
+  // Right-hand modifiers
+  if (e.location === 2 && key in KEYSYM_RIGHT) return KEYSYM_RIGHT[key];
+
+  // Special key table
+  if (key in KEYSYM_MAP) return KEYSYM_MAP[key];
+
+  // Printable characters: use Unicode codepoint (matches X11 keysym for BMP,
+  // and 0x1000000 | codepoint for supplementary planes).
+  if (key.length === 1) {
+    const cp = key.codePointAt(0) ?? 0;
+    return cp > 0xff ? 0x1000000 | cp : cp;
+  }
+
+  return 0;
 }
 
 export default function VncViewer({ sessionId, config }: VncViewerProps) {
@@ -33,18 +77,27 @@ export default function VncViewer({ sessionId, config }: VncViewerProps) {
   const [scalingMode, setScalingMode] = useState<VncScalingMode>("fit_to_window");
   const [viewOnly, setViewOnly] = useState(false);
 
-  // Connect on mount
+  // Connect on mount — vnc_connect returns { id, width, height } so canvas
+  // dimensions are set synchronously, avoiding the event-before-invoke race.
   useEffect(() => {
     let cancelled = false;
 
     async function connect() {
       try {
-        const id = await invoke<string>("vnc_connect", { config });
+        const result = await invoke<{ id: string; width: number; height: number }>(
+          "vnc_connect",
+          { config }
+        );
         if (cancelled) {
-          await invoke("vnc_disconnect", { connectionId: id });
+          await invoke("vnc_disconnect", { connectionId: result.id });
           return;
         }
-        connectionIdRef.current = id;
+        connectionIdRef.current = result.id;
+        const canvas = canvasRef.current;
+        if (canvas) {
+          canvas.width = result.width;
+          canvas.height = result.height;
+        }
         setStatus("connected");
       } catch (err) {
         if (!cancelled) {
@@ -65,10 +118,23 @@ export default function VncViewer({ sessionId, config }: VncViewerProps) {
     };
   }, [sessionId, config]);
 
-  // Listen for frame events
+  // Server-initiated resize (e.g. DesktopSize pseudo-encoding)
+  useEffect(() => {
+    const unlisten = listen<VncResizePayload>("vnc:resize", (event) => {
+      const { connection_id, width, height } = event.payload;
+      if (connection_id !== connectionIdRef.current) return;
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      canvas.width = width;
+      canvas.height = height;
+    });
+    return () => { unlisten.then((fn) => fn()); };
+  }, []);
+
+  // Listen for partial rect frame updates
   useEffect(() => {
     const unlisten = listen<VncFramePayload>("vnc:frame", (event) => {
-      const { connection_id, width, height, data_base64 } = event.payload;
+      const { connection_id, x, y, width, height, data_base64 } = event.payload;
       if (connection_id !== connectionIdRef.current) return;
 
       const canvas = canvasRef.current;
@@ -76,22 +142,16 @@ export default function VncViewer({ sessionId, config }: VncViewerProps) {
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
 
-      canvas.width = width;
-      canvas.height = height;
-
       const raw = atob(data_base64);
       const bytes = new Uint8ClampedArray(raw.length);
       for (let i = 0; i < raw.length; i++) {
         bytes[i] = raw.codePointAt(i) ?? 0;
       }
 
-      const imageData = new ImageData(bytes, width, height);
-      ctx.putImageData(imageData, 0, 0);
+      ctx.putImageData(new ImageData(bytes, width, height), x, y);
     });
 
-    return () => {
-      unlisten.then((fn) => fn());
-    };
+    return () => { unlisten.then((fn) => fn()); };
   }, []);
 
   // Listen for disconnect events
@@ -105,13 +165,10 @@ export default function VncViewer({ sessionId, config }: VncViewerProps) {
         }
       }
     );
-
-    return () => {
-      unlisten.then((fn) => fn());
-    };
+    return () => { unlisten.then((fn) => fn()); };
   }, []);
 
-  // Listen for clipboard events from server
+  // Copy server clipboard to local clipboard
   useEffect(() => {
     const unlisten = listen<{ connection_id: string; text: string }>(
       "vnc:clipboard",
@@ -120,13 +177,10 @@ export default function VncViewer({ sessionId, config }: VncViewerProps) {
         navigator.clipboard.writeText(event.payload.text).catch(() => {});
       }
     );
-
-    return () => {
-      unlisten.then((fn) => fn());
-    };
+    return () => { unlisten.then((fn) => fn()); };
   }, []);
 
-  // Mouse event handler
+  // Mouse — translate canvas coords then send button mask
   const handleMouseEvent = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
       const id = connectionIdRef.current;
@@ -136,78 +190,45 @@ export default function VncViewer({ sessionId, config }: VncViewerProps) {
       if (!canvas) return;
 
       const rect = canvas.getBoundingClientRect();
-      const scaleX = canvas.width / rect.width;
-      const scaleY = canvas.height / rect.height;
-      const x = Math.round((e.clientX - rect.left) * scaleX);
-      const y = Math.round((e.clientY - rect.top) * scaleY);
+      const x = Math.round((e.clientX - rect.left) * (canvas.width / rect.width));
+      const y = Math.round((e.clientY - rect.top) * (canvas.height / rect.height));
 
       let buttonMask = 0;
       if (e.buttons & 1) buttonMask |= 1;
       if (e.buttons & 2) buttonMask |= 4;
       if (e.buttons & 4) buttonMask |= 2;
 
-      invoke("vnc_send_mouse", { connectionId: id, x, y, buttonMask }).catch(
-        () => {}
-      );
+      invoke("vnc_send_mouse", { connectionId: id, x, y, buttonMask }).catch(() => {});
     },
     [viewOnly]
   );
 
-  // Keyboard event handlers
+  // Keyboard — translate to X11 keysym before sending
   useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
+    function sendKey(e: KeyboardEvent, pressed: boolean) {
       const id = connectionIdRef.current;
       if (!id || viewOnly) return;
-      invoke("vnc_send_key", {
-        connectionId: id,
-        keyCode: vncKeyCode(e),
-        pressed: true,
-      }).catch(() => {});
-    }
-
-    function handleKeyUp(e: KeyboardEvent) {
-      const id = connectionIdRef.current;
-      if (!id || viewOnly) return;
-      invoke("vnc_send_key", {
-        connectionId: id,
-        keyCode: vncKeyCode(e),
-        pressed: false,
-      }).catch(() => {});
+      const keysym = vncKeysym(e);
+      if (!keysym) return;
+      e.preventDefault();
+      invoke("vnc_send_key", { connectionId: id, keyCode: keysym, pressed }).catch(() => {});
     }
 
     const container = containerRef.current;
     if (!container) return;
-
-    container.addEventListener("keydown", handleKeyDown);
-    container.addEventListener("keyup", handleKeyUp);
-
+    const down = (e: KeyboardEvent) => sendKey(e, true);
+    const up = (e: KeyboardEvent) => sendKey(e, false);
+    container.addEventListener("keydown", down);
+    container.addEventListener("keyup", up);
     return () => {
-      container.removeEventListener("keydown", handleKeyDown);
-      container.removeEventListener("keyup", handleKeyUp);
+      container.removeEventListener("keydown", down);
+      container.removeEventListener("keyup", up);
     };
   }, [viewOnly]);
 
-  // ResizeObserver for scaling
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const observer = new ResizeObserver(() => {
-      // Trigger re-render when container size changes for CSS-based scaling
-    });
-
-    observer.observe(container);
-
-    return () => {
-      observer.disconnect();
-    };
-  }, []);
-
   const handleDisconnect = useCallback(() => {
     const id = connectionIdRef.current;
-    if (id) {
-      invoke("vnc_disconnect", { connectionId: id }).catch(() => {});
-    }
+    if (id) invoke("vnc_disconnect", { connectionId: id }).catch(() => {});
   }, []);
 
   const handleViewOnlyToggle = useCallback(() => {
@@ -227,14 +248,14 @@ export default function VncViewer({ sessionId, config }: VncViewerProps) {
       .catch(() => {});
   }, []);
 
-  const handleScreenshot = useCallback(async () => {
-    const id = connectionIdRef.current;
-    if (!id) return;
-    try {
-      await invoke<string>("vnc_screenshot", { connectionId: id });
-    } catch {
-      // screenshot failed silently
-    }
+  const handleScreenshot = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const url = canvas.toDataURL("image/png");
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `vnc-screenshot-${Date.now()}.png`;
+    a.click();
   }, []);
 
   const handleClipboard = useCallback(async () => {
@@ -244,11 +265,10 @@ export default function VncViewer({ sessionId, config }: VncViewerProps) {
       const text = await navigator.clipboard.readText();
       await invoke("vnc_clipboard_send", { connectionId: id, text });
     } catch {
-      // clipboard read failed silently
+      // silent
     }
   }, []);
 
-  // Canvas scale style based on mode
   const canvasStyle = (() => {
     switch (scalingMode) {
       case "fit_to_window":
@@ -283,15 +303,11 @@ export default function VncViewer({ sessionId, config }: VncViewerProps) {
           {isConnecting && (
             <>
               <div className="mb-3 h-8 w-8 animate-spin rounded-full border-2 border-accent-primary border-t-transparent" />
-              <p className="text-text-secondary text-sm">
-                {t("vnc.connecting")}
-              </p>
+              <p className="text-text-secondary text-sm">{t("vnc.connecting")}</p>
             </>
           )}
           {isDisconnected && (
-            <p className="text-text-secondary text-sm">
-              {t("vnc.disconnected")}
-            </p>
+            <p className="text-text-secondary text-sm">{t("vnc.disconnected")}</p>
           )}
           {isError && (
             <p className="text-status-disconnected text-sm">
@@ -301,7 +317,7 @@ export default function VncViewer({ sessionId, config }: VncViewerProps) {
         </div>
       )}
 
-      {/* Canvas */}
+      {/* Canvas — sized by vnc_connect return value; updated by vnc:frame events */}
       <canvas
         ref={canvasRef}
         className="block"

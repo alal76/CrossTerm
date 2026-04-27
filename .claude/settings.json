@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/alal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/vnc-rs-0.5.3/src/client/**)",
+      "Read(//Users/alal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/vnc-rs-0.5.3/src/**)",
+      "Read(//Users/alal/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ironrdp-async-0.8.0/src/**)",
+      "Bash(cargo info *)",
+      "Read(//Users/alal/.cargo/registry/src/**)",
+      "Read(//Users/alal/.cargo/registry/**)",
+      "Bash(cargo check *)",
+      "Bash(gh run *)"
+    ]
+  }
+}

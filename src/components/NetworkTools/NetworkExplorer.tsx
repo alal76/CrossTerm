@@ -11,7 +11,6 @@ import {
   PlugZap,
   Plus,
   X,
-  Monitor,
   Server,
   ChevronDown,
   ChevronUp,
@@ -19,7 +18,7 @@ import {
   Wifi,
   ShieldAlert,
 } from 'lucide-react';
-import type { ExploreResult, ExploreProgress, ExploreHostFound, ServiceFilter } from '@/types';
+import type { ExploreResult, ExploreProgress, ExploreHostFound, ServiceFilter, Session } from '@/types';
 import { SessionType } from '@/types';
 import { useSessionStore } from '@/stores/sessionStore';
 import WifiScanner from '@/components/NetworkTools/WifiScanner';
@@ -77,13 +76,20 @@ const SERVICE_DEFAULT_PORTS: Record<string, number> = {
   ssh: 22, sftp: 22, rdp: 3389, vnc: 5900, telnet: 23, ftp: 21,
 };
 
+const SESSION_TYPE_MAP: Record<string, SessionType> = {
+  ssh: SessionType.SSH,
+  sftp: SessionType.SFTP,
+  rdp: SessionType.RDP,
+  vnc: SessionType.VNC,
+  telnet: SessionType.Telnet,
+};
+
 export default function NetworkExplorer() {
   const { t } = useTranslation();
   const { addSession, openTab } = useSessionStore();
   const [toolTab, setToolTab] = useState<'explore' | 'wifi' | 'aircrack'>('explore');
   const [cidr, setCidr] = useState('');
   const [scanning, setScanning] = useState(false);
-  const [scanId, setScanId] = useState<string | null>(null);
   const [results, setResults] = useState<ExploreResult[]>([]);
   const [progress, setProgress] = useState<ExploreProgress | null>(null);
   const [extraPortsInput, setExtraPortsInput] = useState('');
@@ -93,6 +99,7 @@ export default function NetworkExplorer() {
   const [showFilters, setShowFilters] = useState(false);
   const [filterService, setFilterService] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'ip' | 'ports' | 'response'>('ip');
+  const [saveCount, setSaveCount] = useState<number | null>(null);
   const scanIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -149,27 +156,89 @@ export default function NetworkExplorer() {
         target: { cidr: cidr.trim(), services, extra_ports },
       });
       scanIdRef.current = id;
-      setScanId(id);
     } catch {
       setScanning(false);
     }
   }, [cidr, selectedServices, extraPortsInput]);
 
-  const handleConnect = useCallback((_result: ExploreResult) => {
-    // TODO: Integrate with sessionStore to create+open a session
-  }, []);
+  const handleConnect = useCallback(async (result: ExploreResult) => {
+    const svcType = result.suggested_session_type;
+    if (!svcType) return;
+    const sessionType = SESSION_TYPE_MAP[svcType];
+    if (!sessionType) return;
+    const port =
+      result.open_ports.find((p) => p.service_name === svcType)?.port ??
+      SERVICE_DEFAULT_PORTS[svcType] ??
+      22;
+    try {
+      const session = await invoke<Session>('session_create', {
+        request: {
+          name: `${result.hostname ?? result.ip} (${svcType.toUpperCase()})`,
+          session_type: sessionType,
+          connection: { host: result.ip, port },
+          group: null,
+          tags: null,
+          icon: null,
+          color_label: null,
+          credential_ref: null,
+          startup_script: null,
+          environment_variables: null,
+          notes: null,
+          auto_reconnect: null,
+          keep_alive_interval_seconds: null,
+          favorite: null,
+          settings_override: null,
+        },
+      });
+      addSession(session);
+      openTab(session);
+    } catch {
+      // no-op: user stays on screen, can retry
+    }
+  }, [addSession, openTab]);
 
   const handleSaveAsSessions = useCallback(async () => {
-    if (!scanId) return;
-    try {
-      await invoke('network_scan_save_as_sessions', {
-        scanId,
-        folder: 'Discovered Hosts',
-      });
-    } catch {
-      // handle error
+    const candidates = results.filter(
+      (r) => r.suggested_session_type && SESSION_TYPE_MAP[r.suggested_session_type]
+    );
+    if (candidates.length === 0) return;
+    setSaveCount(null);
+    let saved = 0;
+    for (const result of candidates) {
+      const svcType = result.suggested_session_type!;
+      const sessionType = SESSION_TYPE_MAP[svcType];
+      const port =
+        result.open_ports.find((p) => p.service_name === svcType)?.port ??
+        SERVICE_DEFAULT_PORTS[svcType] ??
+        22;
+      try {
+        const session = await invoke<Session>('session_create', {
+          request: {
+            name: `${result.hostname ?? result.ip} (${svcType.toUpperCase()})`,
+            session_type: sessionType,
+            connection: { host: result.ip, port },
+            group: 'Discovered Hosts',
+            tags: null,
+            icon: null,
+            color_label: null,
+            credential_ref: null,
+            startup_script: null,
+            environment_variables: null,
+            notes: null,
+            auto_reconnect: null,
+            keep_alive_interval_seconds: null,
+            favorite: null,
+            settings_override: null,
+          },
+        });
+        addSession(session);
+        saved++;
+      } catch {
+        // skip hosts that fail
+      }
     }
-  }, [scanId]);
+    setSaveCount(saved);
+  }, [results, addSession]);
 
   const filteredResults = useMemo(() => {
     let filtered = results;
@@ -466,13 +535,20 @@ export default function NetworkExplorer() {
 
       {/* Save all */}
       {results.length > 0 && !scanning && (
-        <button
-          onClick={handleSaveAsSessions}
-          className="flex items-center gap-2 self-start rounded-md bg-surface-elevated px-3 py-1.5 text-xs text-text-primary hover:bg-surface-secondary transition-colors"
-        >
-          <Save size={12} />
-          {t('network.saveAsSessions')}
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleSaveAsSessions}
+            className="flex items-center gap-2 rounded-md bg-surface-elevated px-3 py-1.5 text-xs text-text-primary hover:bg-surface-secondary transition-colors"
+          >
+            <Save size={12} />
+            {t('network.saveAsSessions')}
+          </button>
+          {saveCount !== null && (
+            <span className="text-xs text-text-secondary">
+              {saveCount} {saveCount === 1 ? 'session' : 'sessions'} saved
+            </span>
+          )}
+        </div>
       )}
 
       {/* Empty state */}

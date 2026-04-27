@@ -326,6 +326,7 @@ export interface RdpConfig {
   host: string;
   port: number;
   username: string;
+  password: string;
   credential_ref?: string;
   domain?: string;
   nla_enabled: boolean;

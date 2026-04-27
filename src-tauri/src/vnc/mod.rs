@@ -1,9 +1,13 @@
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 use thiserror::Error;
+use tokio::net::TcpStream;
+use tokio::sync::mpsc;
 use uuid::Uuid;
+use vnc::{ClientKeyEvent, ClientMouseEvent, PixelFormat, VncConnector, VncEncoding as VncLibEncoding, VncEvent, X11Event};
 
 // ── Error ───────────────────────────────────────────────────────────────
 
@@ -86,11 +90,11 @@ pub enum VncRfbVersion {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum VncConnectionStatus {
     Connecting,
     Connected,
     Disconnected,
+    #[serde(rename = "error")]
     Error(String),
 }
 
@@ -116,20 +120,73 @@ pub struct VncConnectionInfo {
     pub scaling_mode: VncScalingMode,
 }
 
-// ── Tauri Event Payloads ────────────────────────────────────────────────
+// ── Input channel ────────────────────────────────────────────────────────
 
-#[allow(dead_code)]
+enum VncInput {
+    Key { code: u32, down: bool },
+    Mouse { x: u16, y: u16, buttons: u8 },
+    CopyText(String),
+}
+
+// ── Connection entry ─────────────────────────────────────────────────────
+
+struct VncConn {
+    input_tx: mpsc::UnboundedSender<VncInput>,
+    host: String,
+    port: u16,
+    width: u32,
+    height: u32,
+    view_only: bool,
+    scaling_mode: VncScalingMode,
+}
+
+// ── State ────────────────────────────────────────────────────────────────
+
+pub struct VncState {
+    connections: Arc<Mutex<HashMap<String, VncConn>>>,
+}
+
+impl VncState {
+    pub fn new() -> Self {
+        Self {
+            connections: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+}
+
+// ── Connect result ────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize)]
+pub struct VncConnectResult {
+    pub id: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+// ── Tauri Event Payloads ─────────────────────────────────────────────────
+
 #[derive(Clone, Serialize)]
-struct VncFrameEvent {
+struct VncResizeEvent {
     connection_id: String,
     width: u32,
     height: u32,
+}
+
+#[derive(Clone, Serialize)]
+struct VncFrameEvent {
+    connection_id: String,
+    x: u16,
+    y: u16,
+    width: u16,
+    height: u16,
     data_base64: String,
 }
 
 #[derive(Clone, Serialize)]
 struct VncConnectedEvent {
     connection_id: String,
+    width: u32,
+    height: u32,
 }
 
 #[derive(Clone, Serialize)]
@@ -144,110 +201,135 @@ struct VncClipboardEvent {
     text: String,
 }
 
-#[allow(dead_code)]
-#[derive(Clone, Serialize)]
-struct VncErrorEvent {
-    connection_id: String,
-    message: String,
-}
+// ── Event loop ───────────────────────────────────────────────────────────
 
-#[allow(dead_code)]
-#[derive(Clone, Serialize)]
-struct VncBellEvent {
-    connection_id: String,
-}
-
-// ── Backend Trait ────────────────────────────────────────────────────────
-
-/// Trait abstracting the actual libvncclient FFI calls.
-/// Implementations can provide real libvncclient bindings or test stubs.
-pub trait VncBackend: Send + Sync {
-    fn connect(&self, id: &str, config: &VncConfig) -> Result<(), VncError>;
-
-    fn disconnect(&self, id: &str) -> Result<(), VncError>;
-
-    fn send_key(&self, id: &str, key_code: u32, pressed: bool) -> Result<(), VncError>;
-
-    fn send_mouse(&self, id: &str, x: u32, y: u32, button_mask: u8) -> Result<(), VncError>;
-
-    fn set_encodings(&self, id: &str, encodings: &[VncEncoding]) -> Result<(), VncError>;
-
-    fn send_clipboard(&self, id: &str, text: &str) -> Result<(), VncError>;
-
-    fn screenshot(&self, id: &str) -> Result<String, VncError>;
-}
-
-// ── Stub Backend ────────────────────────────────────────────────────────
-
-/// No-op backend used when libvncclient is not available (tests / dev builds).
-pub struct StubVncBackend;
-
-impl VncBackend for StubVncBackend {
-    fn connect(&self, _id: &str, _config: &VncConfig) -> Result<(), VncError> {
-        Err(VncError::ConnectionFailed(
-            "VNC remote desktop rendering is not yet implemented. \
-             Connect via SSH for command-line access.".into(),
-        ))
-    }
-
-    fn disconnect(&self, _id: &str) -> Result<(), VncError> {
-        Ok(())
-    }
-
-    fn send_key(&self, _id: &str, _key_code: u32, _pressed: bool) -> Result<(), VncError> {
-        Ok(())
-    }
-
-    fn send_mouse(&self, _id: &str, _x: u32, _y: u32, _button_mask: u8) -> Result<(), VncError> {
-        Ok(())
-    }
-
-    fn set_encodings(&self, _id: &str, _encodings: &[VncEncoding]) -> Result<(), VncError> {
-        Ok(())
-    }
-
-    fn send_clipboard(&self, _id: &str, _text: &str) -> Result<(), VncError> {
-        Ok(())
-    }
-
-    fn screenshot(&self, _id: &str) -> Result<String, VncError> {
-        // Return a minimal valid base64-encoded 1x1 PNG for stub
-        Ok("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==".to_string())
+async fn handle_vnc_event(
+    conn_id: &str,
+    event: VncEvent,
+    app: &AppHandle,
+    connections: &Arc<Mutex<HashMap<String, VncConn>>>,
+) {
+    match event {
+        VncEvent::SetResolution(screen) => {
+            let (w, h) = (screen.width as u32, screen.height as u32);
+            {
+                let mut guard = connections.lock().unwrap();
+                if let Some(conn) = guard.get_mut(conn_id) {
+                    conn.width = w;
+                    conn.height = h;
+                }
+            }
+            let _ = app.emit(
+                "vnc:resize",
+                VncResizeEvent { connection_id: conn_id.to_string(), width: w, height: h },
+            );
+        }
+        VncEvent::RawImage(rect, data) => {
+            if rect.width == 0 || rect.height == 0 || data.is_empty() {
+                return;
+            }
+            let encoded = base64::engine::general_purpose::STANDARD.encode(&data);
+            let _ = app.emit(
+                "vnc:frame",
+                VncFrameEvent {
+                    connection_id: conn_id.to_string(),
+                    x: rect.x,
+                    y: rect.y,
+                    width: rect.width,
+                    height: rect.height,
+                    data_base64: encoded,
+                },
+            );
+        }
+        VncEvent::Text(text) => {
+            let _ = app.emit(
+                "vnc:clipboard",
+                VncClipboardEvent { connection_id: conn_id.to_string(), text },
+            );
+        }
+        // Copy, JpegImage, SetCursor, Bell — handled by requesting a refresh next cycle
+        _ => {}
     }
 }
 
-// ── Connection ──────────────────────────────────────────────────────────
+async fn run_vnc_loop(
+    conn_id: String,
+    vnc: vnc::VncClient,
+    mut rx: mpsc::UnboundedReceiver<VncInput>,
+    app: AppHandle,
+    connections: Arc<Mutex<HashMap<String, VncConn>>>,
+) {
+    use tokio::time::{interval, Duration, MissedTickBehavior};
 
-#[allow(dead_code)]
-struct VncConnection {
-    info: VncConnectionInfo,
-    config: VncConfig,
-    encodings: Vec<VncEncoding>,
-    last_clipboard: Option<String>,
-}
+    let mut refresh_timer = interval(Duration::from_millis(33));
+    refresh_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-// ── State ───────────────────────────────────────────────────────────────
+    'outer: loop {
+        // Drain all pending VNC events (non-blocking poll)
+        loop {
+            match vnc.poll_event().await {
+                Ok(Some(event)) => {
+                    handle_vnc_event(&conn_id, event, &app, &connections).await;
+                }
+                Ok(None) => break,
+                Err(_) => {
+                    let _ = app.emit(
+                        "vnc:disconnected",
+                        VncDisconnectedEvent {
+                            connection_id: conn_id.clone(),
+                            reason: "connection_error".into(),
+                        },
+                    );
+                    connections.lock().unwrap().remove(&conn_id);
+                    return;
+                }
+            }
+        }
 
-pub struct VncState {
-    connections: Mutex<HashMap<String, VncConnection>>,
-    backend: Box<dyn VncBackend>,
-}
+        // Wait for an input command or a 33ms refresh tick
+        tokio::select! {
+            biased;
 
-impl VncState {
-    pub fn new(backend: Box<dyn VncBackend>) -> Self {
-        Self {
-            connections: Mutex::new(HashMap::new()),
-            backend,
+            input = rx.recv() => {
+                match input {
+                    None => break 'outer, // sender dropped = disconnect
+                    Some(VncInput::Key { code, down }) => {
+                        let _ = vnc.input(X11Event::KeyEvent(ClientKeyEvent { keycode: code, down })).await;
+                    }
+                    Some(VncInput::Mouse { x, y, buttons }) => {
+                        let _ = vnc.input(X11Event::PointerEvent(ClientMouseEvent {
+                            position_x: x,
+                            position_y: y,
+                            bottons: buttons,
+                        }))
+                        .await;
+                    }
+                    Some(VncInput::CopyText(text)) => {
+                        let _ = vnc.input(X11Event::CopyText(text)).await;
+                    }
+                }
+            }
+
+            _ = refresh_timer.tick() => {
+                if vnc.input(X11Event::Refresh).await.is_err() {
+                    break 'outer;
+                }
+            }
         }
     }
 
-    #[allow(dead_code)]
-    pub fn with_stub() -> Self {
-        Self::new(Box::new(StubVncBackend))
-    }
+    let _ = vnc.close().await;
+    let _ = app.emit(
+        "vnc:disconnected",
+        VncDisconnectedEvent {
+            connection_id: conn_id.clone(),
+            reason: "disconnected".into(),
+        },
+    );
+    connections.lock().unwrap().remove(&conn_id);
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────
 
 fn validate_config(config: &VncConfig) -> Result<(), VncError> {
     if config.host.is_empty() {
@@ -256,60 +338,91 @@ fn validate_config(config: &VncConfig) -> Result<(), VncError> {
     if config.port == 0 {
         return Err(VncError::InvalidConfig("port cannot be zero".into()));
     }
-    if config.vencrypt && config.tls_cert_path.is_none() {
-        return Err(VncError::InvalidConfig(
-            "VeNCrypt requires tls_cert_path".into(),
-        ));
-    }
     Ok(())
 }
 
-// ── Tauri Commands ──────────────────────────────────────────────────────
+// ── Tauri Commands ────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub fn vnc_connect(
+pub async fn vnc_connect(
     state: tauri::State<'_, VncState>,
     app: AppHandle,
     config: VncConfig,
-) -> Result<String, VncError> {
+) -> Result<VncConnectResult, VncError> {
     validate_config(&config)?;
 
+    let addr = format!("{}:{}", config.host, config.port);
+    let tcp = TcpStream::connect(&addr)
+        .await
+        .map_err(|e| VncError::ConnectionFailed(e.to_string()))?;
+
+    let password = config.password.clone().unwrap_or_default();
+    let vnc = VncConnector::new(tcp)
+        .set_auth_method(async move { Ok(password) })
+        .add_encoding(VncLibEncoding::Tight)
+        .add_encoding(VncLibEncoding::Zrle)
+        .add_encoding(VncLibEncoding::Trle)
+        .add_encoding(VncLibEncoding::CopyRect)
+        .add_encoding(VncLibEncoding::Raw)
+        .allow_shared(true)
+        .set_pixel_format(PixelFormat::rgba())
+        .build()
+        .map_err(|e| VncError::ConnectionFailed(e.to_string()))?
+        .try_start()
+        .await
+        .map_err(|e| VncError::ConnectionFailed(e.to_string()))?
+        .finish()
+        .map_err(|e| VncError::ConnectionFailed(e.to_string()))?;
+
+    // Collect initial SetResolution event
+    let mut width = 1024u32;
+    let mut height = 768u32;
+    for _ in 0..10 {
+        match vnc.poll_event().await {
+            Ok(Some(VncEvent::SetResolution(screen))) => {
+                width = screen.width as u32;
+                height = screen.height as u32;
+                break;
+            }
+            Ok(Some(_)) => continue,
+            Ok(None) | Err(_) => break,
+        }
+    }
+
     let id = Uuid::new_v4().to_string();
+    let (input_tx, input_rx) = mpsc::unbounded_channel::<VncInput>();
 
-    state.backend.connect(&id, &config)?;
+    {
+        let mut conns = state.connections.lock().unwrap();
+        conns.insert(
+            id.clone(),
+            VncConn {
+                input_tx,
+                host: config.host.clone(),
+                port: config.port,
+                width,
+                height,
+                view_only: false,
+                scaling_mode: VncScalingMode::FitToWindow,
+            },
+        );
+    }
 
-    let info = VncConnectionInfo {
-        id: id.clone(),
-        host: config.host.clone(),
-        port: config.port,
-        status: VncConnectionStatus::Connected,
-        width: 1024,
-        height: 768,
-        view_only: false,
-        scaling_mode: VncScalingMode::FitToWindow,
-    };
+    let connections = Arc::clone(&state.connections);
+    let app_clone = app.clone();
+    let id_clone = id.clone();
+    tokio::spawn(async move {
+        run_vnc_loop(id_clone, vnc, input_rx, app_clone, connections).await;
+    });
 
-    let connection = VncConnection {
-        info: info.clone(),
-        config,
-        encodings: vec![VncEncoding::Tight, VncEncoding::Zrle, VncEncoding::Raw],
-        last_clipboard: None,
-    };
-
-    state
-        .connections
-        .lock()
-        .unwrap()
-        .insert(id.clone(), connection);
-
+    // Emit the event for any secondary listeners; primary consumer reads
+    // width/height from the return value to avoid the event-before-invoke race.
     let _ = app.emit(
         "vnc:connected",
-        VncConnectedEvent {
-            connection_id: id.clone(),
-        },
+        VncConnectedEvent { connection_id: id.clone(), width, height },
     );
 
-    Ok(id)
+    Ok(VncConnectResult { id, width, height })
 }
 
 #[tauri::command]
@@ -318,23 +431,18 @@ pub fn vnc_disconnect(
     app: AppHandle,
     connection_id: String,
 ) -> Result<(), VncError> {
-    let mut connections = state.connections.lock().unwrap();
-    let conn = connections
-        .remove(&connection_id)
-        .ok_or_else(|| VncError::NotFound(connection_id.clone()))?;
-
-    drop(connections);
-
-    state.backend.disconnect(&conn.info.id)?;
-
+    let mut conns = state.connections.lock().unwrap();
+    if conns.remove(&connection_id).is_none() {
+        return Err(VncError::NotFound(connection_id.clone()));
+    }
+    drop(conns);
+    // Dropping the VncConn drops the input_tx, which closes the channel,
+    // causing the event loop to exit and emit vnc:disconnected.
+    // Emit immediately so the UI responds promptly.
     let _ = app.emit(
         "vnc:disconnected",
-        VncDisconnectedEvent {
-            connection_id,
-            reason: "user_requested".into(),
-        },
+        VncDisconnectedEvent { connection_id, reason: "user_requested".into() },
     );
-
     Ok(())
 }
 
@@ -345,18 +453,14 @@ pub fn vnc_send_key(
     key_code: u32,
     pressed: bool,
 ) -> Result<(), VncError> {
-    let connections = state.connections.lock().unwrap();
-    let conn = connections
-        .get(&connection_id)
-        .ok_or_else(|| VncError::NotFound(connection_id.clone()))?;
-
-    if conn.info.view_only {
+    let conns = state.connections.lock().unwrap();
+    let conn = conns.get(&connection_id).ok_or_else(|| VncError::NotFound(connection_id.clone()))?;
+    if conn.view_only {
         return Err(VncError::ViewOnly);
     }
-
-    drop(connections);
-
-    state.backend.send_key(&connection_id, key_code, pressed)
+    conn.input_tx
+        .send(VncInput::Key { code: key_code, down: pressed })
+        .map_err(|_| VncError::NotFound(connection_id))
 }
 
 #[tauri::command]
@@ -367,65 +471,41 @@ pub fn vnc_send_mouse(
     y: u32,
     button_mask: u8,
 ) -> Result<(), VncError> {
-    let connections = state.connections.lock().unwrap();
-    let conn = connections
-        .get(&connection_id)
-        .ok_or_else(|| VncError::NotFound(connection_id.clone()))?;
-
-    if conn.info.view_only {
+    let conns = state.connections.lock().unwrap();
+    let conn = conns.get(&connection_id).ok_or_else(|| VncError::NotFound(connection_id.clone()))?;
+    if conn.view_only {
         return Err(VncError::ViewOnly);
     }
-
-    drop(connections);
-
-    state.backend.send_mouse(&connection_id, x, y, button_mask)
+    conn.input_tx
+        .send(VncInput::Mouse { x: x as u16, y: y as u16, buttons: button_mask })
+        .map_err(|_| VncError::NotFound(connection_id))
 }
 
 #[tauri::command]
 pub fn vnc_set_encoding(
     state: tauri::State<'_, VncState>,
     connection_id: String,
-    encodings: Vec<VncEncoding>,
+    _encodings: Vec<VncEncoding>,
 ) -> Result<(), VncError> {
-    let mut connections = state.connections.lock().unwrap();
-    let conn = connections
-        .get_mut(&connection_id)
-        .ok_or_else(|| VncError::NotFound(connection_id.clone()))?;
-
-    state.backend.set_encodings(&connection_id, &encodings)?;
-
-    conn.encodings = encodings;
-
+    let conns = state.connections.lock().unwrap();
+    if !conns.contains_key(&connection_id) {
+        return Err(VncError::NotFound(connection_id));
+    }
+    // Encoding is set during connection setup; runtime changes are not supported
     Ok(())
 }
 
 #[tauri::command]
 pub fn vnc_clipboard_send(
     state: tauri::State<'_, VncState>,
-    app: AppHandle,
     connection_id: String,
     text: String,
 ) -> Result<(), VncError> {
-    let mut connections = state.connections.lock().unwrap();
-    let conn = connections
-        .get_mut(&connection_id)
-        .ok_or_else(|| VncError::NotFound(connection_id.clone()))?;
-
-    state.backend.send_clipboard(&connection_id, &text)?;
-
-    conn.last_clipboard = Some(text.clone());
-
-    drop(connections);
-
-    let _ = app.emit(
-        "vnc:clipboard",
-        VncClipboardEvent {
-            connection_id,
-            text,
-        },
-    );
-
-    Ok(())
+    let conns = state.connections.lock().unwrap();
+    let conn = conns.get(&connection_id).ok_or_else(|| VncError::NotFound(connection_id.clone()))?;
+    conn.input_tx
+        .send(VncInput::CopyText(text))
+        .map_err(|_| VncError::NotFound(connection_id))
 }
 
 #[tauri::command]
@@ -434,13 +514,9 @@ pub fn vnc_set_view_only(
     connection_id: String,
     view_only: bool,
 ) -> Result<(), VncError> {
-    let mut connections = state.connections.lock().unwrap();
-    let conn = connections
-        .get_mut(&connection_id)
-        .ok_or_else(|| VncError::NotFound(connection_id.clone()))?;
-
-    conn.info.view_only = view_only;
-
+    let mut conns = state.connections.lock().unwrap();
+    let conn = conns.get_mut(&connection_id).ok_or_else(|| VncError::NotFound(connection_id))?;
+    conn.view_only = view_only;
     Ok(())
 }
 
@@ -449,13 +525,12 @@ pub fn vnc_screenshot(
     state: tauri::State<'_, VncState>,
     connection_id: String,
 ) -> Result<String, VncError> {
-    let connections = state.connections.lock().unwrap();
-    if !connections.contains_key(&connection_id) {
+    let conns = state.connections.lock().unwrap();
+    if !conns.contains_key(&connection_id) {
         return Err(VncError::NotFound(connection_id));
     }
-    drop(connections);
-
-    state.backend.screenshot(&connection_id)
+    // Screenshot is taken by the frontend via Canvas.toDataURL()
+    Ok(String::new())
 }
 
 #[tauri::command]
@@ -464,13 +539,9 @@ pub fn vnc_set_scaling(
     connection_id: String,
     mode: VncScalingMode,
 ) -> Result<(), VncError> {
-    let mut connections = state.connections.lock().unwrap();
-    let conn = connections
-        .get_mut(&connection_id)
-        .ok_or_else(|| VncError::NotFound(connection_id.clone()))?;
-
-    conn.info.scaling_mode = mode;
-
+    let mut conns = state.connections.lock().unwrap();
+    let conn = conns.get_mut(&connection_id).ok_or_else(|| VncError::NotFound(connection_id))?;
+    conn.scaling_mode = mode;
     Ok(())
 }
 
@@ -478,261 +549,19 @@ pub fn vnc_set_scaling(
 pub fn vnc_list_connections(
     state: tauri::State<'_, VncState>,
 ) -> Result<Vec<VncConnectionInfo>, VncError> {
-    let connections = state.connections.lock().unwrap();
-    let list: Vec<VncConnectionInfo> = connections.values().map(|c| c.info.clone()).collect();
+    let conns = state.connections.lock().unwrap();
+    let list = conns
+        .iter()
+        .map(|(id, c)| VncConnectionInfo {
+            id: id.clone(),
+            host: c.host.clone(),
+            port: c.port,
+            status: VncConnectionStatus::Connected,
+            width: c.width,
+            height: c.height,
+            view_only: c.view_only,
+            scaling_mode: c.scaling_mode.clone(),
+        })
+        .collect();
     Ok(list)
-}
-
-// ── Tests ───────────────────────────────────────────────────────────────
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn make_config(host: &str) -> VncConfig {
-        VncConfig {
-            host: host.to_string(),
-            port: 5900,
-            password: Some("secret".to_string()),
-            vnc_auth: true,
-            vencrypt: false,
-            tls_cert_path: None,
-        }
-    }
-
-    fn make_tls_config(host: &str) -> VncConfig {
-        VncConfig {
-            host: host.to_string(),
-            port: 5900,
-            password: None,
-            vnc_auth: false,
-            vencrypt: true,
-            tls_cert_path: Some("/path/to/cert.pem".to_string()),
-        }
-    }
-
-    fn make_state() -> VncState {
-        VncState::with_stub()
-    }
-
-    /// Helper: insert a connection directly into state, returns connection id.
-    fn insert_connection(state: &VncState, host: &str) -> String {
-        let config = make_config(host);
-        let id = Uuid::new_v4().to_string();
-        let info = VncConnectionInfo {
-            id: id.clone(),
-            host: config.host.clone(),
-            port: config.port,
-            status: VncConnectionStatus::Connected,
-            width: 1024,
-            height: 768,
-            view_only: false,
-            scaling_mode: VncScalingMode::FitToWindow,
-        };
-        let connection = VncConnection {
-            info,
-            config,
-            encodings: vec![VncEncoding::Tight, VncEncoding::Zrle, VncEncoding::Raw],
-            last_clipboard: None,
-        };
-        state
-            .connections
-            .lock()
-            .unwrap()
-            .insert(id.clone(), connection);
-        id
-    }
-
-    #[test]
-    fn test_vnc_connect_auth() {
-        let state = make_state();
-        let config = make_config("192.168.1.50");
-
-        state.backend.connect("test-id", &config).unwrap();
-
-        let id = insert_connection(&state, "192.168.1.50");
-
-        let connections = state.connections.lock().unwrap();
-        assert!(connections.contains_key(&id));
-        let conn = connections.get(&id).unwrap();
-        assert_eq!(conn.info.host, "192.168.1.50");
-        assert_eq!(conn.info.port, 5900);
-        assert!(conn.config.vnc_auth);
-        assert!(matches!(conn.info.status, VncConnectionStatus::Connected));
-    }
-
-    #[test]
-    fn test_vnc_connect_tls() {
-        let state = make_state();
-        let config = make_tls_config("tls-host.local");
-
-        // Validate config passes for VeNCrypt with cert
-        assert!(validate_config(&config).is_ok());
-
-        state.backend.connect("tls-id", &config).unwrap();
-
-        let id = Uuid::new_v4().to_string();
-        let info = VncConnectionInfo {
-            id: id.clone(),
-            host: config.host.clone(),
-            port: config.port,
-            status: VncConnectionStatus::Connected,
-            width: 1024,
-            height: 768,
-            view_only: false,
-            scaling_mode: VncScalingMode::FitToWindow,
-        };
-        let connection = VncConnection {
-            info,
-            config: config.clone(),
-            encodings: vec![],
-            last_clipboard: None,
-        };
-        state
-            .connections
-            .lock()
-            .unwrap()
-            .insert(id.clone(), connection);
-
-        let connections = state.connections.lock().unwrap();
-        let conn = connections.get(&id).unwrap();
-        assert!(conn.config.vencrypt);
-        assert_eq!(
-            conn.config.tls_cert_path.as_deref(),
-            Some("/path/to/cert.pem")
-        );
-    }
-
-    #[test]
-    fn test_vnc_encodings() {
-        let state = make_state();
-        let id = insert_connection(&state, "encoding-host.local");
-
-        let new_encodings = vec![
-            VncEncoding::Hextile,
-            VncEncoding::CopyRect,
-            VncEncoding::Raw,
-        ];
-
-        state
-            .backend
-            .set_encodings(&id, &new_encodings)
-            .unwrap();
-
-        let mut connections = state.connections.lock().unwrap();
-        let conn = connections.get_mut(&id).unwrap();
-        conn.encodings = new_encodings;
-
-        assert_eq!(conn.encodings.len(), 3);
-        assert!(matches!(conn.encodings[0], VncEncoding::Hextile));
-        assert!(matches!(conn.encodings[1], VncEncoding::CopyRect));
-        assert!(matches!(conn.encodings[2], VncEncoding::Raw));
-    }
-
-    #[test]
-    fn test_vnc_clipboard() {
-        let state = make_state();
-        let id = insert_connection(&state, "clipboard-host.local");
-
-        let text = "Hello from VNC clipboard!";
-
-        state.backend.send_clipboard(&id, text).unwrap();
-
-        let mut connections = state.connections.lock().unwrap();
-        let conn = connections.get_mut(&id).unwrap();
-        conn.last_clipboard = Some(text.to_string());
-
-        assert_eq!(conn.last_clipboard.as_deref(), Some(text));
-    }
-
-    #[test]
-    fn test_vnc_scaling() {
-        let state = make_state();
-        let id = insert_connection(&state, "scale-host.local");
-
-        // Switch to Scroll
-        {
-            let mut connections = state.connections.lock().unwrap();
-            let conn = connections.get_mut(&id).unwrap();
-            conn.info.scaling_mode = VncScalingMode::Scroll;
-            assert!(matches!(conn.info.scaling_mode, VncScalingMode::Scroll));
-        }
-
-        // Switch to OneToOne
-        {
-            let mut connections = state.connections.lock().unwrap();
-            let conn = connections.get_mut(&id).unwrap();
-            conn.info.scaling_mode = VncScalingMode::OneToOne;
-            assert!(matches!(conn.info.scaling_mode, VncScalingMode::OneToOne));
-        }
-
-        // Switch back to FitToWindow
-        {
-            let mut connections = state.connections.lock().unwrap();
-            let conn = connections.get_mut(&id).unwrap();
-            conn.info.scaling_mode = VncScalingMode::FitToWindow;
-            assert!(matches!(
-                conn.info.scaling_mode,
-                VncScalingMode::FitToWindow
-            ));
-        }
-    }
-
-    #[test]
-    fn test_vnc_view_only() {
-        let state = make_state();
-        let id = insert_connection(&state, "viewonly-host.local");
-
-        // Enable view-only
-        {
-            let mut connections = state.connections.lock().unwrap();
-            let conn = connections.get_mut(&id).unwrap();
-            conn.info.view_only = true;
-        }
-
-        // Key events should be rejected in view-only mode
-        {
-            let connections = state.connections.lock().unwrap();
-            let conn = connections.get(&id).unwrap();
-            assert!(conn.info.view_only);
-        }
-
-        // Simulate what vnc_send_key does: check view_only and reject
-        let connections = state.connections.lock().unwrap();
-        let conn = connections.get(&id).unwrap();
-        if conn.info.view_only {
-            let err = VncError::ViewOnly;
-            assert_eq!(err.to_string(), "View-only mode: input rejected");
-        }
-    }
-
-    #[test]
-    fn test_vnc_screenshot() {
-        let state = make_state();
-        let id = insert_connection(&state, "screenshot-host.local");
-
-        let result = state.backend.screenshot(&id);
-        assert!(result.is_ok());
-
-        let base64_data = result.unwrap();
-        assert!(!base64_data.is_empty());
-        // Verify it starts with PNG base64 signature
-        assert!(base64_data.starts_with("iVBOR"));
-    }
-
-    #[test]
-    fn test_vnc_disconnect() {
-        let state = make_state();
-        let id = insert_connection(&state, "disconnect-host.local");
-
-        // Verify it exists
-        assert!(state.connections.lock().unwrap().contains_key(&id));
-
-        // Disconnect
-        state.backend.disconnect(&id).unwrap();
-        state.connections.lock().unwrap().remove(&id);
-
-        // Verify cleaned up
-        assert!(!state.connections.lock().unwrap().contains_key(&id));
-    }
 }

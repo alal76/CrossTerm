@@ -61,6 +61,14 @@ anyhow = "1.0"
 thiserror = "1.0"
 dirs = "5"
 
+# VNC
+vnc-rs = "0.5.3"
+
+# RDP
+ironrdp = { version = "0.14", features = ["connector", "session", "graphics", "pdu"] }
+ironrdp-blocking = "0.8"
+rustls = { version = "0.23", default-features = false, features = ["ring", "tls12", "std"] }
+
 # OS Credential Store
 keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
 

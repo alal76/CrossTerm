@@ -50,7 +50,7 @@ pub struct TelnetConfig {
     pub terminal_type: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct TelnetDataEvent {
     conn_id: String,
     data: String,
