@@ -1,0 +1,14 @@
+{
+  "cookies": [],
+  "origins": [
+    {
+      "origin": "http://localhost:1420",
+      "localStorage": [
+        {
+          "name": "crossterm-app-store",
+          "value": "{\"state\":{\"activeProfileId\":null,\"profiles\":[],\"firstLaunchComplete\":true,\"theme\":\"dark\"},\"version\":0}"
+        }
+      ]
+    }
+  ]
+}

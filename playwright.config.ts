@@ -8,6 +8,7 @@ export default defineConfig({
     baseURL: 'http://localhost:1420', // Tauri dev server
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
+    storageState: 'e2e/storage-state.json',
   },
   webServer: {
     command: 'npm run dev',

@@ -264,6 +264,9 @@ jobs:
           for i in $(seq 1 30); do nc -z 127.0.0.1 2223 && break || sleep 1; done
           echo "All services ready."
 
+      - name: Create stub frontend dist for proc macro
+        run: mkdir -p dist && printf '<!DOCTYPE html><html><body></body></html>' > dist/index.html
+
       - name: Run integration tests
         working-directory: src-tauri
         run: cargo test --features integration -- --ignored --test-threads=1
