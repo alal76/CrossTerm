@@ -1,7 +1,9 @@
 use async_trait::async_trait;
 use russh::client;
 use russh::keys::key::PublicKey;
-use russh::{ChannelId, ChannelMsg, CryptoVec, Disconnect};
+use russh::{ChannelId, ChannelMsg, Disconnect};
+#[cfg(unix)]
+use russh::CryptoVec;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
@@ -36,6 +38,7 @@ pub enum SshError {
     #[error("IO error: {0}")]
     Io(String),
     #[error("Agent forwarding error: {0}")]
+    #[allow(dead_code)]
     AgentForward(String),
     #[error("Host key changed for {0} — possible MITM attack")]
     HostKeyChanged(String),
@@ -223,6 +226,7 @@ pub(crate) struct SshClientHandler {
     #[allow(clippy::type_complexity)]
     remote_forwards: Arc<TokioMutex<HashMap<(String, u32), (String, u16)>>>,
     /// Whether SSH agent forwarding is enabled for this connection.
+    #[allow(dead_code)]
     agent_enabled: bool,
     /// Active agent forwarding sockets keyed by channel ID (Unix only).
     #[cfg(unix)]
@@ -369,15 +373,15 @@ impl client::Handler for SshClientHandler {
 
     async fn data(
         &mut self,
-        channel: ChannelId,
-        data: &[u8],
-        session: &mut client::Session,
+        _channel: ChannelId,
+        _data: &[u8],
+        _session: &mut client::Session,
     ) -> Result<(), Self::Error> {
         // Handle agent forwarding channels
         #[cfg(unix)]
-        if let Some(socket) = self.agent_sockets.get_mut(&channel) {
+        if let Some(socket) = self.agent_sockets.get_mut(&_channel) {
             // Forward data to local SSH agent
-            socket.write_all(data).await
+            socket.write_all(_data).await
                 .map_err(|e| SshError::AgentForward(e.to_string()))?;
 
             // Read response: SSH agent protocol uses 4-byte length prefix
@@ -392,7 +396,7 @@ impl client::Handler for SshClientHandler {
             let mut response = CryptoVec::new();
             response.extend(&len_buf);
             response.extend(&body);
-            session.data(channel, response);
+            _session.data(_channel, response);
             return Ok(());
         }
 
@@ -405,14 +409,14 @@ impl client::Handler for SshClientHandler {
 
     async fn server_channel_open_agent_forward(
         &mut self,
-        channel: ChannelId,
+        _channel: ChannelId,
         _session: &mut client::Session,
     ) -> Result<(), Self::Error> {
         #[cfg(unix)]
         if self.agent_enabled {
             if let Ok(sock_path) = std::env::var("SSH_AUTH_SOCK") {
                 if let Ok(stream) = TokioUnixStream::connect(&sock_path).await {
-                    self.agent_sockets.insert(channel, stream);
+                    self.agent_sockets.insert(_channel, stream);
                 }
             }
         }

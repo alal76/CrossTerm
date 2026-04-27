@@ -1411,7 +1411,7 @@ async fn platform_wifi_scan() -> Result<(Vec<WifiNetwork>, Option<WifiNetwork>, 
                 };
                 networks.push(net);
             }
-            bssid = trimmed.split(':').skip(1).next().map(|s| s.trim().to_string());
+            bssid = trimmed.split(':').nth(1).map(|s| s.trim().to_string());
             // Reset for this BSSID entry
             signal_pct = 0;
             channel = 0;
@@ -2419,9 +2419,9 @@ pub async fn network_aircrack_stop_all(
     let mut killed = 0;
     for (_, proc) in procs.iter_mut() {
         if proc.active {
-            if let Some(pid) = proc.pid {
+            if let Some(_pid) = proc.pid {
                 #[cfg(unix)]
-                unsafe { libc::kill(pid as i32, libc::SIGTERM); }
+                unsafe { libc::kill(_pid as i32, libc::SIGTERM); }
                 proc.active = false;
                 killed += 1;
             }
