@@ -400,7 +400,8 @@ async fn reverse_dns(ip: IpAddr) -> Option<String> {
         .flatten()
 }
 
-/// System-level reverse DNS via getnameinfo(3).
+/// System-level reverse DNS via getnameinfo(3) — Unix only.
+#[cfg(unix)]
 fn dns_lookup_reverse(ip: IpAddr) -> Option<String> {
     use std::ffi::CStr;
     use std::mem;
@@ -411,7 +412,6 @@ fn dns_lookup_reverse(ip: IpAddr) -> Option<String> {
         IpAddr::V4(v4) => unsafe {
             let mut sin: libc::sockaddr_in = mem::zeroed();
             sin.sin_family = libc::AF_INET as libc::sa_family_t;
-            // from_ne_bytes: bytes in memory match the octets directly (network order)
             sin.sin_addr.s_addr = u32::from_ne_bytes(v4.octets());
             libc::getnameinfo(
                 &sin as *const libc::sockaddr_in as *const libc::sockaddr,
@@ -445,6 +445,11 @@ fn dns_lookup_reverse(ip: IpAddr) -> Option<String> {
     } else {
         None
     }
+}
+
+#[cfg(not(unix))]
+fn dns_lookup_reverse(_ip: IpAddr) -> Option<String> {
+    None
 }
 
 /// Guess OS from open ports heuristic.
@@ -1394,7 +1399,8 @@ async fn platform_wifi_scan() -> Result<(Vec<WifiNetwork>, Option<WifiNetwork>, 
             // Save previous network if any
             if bssid.is_some() {
                 let is_current = ssid == current_ssid;
-                let (channel, channel_width, freq_hint) = parse_channel_info(&format!("{}", channel));
+                let ch_str = channel.to_string();
+                let (channel, channel_width, freq_hint) = parse_channel_info(&ch_str);
                 let band = parse_band_from_channel(channel, freq_hint);
                 let sec = security.clone();
                 let net = WifiNetwork {
@@ -1421,7 +1427,8 @@ async fn platform_wifi_scan() -> Result<(Vec<WifiNetwork>, Option<WifiNetwork>, 
     // Push last entry
     if bssid.is_some() || !ssid.is_empty() {
         let is_current = ssid == current_ssid;
-        let (channel, channel_width, freq_hint) = parse_channel_info(&format!("{}", channel));
+        let ch_str = channel.to_string();
+        let (channel, channel_width, freq_hint) = parse_channel_info(&ch_str);
         let band = parse_band_from_channel(channel, freq_hint);
         networks.push(WifiNetwork {
             ssid, bssid, channel, channel_width_mhz: channel_width,
@@ -1750,12 +1757,10 @@ pub async fn network_aircrack_check() -> Result<AircrackToolStatus, NetworkError
     let version = get_aircrack_version().await;
 
     // Check if we need root/sudo
-    let needs_root = if cfg!(unix) {
-        let uid = unsafe { libc::getuid() };
-        uid != 0
-    } else {
-        true
-    };
+    #[cfg(unix)]
+    let needs_root = unsafe { libc::getuid() != 0 };
+    #[cfg(not(unix))]
+    let needs_root = true;
 
     Ok(AircrackToolStatus {
         aircrack_ng: aircrack,
