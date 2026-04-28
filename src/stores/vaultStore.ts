@@ -61,7 +61,8 @@ export const useVaultStore = create<VaultState>((set, get) => ({
 
   listVaults: async () => {
     try {
-      const vaults = await invoke<VaultInfo[]>("vault_list", { profileId: getProfileId() });
+      const rawVaults = await invoke<VaultInfo[]>("vault_list", { profileId: getProfileId() });
+      const vaults: VaultInfo[] = Array.isArray(rawVaults) ? rawVaults : [];
       const lockStates: Record<string, boolean> = {};
       for (const v of vaults) {
         try {

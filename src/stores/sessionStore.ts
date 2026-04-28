@@ -53,7 +53,7 @@ export const useSessionStore = create<SessionState>((set) => ({
   loadSessions: async () => {
     try {
       const sessions = await invoke<Session[]>("session_list");
-      set({ sessions });
+      set({ sessions: Array.isArray(sessions) ? sessions : [] });
     } catch {
       // Profile may not be active yet
     }
