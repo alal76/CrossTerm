@@ -1231,12 +1231,14 @@ export default function App() {
           await invoke("profile_switch", { id: profileId }).catch(() => {});
         }
         const settings = await invoke<{ theme?: ThemeVariant }>("settings_get");
+        // Only proceed when the backend actually returned settings (undefined = no backend / stub)
+        if (settings === undefined) return;
         if (settings?.theme) {
           setTheme(settings.theme);
         }
         // Load saved sessions from backend
         await useSessionStore.getState().loadSessions();
-        // If settings were loaded successfully, first launch is already done
+        // Backend confirmed reachable — mark first launch complete
         setFirstLaunchComplete(true);
       } catch {
         // Backend not ready or first launch — wizard will handle it

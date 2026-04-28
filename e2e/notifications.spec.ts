@@ -6,6 +6,8 @@ test.describe('Notifications', () => {
   // Assertions: Tab closes
   test('E2E-14: middle-click on tab closes it', async ({ page }) => {
     await page.goto('/');
+    // Wait for the app to be ready before sending keyboard shortcuts
+    await expect(page.locator('header')).toBeVisible();
 
     // Open two tabs
     await page.keyboard.press('Control+t');

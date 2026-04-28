@@ -7,25 +7,22 @@ test.describe('Settings & Theme', () => {
   test('E2E-08: theme switching updates css variables', async ({ page }) => {
     await page.goto('/');
 
-    // By default the app should be in dark mode
+    // By default the app should be in dark mode (set in storage state)
     const html = page.locator('html');
     await expect(html).toHaveClass(/dark/);
 
-    // Click the theme toggle button in the TitleBar
-    // The button has a title like "Dark" or data-tooltip with the theme name
-    const themeBtn = page.locator('header button').filter({ has: page.locator('svg') }).first();
-    await themeBtn.click();
+    // The theme toggle button in the TitleBar has a title matching the current theme name
+    // Starting from dark → button title is "Dark"
+    await page.locator('header button[title="Dark"]').click();
     await page.waitForTimeout(300);
 
     // After one click, it should switch to light mode
     await expect(html).toHaveClass(/light/);
 
-    // Click again to go to system, then one more to go back to dark
-    await themeBtn.click();
+    // Click again to go to system, then one more to cycle back to dark
+    await page.locator('header button[title="Light"]').click();
     await page.waitForTimeout(300);
-    // Now it's "system" mode — resolved theme depends on prefers-color-scheme
-    // Click once more to cycle back to dark
-    await themeBtn.click();
+    await page.locator('header button[title="System"]').click();
     await page.waitForTimeout(300);
 
     await expect(html).toHaveClass(/dark/);

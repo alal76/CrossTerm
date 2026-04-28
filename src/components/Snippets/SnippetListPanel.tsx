@@ -25,10 +25,10 @@ export default function SnippetListPanel() {
     try {
       if (searchQuery.trim()) {
         const results = await invoke<Snippet[]>("snippet_search", { query: searchQuery });
-        setSnippets(results);
+        setSnippets(Array.isArray(results) ? results : []);
       } else {
         const results = await invoke<Snippet[]>("snippet_list");
-        setSnippets(results);
+        setSnippets(Array.isArray(results) ? results : []);
       }
     } catch {
       // Backend unavailable during dev

@@ -86,6 +86,8 @@ test.describe('Session Management', () => {
   // Assertions: Correct tab active, tab 3 gone
   test('E2E-04: tab management open close and switch', async ({ page }) => {
     await page.goto('/');
+    // Wait for the app to be ready before sending keyboard shortcuts
+    await expect(page.locator('header')).toBeVisible();
 
     // Open 3 tabs using Ctrl+T
     await page.keyboard.press('Control+t');
@@ -140,6 +142,7 @@ test.describe('Session Management', () => {
   // Assertions: Tab width changes
   test('E2E-13: pin and unpin tab changes tab appearance', async ({ page }) => {
     await page.goto('/');
+    await expect(page.locator('header')).toBeVisible();
 
     // Open a tab
     await page.keyboard.press('Control+t');

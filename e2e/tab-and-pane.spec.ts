@@ -73,7 +73,7 @@ test.describe('Tab & Pane Management', () => {
     await page.waitForTimeout(200);
 
     // The Snippets empty state should be visible
-    await expect(bottomPanel.getByText('No snippets saved')).toBeVisible();
+    await expect(bottomPanel.getByText('No snippets yet')).toBeVisible();
 
     // Switch to Audit Log mode
     await bottomPanel.getByText('Audit Log').click();

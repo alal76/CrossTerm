@@ -205,7 +205,7 @@ export default function VaultUnlock() {
 
   if (checkingVault) {
     return (
-      <div className="flex items-center justify-center w-full h-full bg-surface-primary">
+      <div className="fixed inset-0 flex items-center justify-center bg-surface-primary z-50">
         <Loader2 size={24} className="animate-spin text-accent-primary" />
       </div>
     );
@@ -216,7 +216,7 @@ export default function VaultUnlock() {
   }
 
   return (
-    <div className="flex items-center justify-center w-full h-full bg-surface-primary">
+    <div className="fixed inset-0 flex items-center justify-center bg-surface-primary z-50">
       <div className="w-full max-w-sm px-6">
         <VaultHeader isNewVault={isNewVault} t={t} />
 

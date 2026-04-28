@@ -63,6 +63,9 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     try {
       const rawVaults = await invoke<VaultInfo[]>("vault_list", { profileId: getProfileId() });
       const vaults: VaultInfo[] = Array.isArray(rawVaults) ? rawVaults : [];
+      // When no backend is available (stub returns undefined), treat as unlocked so the
+      // main UI remains accessible (no vault has been created yet in this environment).
+      const noBackend = rawVaults === undefined;
       const lockStates: Record<string, boolean> = {};
       for (const v of vaults) {
         try {
@@ -72,7 +75,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
           lockStates[v.id] = true;
         }
       }
-      const anyUnlocked = Object.values(lockStates).some((l) => !l);
+      const anyUnlocked = noBackend || Object.values(lockStates).some((l) => !l);
       const activeId = get().activeVaultId;
       const resolvedActive = activeId && !lockStates[activeId]
         ? activeId

@@ -166,4 +166,12 @@ export const useAppStore = create<AppState>()(persist((set) => ({
     firstLaunchComplete: state.firstLaunchComplete,
     theme: state.theme,
   }),
+  merge: (persistedState, currentState) => {
+    const persisted = persistedState as Partial<AppState>;
+    const theme = persisted.theme ?? currentState.theme;
+    const resolvedTheme = theme === ThemeVariant.System
+      ? getSystemTheme()
+      : theme;
+    return { ...currentState, ...persisted, resolvedTheme };
+  },
 }));
