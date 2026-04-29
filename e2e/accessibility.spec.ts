@@ -48,7 +48,8 @@ test.describe('Accessibility', () => {
     expect(focusedAfter).toBeTruthy();
 
     // Verify the live announcement region exists for screen readers
-    const liveRegion = page.locator('[aria-live="polite"]');
+    // Use aria-atomic="true" to distinguish it from the toast notification container
+    const liveRegion = page.locator('[aria-live="polite"][aria-atomic="true"]');
     await expect(liveRegion).toBeAttached();
 
     // Verify keyboard shortcut: F1 opens help panel
