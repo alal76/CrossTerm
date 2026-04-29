@@ -7,6 +7,10 @@
         {
           "name": "crossterm-app-store",
           "value": "{\"state\":{\"activeProfileId\":null,\"profiles\":[],\"firstLaunchComplete\":true,\"theme\":\"dark\"},\"version\":0}"
+        },
+        {
+          "name": "crossterm:whats-new-dismissed",
+          "value": "1.0.0"
         }
       ]
     }
