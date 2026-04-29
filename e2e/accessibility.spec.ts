@@ -25,8 +25,8 @@ test.describe('Accessibility', () => {
     const sidebar = page.locator('nav');
     await expect(sidebar).toBeVisible();
 
-    // Region F: Status bar (role="status")
-    const statusBar = page.locator('[role="status"]');
+    // Region F: Status bar (footer element — <output> inside has implicit role="status")
+    const statusBar = page.locator('footer');
     await expect(statusBar).toBeVisible();
 
     // Test keyboard navigation: Tab through elements

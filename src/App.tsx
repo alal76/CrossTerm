@@ -1073,7 +1073,7 @@ function StatusBar({
   }, [remoteMonitorEnabled, activeConnectionId, setRemoteStats]);
 
   return (
-    <footer role="status" className="flex items-center h-7 px-3 bg-surface-primary border-t border-border-subtle text-[11px] text-text-secondary no-select shrink-0 gap-4">
+    <footer className="flex items-center h-7 px-3 bg-surface-primary border-t border-border-subtle text-[11px] text-text-secondary no-select shrink-0 gap-4">
       <output>
         <span className="flex items-center gap-1">
           <User size={11} />
