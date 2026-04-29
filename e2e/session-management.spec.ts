@@ -19,13 +19,13 @@ test.describe('Session Management', () => {
     await expect(page.getByText('Create a Profile')).toBeVisible();
     const profileInput = page.locator('#profile-name');
     await profileInput.fill('Test Profile');
-    await page.getByText('Create').first().click();
+    await page.getByRole('button', { name: 'Create' }).click();
 
     // Step 2: Set Master Password
     await expect(page.getByText('Set Master Password')).toBeVisible();
     await page.locator('#master-password').fill('TestPassword123!');
     await page.locator('#confirm-password').fill('TestPassword123!');
-    await page.getByText('Create').first().click();
+    await page.getByRole('button', { name: 'Create' }).click();
 
     // Step 3: Choose Theme
     await expect(page.getByText('Choose a Theme')).toBeVisible();
@@ -121,9 +121,11 @@ test.describe('Session Management', () => {
   // Assertions: Session visible in sidebar
   test('E2E-12: edit session updates name in tree', async ({ page }) => {
     await page.goto('/');
+    await expect(page.locator('header')).toBeVisible();
 
     // Ensure sidebar shows Sessions panel
     await page.locator('nav button[title="Sessions"]').click();
+    await page.waitForTimeout(300);
 
     // Create a session via Ctrl+T
     await page.keyboard.press('Control+t');

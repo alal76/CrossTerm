@@ -12,8 +12,8 @@ test.describe('Help System', () => {
     await page.keyboard.press('Control+,');
     await page.waitForTimeout(500);
 
-    // Settings panel should be visible
-    await expect(page.getByText('Settings')).toBeVisible();
+    // Settings panel should be visible — check for nav category buttons (title label has CSS uppercase transform)
+    await expect(page.getByText('Appearance')).toBeVisible();
 
     // Navigate to Appearance category
     const appearanceBtn = page.getByText('Appearance');

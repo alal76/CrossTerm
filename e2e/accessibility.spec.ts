@@ -13,6 +13,10 @@ test.describe('Accessibility', () => {
     const header = page.locator('header');
     await expect(header).toBeVisible();
 
+    // Open a tab so the tablist has content and is visible
+    await page.keyboard.press('Control+t');
+    await page.waitForTimeout(300);
+
     // Region B: Tab bar (role="tablist")
     const tablist = page.locator('[role="tablist"]');
     await expect(tablist).toBeVisible();

@@ -16,7 +16,7 @@ test.describe('Command Palette', () => {
     await page.waitForTimeout(300);
 
     // The command palette dialog should appear
-    const paletteDialog = page.locator('[role="dialog"]');
+    const paletteDialog = page.getByRole('dialog');
     await expect(paletteDialog).toBeVisible();
 
     // Type "toggle" to filter commands
