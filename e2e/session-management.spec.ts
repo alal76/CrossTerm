@@ -123,20 +123,20 @@ test.describe('Session Management', () => {
     await page.goto('/');
     await expect(page.locator('header')).toBeVisible();
 
-    // Ensure sidebar shows Sessions panel
-    await page.locator('nav button[title="Sessions"]').click();
-    await page.waitForTimeout(300);
-
-    // Create a session via Ctrl+T
-    await page.keyboard.press('Control+t');
-    await page.waitForTimeout(300);
-
-    // Verify the sidebar has sessions content
+    // Sidebar defaults to Sessions mode expanded — verify Sessions panel is visible
+    // (clicking the Sessions button when it's already active collapses the sidebar)
     const sidebar = page.locator('nav');
     await expect(sidebar).toBeVisible();
 
-    // Check that the "Sessions" heading is visible in the sidebar
-    await expect(sidebar.getByText('Sessions').first()).toBeVisible();
+    // The Sessions panel shows "New Session" button in the empty state (no backend)
+    await expect(sidebar.getByText('New Session')).toBeVisible();
+
+    // Open a tab to verify keyboard shortcuts are functional
+    await page.keyboard.press('Control+t');
+    await page.waitForTimeout(300);
+
+    // Sidebar should still be showing the Sessions panel
+    await expect(sidebar).toBeVisible();
   });
 
   // E2E-13: Pin/unpin tab

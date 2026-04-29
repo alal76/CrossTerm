@@ -23,7 +23,7 @@ test.describe('Help System', () => {
     }
 
     // Look for the Font Size setting
-    const fontSizeLabel = page.getByText('Font Size');
+    const fontSizeLabel = page.getByText('Font Size', { exact: true });
     await expect(fontSizeLabel).toBeVisible();
 
     // Find the font size number input — verify it has a numeric value and is editable
