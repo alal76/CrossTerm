@@ -38,7 +38,16 @@
       "Bash(git commit -m ' *)",
       "Bash(git push *)",
       "Bash(gh release *)",
-      "Bash(cargo clippy *)"
+      "Bash(cargo clippy *)",
+      "Bash(cargo cyclonedx *)",
+      "Bash(git -C /Users/alal/Code/CrossTerm add .github/workflows/ci.yml src-tauri/src/terminal/mod.rs)",
+      "Bash(grep -v \"\\\\.skip\\\\|test\\('$\")",
+      "Bash(npm test *)",
+      "Bash(GH_NO_UPDATE_NOTIFIER=1 gh run download 25094906988 --name \"playwright-report\" -D /tmp/playwright-report-25094906988)",
+      "Read(//private/tmp/e2e-report-25094906988/**)"
+    ],
+    "additionalDirectories": [
+      "/Users/alal/.cache/gh"
     ]
   }
 }
