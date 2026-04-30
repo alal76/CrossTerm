@@ -49,7 +49,7 @@ describe("CredentialManager", () => {
       ],
     });
 
-    render(<CredentialManager />);
+    render(<CredentialManager onClose={() => {}} />);
 
     expect(screen.getByText("Production DB")).toBeInTheDocument();
     expect(screen.getByText("admin")).toBeInTheDocument();
@@ -60,7 +60,7 @@ describe("CredentialManager", () => {
   it("FT-C-15: shows form fields for password credential type", async () => {
     const user = userEvent.setup();
 
-    render(<CredentialManager />);
+    render(<CredentialManager onClose={() => {}} />);
 
     // Click the Add button to open the form (exact match to avoid "Add Credential" empty-state btn)
     const addButton = screen.getByRole("button", { name: /^Add$/ });

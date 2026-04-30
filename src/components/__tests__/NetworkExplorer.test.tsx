@@ -2,9 +2,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import '@/i18n';
 import NetworkExplorer from '@/components/NetworkTools/NetworkExplorer';
+import { ToastProvider } from '@/components/Shared/Toast';
 import { invoke } from '@tauri-apps/api/core';
 
 const mockInvoke = vi.mocked(invoke);
+
+function renderWithToast(ui: React.ReactElement) {
+  return render(<ToastProvider>{ui}</ToastProvider>);
+}
 
 describe('NetworkExplorer', () => {
   beforeEach(() => {
@@ -12,7 +17,7 @@ describe('NetworkExplorer', () => {
   });
 
   it('renders the explore heading and CIDR input', () => {
-    render(<NetworkExplorer />);
+    renderWithToast(<NetworkExplorer />);
     expect(screen.getByRole('heading', { name: 'Network Explore' })).toBeInTheDocument();
     expect(
       screen.getByPlaceholderText(/Enter CIDR range/)
@@ -20,14 +25,14 @@ describe('NetworkExplorer', () => {
   });
 
   it('disables scan button when CIDR is empty', () => {
-    render(<NetworkExplorer />);
+    renderWithToast(<NetworkExplorer />);
     const buttons = screen.getAllByRole('button');
     const scanButton = buttons.find((b) => b.textContent?.includes('Network Explore') && b.hasAttribute('disabled'));
     expect(scanButton).toBeDisabled();
   });
 
   it('enables scan button when CIDR is entered', () => {
-    render(<NetworkExplorer />);
+    renderWithToast(<NetworkExplorer />);
     const input = screen.getByPlaceholderText(/Enter CIDR range/);
     fireEvent.change(input, { target: { value: '192.168.1.0/24' } });
     const buttons = screen.getAllByRole('button');
@@ -37,7 +42,7 @@ describe('NetworkExplorer', () => {
 
   it('invokes network_explore_start on scan', async () => {
     mockInvoke.mockResolvedValueOnce('scan-id-123');
-    render(<NetworkExplorer />);
+    renderWithToast(<NetworkExplorer />);
     const input = screen.getByPlaceholderText(/Enter CIDR range/);
     fireEvent.change(input, { target: { value: '10.0.0.0/28' } });
     const buttons = screen.getAllByRole('button');
@@ -54,14 +59,14 @@ describe('NetworkExplorer', () => {
   });
 
   it('shows empty state when no results', () => {
-    render(<NetworkExplorer />);
+    renderWithToast(<NetworkExplorer />);
     expect(
       screen.getByText(/Enter a CIDR range to discover/)
     ).toBeInTheDocument();
   });
 
   it('toggles service filters panel', () => {
-    render(<NetworkExplorer />);
+    renderWithToast(<NetworkExplorer />);
     const filterButton = screen.getByText('Service Filters');
     fireEvent.click(filterButton);
     expect(screen.getByText('SSH (22)')).toBeInTheDocument();
@@ -73,7 +78,7 @@ describe('NetworkExplorer', () => {
   });
 
   it('accepts extra ports input', () => {
-    render(<NetworkExplorer />);
+    renderWithToast(<NetworkExplorer />);
     fireEvent.click(screen.getByText('Service Filters'));
     const extraInput = screen.getByPlaceholderText(/Extra ports/);
     fireEvent.change(extraInput, { target: { value: '2222, 8080' } });

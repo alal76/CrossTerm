@@ -44,7 +44,9 @@
       "Bash(grep -v \"\\\\.skip\\\\|test\\('$\")",
       "Bash(npm test *)",
       "Bash(GH_NO_UPDATE_NOTIFIER=1 gh run download 25094906988 --name \"playwright-report\" -D /tmp/playwright-report-25094906988)",
-      "Read(//private/tmp/e2e-report-25094906988/**)"
+      "Read(//private/tmp/e2e-report-25094906988/**)",
+      "Bash(git tag *)",
+      "Bash(grep -E \"\\\\.\\(tsx|ts|jsx|js\\)$\")"
     ],
     "additionalDirectories": [
       "/Users/alal/.cache/gh"

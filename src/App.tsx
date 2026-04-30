@@ -12,6 +12,7 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   User,
   Sun,
   Moon,
@@ -29,6 +30,12 @@ import {
   KeyRound,
   Bell,
   ExternalLink,
+  Settings,
+  Trash2,
+  Tv2,
+  Eye,
+  EyeOff,
+  Loader2,
 } from "lucide-react";
 import { useAppStore } from "@/stores/appStore";
 import { useSessionStore } from "@/stores/sessionStore";
@@ -108,7 +115,334 @@ function StatusDot({ status }: { readonly status: ConnectionStatus }) {
 
 // ─── Region A: Title Bar ───────────────────────────────────────
 
-function TitleBar() {
+interface TitleBarActions {
+  onNewLocalShell: () => void;
+  onNewSSH: () => void;
+  onNewConnection: (type: SessionType) => void;
+  onOpenNetworkExplorer: () => void;
+  onOpenCredentials: () => void;
+  onOpenSettings: () => void;
+  onLockVault: () => void;
+  onDeleteVault: () => void;
+  onChangePassword: () => void;
+}
+
+function ConnectionsMenu({
+  anchorRef,
+  onClose,
+  onNewLocalShell,
+  onNewSSH,
+  onNewConnection,
+  onOpenNetworkExplorer,
+}: {
+  readonly anchorRef: React.RefObject<HTMLButtonElement | null>;
+  readonly onClose: () => void;
+  readonly onNewLocalShell: () => void;
+  readonly onNewSSH: () => void;
+  readonly onNewConnection: (type: SessionType) => void;
+  readonly onOpenNetworkExplorer: () => void;
+}) {
+  const { t } = useTranslation();
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (
+        menuRef.current && !menuRef.current.contains(e.target as Node) &&
+        anchorRef.current && !anchorRef.current.contains(e.target as Node)
+      ) { onClose(); }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [onClose, anchorRef]);
+
+  const rect = anchorRef.current?.getBoundingClientRect();
+  const left = rect ? rect.left : 0;
+  const top = rect ? rect.bottom + 2 : 40;
+
+  const items = [
+    { label: t("newTabMenu.localShell"), icon: <Terminal size={13} />, action: onNewLocalShell },
+    { label: t("newTabMenu.ssh"), icon: <Globe size={13} />, action: onNewSSH },
+    { label: t("sessionTypes.telnet"), icon: <Radio size={13} />, action: () => onNewConnection(SessionType.Telnet) },
+    { label: t("sessionTypes.rdp"), icon: <Monitor size={13} />, action: () => onNewConnection(SessionType.RDP) },
+    { label: t("sessionTypes.vnc"), icon: <Tv2 size={13} />, action: () => onNewConnection(SessionType.VNC) },
+    { label: t("newTabMenu.sftp"), icon: <FolderTree size={13} />, action: () => onNewConnection(SessionType.SFTP) },
+  ];
+
+  return (
+    <div
+      ref={menuRef}
+      className="fixed z-[9000] min-w-[200px] bg-surface-elevated border border-border-default rounded-lg shadow-[var(--shadow-3)] py-1 overflow-hidden"
+      style={{ left, top, animation: "paletteIn var(--duration-short) var(--ease-decelerate)" }}
+    >
+      {items.map((item) => (
+        <button
+          key={item.label}
+          onClick={() => { item.action(); onClose(); }}
+          className="flex items-center gap-2.5 w-full px-3 py-1.5 text-xs text-left text-text-secondary hover:bg-surface-secondary hover:text-text-primary transition-colors"
+        >
+          <span className="shrink-0 text-text-disabled">{item.icon}</span>
+          {item.label}
+        </button>
+      ))}
+      <div className="h-px bg-border-subtle mx-2 my-1" />
+      <button
+        onClick={() => { onOpenNetworkExplorer(); onClose(); }}
+        className="flex items-center gap-2.5 w-full px-3 py-1.5 text-xs text-left text-text-secondary hover:bg-surface-secondary hover:text-text-primary transition-colors"
+      >
+        <Radar size={13} className="shrink-0 text-text-disabled" />
+        {t("network.explore")}
+      </button>
+    </div>
+  );
+}
+
+function VaultMenu({
+  anchorRef,
+  onClose,
+  onOpenCredentials,
+  onLockVault,
+  onDeleteVault,
+  onChangePassword,
+}: {
+  readonly anchorRef: React.RefObject<HTMLButtonElement | null>;
+  readonly onClose: () => void;
+  readonly onOpenCredentials: () => void;
+  readonly onLockVault: () => void;
+  readonly onDeleteVault: () => void;
+  readonly onChangePassword: () => void;
+}) {
+  const { t } = useTranslation();
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (
+        menuRef.current && !menuRef.current.contains(e.target as Node) &&
+        anchorRef.current && !anchorRef.current.contains(e.target as Node)
+      ) { onClose(); }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [onClose, anchorRef]);
+
+  const rect = anchorRef.current?.getBoundingClientRect();
+  const left = rect ? rect.left : 0;
+  const top = rect ? rect.bottom + 2 : 40;
+
+  return (
+    <div
+      ref={menuRef}
+      className="fixed z-[9000] min-w-[200px] bg-surface-elevated border border-border-default rounded-lg shadow-[var(--shadow-3)] py-1 overflow-hidden"
+      style={{ left, top, animation: "paletteIn var(--duration-short) var(--ease-decelerate)" }}
+    >
+      <button
+        onClick={() => { onOpenCredentials(); onClose(); }}
+        className="flex items-center gap-2.5 w-full px-3 py-1.5 text-xs text-left text-text-secondary hover:bg-surface-secondary hover:text-text-primary transition-colors"
+      >
+        <KeyRound size={13} className="shrink-0 text-text-disabled" />
+        {t("vault.credentials")}
+      </button>
+      <button
+        onClick={() => { onChangePassword(); onClose(); }}
+        className="flex items-center gap-2.5 w-full px-3 py-1.5 text-xs text-left text-text-secondary hover:bg-surface-secondary hover:text-text-primary transition-colors"
+      >
+        <Lock size={13} className="shrink-0 text-text-disabled" />
+        {t("vault.changePassword")}
+      </button>
+      <div className="h-px bg-border-subtle mx-2 my-1" />
+      <button
+        onClick={() => { onLockVault(); onClose(); }}
+        className="flex items-center gap-2.5 w-full px-3 py-1.5 text-xs text-left text-text-secondary hover:bg-surface-secondary hover:text-text-primary transition-colors"
+      >
+        <Lock size={13} className="shrink-0 text-text-disabled" />
+        {t("vault.lockAll")}
+      </button>
+      <button
+        onClick={() => { onDeleteVault(); onClose(); }}
+        className="flex items-center gap-2.5 w-full px-3 py-1.5 text-xs text-left text-status-disconnected hover:bg-status-disconnected/10 transition-colors"
+      >
+        <Trash2 size={13} className="shrink-0" />
+        {t("vault.deleteVault")}
+      </button>
+    </div>
+  );
+}
+
+function VaultDeleteDialog({ onClose }: { readonly onClose: () => void }) {
+  const { t } = useTranslation();
+  const vaults = useVaultStore((s) => s.vaults);
+  const activeVaultId = useVaultStore((s) => s.activeVaultId);
+  const deleteVault = useVaultStore((s) => s.deleteVault);
+  const [password, setPassword] = useState("");
+  const [showPw, setShowPw] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const vault = vaults.find((v) => v.id === activeVaultId) ?? vaults[0];
+
+  async function handleDelete() {
+    if (!vault) return;
+    if (!password) { setError(t("vault.passwordRequired")); return; }
+    setLoading(true);
+    setError(null);
+    try {
+      await deleteVault(vault.id, password);
+      onClose();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <dialog open className="fixed inset-0 z-[9100] flex items-center justify-center" aria-modal="true">
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
+      <div className="relative w-full max-w-sm bg-surface-elevated border border-border-default rounded-xl shadow-[var(--shadow-3)] p-5 flex flex-col gap-4">
+        <h2 className="text-sm font-semibold text-text-primary">{t("vault.deleteVault")}</h2>
+        <p className="text-xs text-text-secondary">
+          {t("vault.deleteVaultConfirm", { name: vault?.name ?? "vault" })}
+        </p>
+        <div className="relative">
+          <input
+            type={showPw ? "text" : "password"}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleDelete()}
+            placeholder={t("vault.currentPasswordPlaceholder")}
+            className="w-full px-3 py-2 pr-9 rounded-lg text-xs bg-surface-secondary border border-border-default text-text-primary placeholder:text-text-disabled focus:border-border-focus outline-none"
+            autoFocus
+          />
+          <button
+            type="button"
+            onClick={() => setShowPw((v) => !v)}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary"
+            tabIndex={-1}
+          >
+            {showPw ? <EyeOff size={14} /> : <Eye size={14} />}
+          </button>
+        </div>
+        {error && <p className="text-xs text-status-disconnected">{error}</p>}
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 text-xs rounded-lg border border-border-default hover:bg-surface-secondary text-text-secondary transition-colors"
+          >
+            {t("actions.cancel")}
+          </button>
+          <button
+            onClick={handleDelete}
+            disabled={loading}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-status-disconnected/80 hover:bg-status-disconnected text-white disabled:opacity-50 transition-colors"
+          >
+            {loading ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+            {t("actions.delete")}
+          </button>
+        </div>
+      </div>
+    </dialog>
+  );
+}
+
+function ChangePasswordDialog({ onClose }: { readonly onClose: () => void }) {
+  const { t } = useTranslation();
+  const vaults = useVaultStore((s) => s.vaults);
+  const activeVaultId = useVaultStore((s) => s.activeVaultId);
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [showPw, setShowPw] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState(false);
+
+  const vault = vaults.find((v) => v.id === activeVaultId) ?? vaults[0];
+
+  async function handleSave() {
+    if (!current || !next) { setError(t("vault.passwordRequired")); return; }
+    if (next !== confirm) { setError(t("vault.passwordMismatch")); return; }
+    setLoading(true);
+    setError(null);
+    try {
+      await invoke("vault_change_password", {
+        vaultId: vault?.id,
+        currentPassword: current,
+        newPassword: next,
+      });
+      setSuccess(true);
+      setTimeout(onClose, 1200);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const fieldCls = "w-full px-3 py-2 rounded-lg text-xs bg-surface-secondary border border-border-default text-text-primary placeholder:text-text-disabled focus:border-border-focus outline-none";
+
+  return (
+    <dialog open className="fixed inset-0 z-[9100] flex items-center justify-center" aria-modal="true">
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
+      <div className="relative w-full max-w-sm bg-surface-elevated border border-border-default rounded-xl shadow-[var(--shadow-3)] p-5 flex flex-col gap-4">
+        <h2 className="text-sm font-semibold text-text-primary">{t("vault.changePassword")}</h2>
+        <div className="flex flex-col gap-3">
+          <div className="relative">
+            <label className="block text-[11px] text-text-secondary mb-1">{t("vault.currentPassword")}</label>
+            <input
+              type={showPw ? "text" : "password"}
+              value={current}
+              onChange={(e) => setCurrent(e.target.value)}
+              className={fieldCls}
+              autoFocus
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] text-text-secondary mb-1">{t("vault.newPassword")}</label>
+            <input
+              type={showPw ? "text" : "password"}
+              value={next}
+              onChange={(e) => setNext(e.target.value)}
+              className={fieldCls}
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] text-text-secondary mb-1">{t("vault.confirmPassword")}</label>
+            <input
+              type={showPw ? "text" : "password"}
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleSave()}
+              className={fieldCls}
+            />
+          </div>
+          <label className="flex items-center gap-2 text-xs text-text-secondary cursor-pointer select-none">
+            <input type="checkbox" checked={showPw} onChange={(e) => setShowPw(e.target.checked)} className="accent-accent-primary" />
+            {showPw ? <EyeOff size={12} /> : <Eye size={12} />}
+            Show passwords
+          </label>
+        </div>
+        {error && <p className="text-xs text-status-disconnected">{error}</p>}
+        {success && <p className="text-xs text-status-connected">Password changed successfully!</p>}
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-3 py-1.5 text-xs rounded-lg border border-border-default hover:bg-surface-secondary text-text-secondary transition-colors">
+            {t("actions.cancel")}
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={loading || success}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-interactive-default hover:bg-interactive-hover text-text-primary disabled:opacity-50 transition-colors"
+          >
+            {loading ? <Loader2 size={12} className="animate-spin" /> : <Lock size={12} />}
+            {t("actions.save")}
+          </button>
+        </div>
+      </div>
+    </dialog>
+  );
+}
+
+function TitleBar({ actions }: { readonly actions: TitleBarActions }) {
   const { t } = useTranslation();
   const activeProfileId = useAppStore((s) => s.activeProfileId);
   const profiles = useAppStore((s) => s.profiles);
@@ -116,6 +450,11 @@ function TitleBar() {
   const setTheme = useAppStore((s) => s.setTheme);
   const showNotificationHistory = useAppStore((s) => s.showNotificationHistory);
   const setShowNotificationHistory = useAppStore((s) => s.setShowNotificationHistory);
+
+  const [showConnMenu, setShowConnMenu] = useState(false);
+  const [showVaultMenu, setShowVaultMenu] = useState(false);
+  const connBtnRef = useRef<HTMLButtonElement | null>(null);
+  const vaultBtnRef = useRef<HTMLButtonElement | null>(null);
 
   const activeProfile = profiles.find((p) => p.id === activeProfileId);
 
@@ -133,18 +472,78 @@ function TitleBar() {
 
   return (
     <header
-      className="flex items-center h-10 px-3 bg-surface-primary border-b border-border-subtle no-select shrink-0"
+      className="flex items-center h-10 px-3 bg-surface-primary border-b border-border-subtle no-select shrink-0 gap-0.5"
       data-tauri-drag-region
     >
-      <span className="text-sm font-semibold text-accent-primary mr-3 tracking-wide">
+      <span className="text-sm font-semibold text-accent-primary mr-2 tracking-wide shrink-0">
         CrossTerm
       </span>
+
+      {/* Connections menu */}
+      <button
+        ref={connBtnRef}
+        onClick={() => { setShowConnMenu((v) => !v); setShowVaultMenu(false); }}
+        className={clsx(
+          "flex items-center gap-1 px-2.5 py-1 rounded text-xs transition-colors shrink-0",
+          showConnMenu
+            ? "bg-surface-elevated text-text-primary"
+            : "text-text-secondary hover:text-text-primary hover:bg-surface-elevated"
+        )}
+      >
+        Connect
+        <ChevronDown size={11} className={clsx("transition-transform", showConnMenu && "rotate-180")} />
+      </button>
+      {showConnMenu && (
+        <ConnectionsMenu
+          anchorRef={connBtnRef}
+          onClose={() => setShowConnMenu(false)}
+          onNewLocalShell={actions.onNewLocalShell}
+          onNewSSH={actions.onNewSSH}
+          onNewConnection={actions.onNewConnection}
+          onOpenNetworkExplorer={actions.onOpenNetworkExplorer}
+        />
+      )}
+
+      {/* Vault menu */}
+      <button
+        ref={vaultBtnRef}
+        onClick={() => { setShowVaultMenu((v) => !v); setShowConnMenu(false); }}
+        className={clsx(
+          "flex items-center gap-1 px-2.5 py-1 rounded text-xs transition-colors shrink-0",
+          showVaultMenu
+            ? "bg-surface-elevated text-text-primary"
+            : "text-text-secondary hover:text-text-primary hover:bg-surface-elevated"
+        )}
+      >
+        Vault
+        <ChevronDown size={11} className={clsx("transition-transform", showVaultMenu && "rotate-180")} />
+      </button>
+      {showVaultMenu && (
+        <VaultMenu
+          anchorRef={vaultBtnRef}
+          onClose={() => setShowVaultMenu(false)}
+          onOpenCredentials={actions.onOpenCredentials}
+          onLockVault={actions.onLockVault}
+          onDeleteVault={actions.onDeleteVault}
+          onChangePassword={actions.onChangePassword}
+        />
+      )}
+
       <div className="flex-1" data-tauri-drag-region />
+
+      {/* Settings */}
+      <button
+        onClick={actions.onOpenSettings}
+        className="p-1.5 rounded hover:bg-surface-elevated text-text-secondary hover:text-text-primary transition-colors"
+        title="Settings (Ctrl+,)"
+      >
+        <Settings size={14} />
+      </button>
+
       <button
         onClick={() => setShowNotificationHistory(!showNotificationHistory)}
         className="p-1.5 rounded hover:bg-surface-elevated text-text-secondary hover:text-text-primary transition-colors"
         title={t("notifications.title")}
-        data-tooltip={t("notifications.title")}
       >
         <Bell size={14} />
       </button>
@@ -152,11 +551,10 @@ function TitleBar() {
         onClick={cycleTheme}
         className="p-1.5 rounded hover:bg-surface-elevated text-text-secondary hover:text-text-primary transition-colors"
         title={themeLabel}
-        data-tooltip={themeLabel}
       >
         {themeIcon}
       </button>
-      <div className="flex items-center gap-1.5 ml-2 px-2 py-1 rounded hover:bg-surface-elevated cursor-pointer">
+      <div className="flex items-center gap-1.5 ml-1 px-2 py-1 rounded hover:bg-surface-elevated cursor-pointer">
         <User size={14} className="text-text-secondary" />
         <span className="text-xs text-text-secondary">{activeProfile?.name ?? t("titleBar.profile")}</span>
       </div>
@@ -562,18 +960,15 @@ const SIDEBAR_MODES = [
   { mode: SidebarMode.Sessions, icon: FolderOpen, label: "sidebar.sessions" as const },
   { mode: SidebarMode.Snippets, icon: Code2, label: "sidebar.snippets" as const },
   { mode: SidebarMode.Tunnels, icon: Lock, label: "sidebar.tunnels" as const },
-  { mode: SidebarMode.Network, icon: Radar, label: "sidebar.network" as const },
   { mode: SidebarMode.RemoteFiles, icon: FolderTree, label: "sidebar.remote_files" as const },
 ];
 
 function Sidebar({
   onNewSession,
   onOpenCredentials,
-  onOpenNetworkTab,
 }: {
   readonly onNewSession: () => void;
   readonly onOpenCredentials: () => void;
-  readonly onOpenNetworkTab: () => void;
 }) {
   const { t } = useTranslation();
   const sidebarMode = useAppStore((s) => s.sidebarMode);
@@ -712,18 +1107,6 @@ function Sidebar({
                 icon={<Lock size={32} className="text-text-disabled" />}
                 message={t("statusBar.noTunnels")}
               />
-            )}
-            {sidebarMode === SidebarMode.Network && (
-              <div className="flex flex-col gap-2">
-                <button
-                  onClick={onOpenNetworkTab}
-                  className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded bg-interactive-default hover:bg-interactive-hover text-text-inverse transition-colors shrink-0"
-                >
-                  <ExternalLink size={13} />
-                  {t("remoteFiles.openNetworkExplorer")}
-                </button>
-                <NetworkExplorer />
-              </div>
             )}
             {sidebarMode === SidebarMode.RemoteFiles && (
               <RemoteFileBrowser />
@@ -1207,6 +1590,9 @@ export default function App() {
   const [showCredentialManager, setShowCredentialManager] = useState(false);
   const [showSessionEditor, setShowSessionEditor] = useState(false);
   const [editingSession, setEditingSession] = useState<Session | null>(null);
+  const [newSessionDefaultType, setNewSessionDefaultType] = useState<SessionType | undefined>(undefined);
+  const [showVaultDeleteDialog, setShowVaultDeleteDialog] = useState(false);
+  const [showChangePasswordDialog, setShowChangePasswordDialog] = useState(false);
   const [showHelpPanel, setShowHelpPanel] = useState(false);
   const [showShortcutOverlay, setShowShortcutOverlay] = useState(false);
   const [helpArticleSlug, setHelpArticleSlug] = useState<string | undefined>(undefined);
@@ -1441,14 +1827,27 @@ export default function App() {
             {liveAnnouncement}
           </div>
           {/* Region A */}
-          <TitleBar />
+          <TitleBar actions={{
+            onNewLocalShell: handleNewLocalShell,
+            onNewSSH: () => setShowQuickConnect(true),
+            onNewConnection: (type) => {
+              setNewSessionDefaultType(type);
+              setEditingSession(null);
+              setShowSessionEditor(true);
+            },
+            onOpenNetworkExplorer: handleOpenNetworkTab,
+            onOpenCredentials: () => setShowCredentialManager(true),
+            onOpenSettings: () => setSettingsOpen(true),
+            onLockVault: () => lockAllVaults(),
+            onDeleteVault: () => setShowVaultDeleteDialog(true),
+            onChangePassword: () => setShowChangePasswordDialog(true),
+          }} />
 
           <div className="flex flex-1 min-h-0">
             {/* Region C - hidden on compact via Sidebar internal logic */}
             <Sidebar
               onNewSession={() => { setEditingSession(null); setShowSessionEditor(true); }}
               onOpenCredentials={() => setShowCredentialManager(true)}
-              onOpenNetworkTab={handleOpenNetworkTab}
             />
 
             <div className="flex flex-col flex-1 min-w-0">
@@ -1502,12 +1901,25 @@ export default function App() {
           <TipOfTheDay />
           <VaultUnlock />
           {settingsOpen && <SettingsPanel />}
-          {showCredentialManager && <CredentialManager />}
+          {showCredentialManager && (
+            <CredentialManager onClose={() => setShowCredentialManager(false)} />
+          )}
           {showSessionEditor && (
             <SessionEditor
               session={editingSession}
-              onClose={() => { setShowSessionEditor(false); setEditingSession(null); }}
+              defaultType={newSessionDefaultType}
+              onClose={() => {
+                setShowSessionEditor(false);
+                setEditingSession(null);
+                setNewSessionDefaultType(undefined);
+              }}
             />
+          )}
+          {showVaultDeleteDialog && (
+            <VaultDeleteDialog onClose={() => setShowVaultDeleteDialog(false)} />
+          )}
+          {showChangePasswordDialog && (
+            <ChangePasswordDialog onClose={() => setShowChangePasswordDialog(false)} />
           )}
           {showFeatureTour && activeTourId && (
             <FeatureTour

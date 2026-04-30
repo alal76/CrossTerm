@@ -149,7 +149,15 @@
     "enrollFido2": "Register Security Key",
     "osStoreEnabled": "OS keychain integration enabled",
     "osStoreSave": "Save to System Keychain",
-    "selectVault": "Select a vault to unlock"
+    "selectVault": "Select a vault to unlock",
+    "lockAll": "Lock All Vaults",
+    "changePassword": "Change Master Password",
+    "deleteVault": "Delete Vault",
+    "deleteVaultConfirm": "This will permanently delete the vault \"{{name}}\" and all stored credentials. Enter your master password to confirm.",
+    "currentPassword": "Current password",
+    "newPassword": "New password",
+    "confirmPassword": "Confirm new password",
+    "currentPasswordPlaceholder": "Enter current master password"
   },
   "snippets": {
     "title": "Snippets",

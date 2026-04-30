@@ -4,6 +4,7 @@ import clsx from "clsx";
 import {
   Plus,
   Key,
+  KeyRound,
   Lock,
   Cloud,
   FileKey2,
@@ -372,7 +373,7 @@ function CredentialForm({
 
 // ── Main Component ──
 
-export default function CredentialManager() {
+export default function CredentialManager({ onClose }: { readonly onClose: () => void }) {
   const { t } = useTranslation();
   const credentials = useVaultStore((s) => s.credentials);
   const deleteCredential = useVaultStore((s) => s.deleteCredential);
@@ -391,127 +392,136 @@ export default function CredentialManager() {
     fetchCredentials();
   }, [fetchCredentials]);
 
+  // Close on Escape
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape" && !formOpen) onClose();
+    }
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [onClose, formOpen]);
+
   function getSubtitle(cred: { credential_type: string; username: string | null }): string {
     if (cred.username) return cred.username;
     switch (cred.credential_type) {
-      case CredentialType.Password:
-        return t("credentialTypes.password");
-      case CredentialType.SSHKey:
-        return t("credentialTypes.ssh_key");
-      case CredentialType.APIToken:
-        return t("credentialTypes.api_token");
-      case CredentialType.CloudCredential:
-        return t("credentialTypes.cloud_credential");
-      case CredentialType.Certificate:
-        return t("credentialTypes.certificate");
-      case CredentialType.TOTPSeed:
-        return t("credentialTypes.totp_seed");
-      default:
-        return cred.credential_type;
+      case CredentialType.Password: return t("credentialTypes.password");
+      case CredentialType.SSHKey: return t("credentialTypes.ssh_key");
+      case CredentialType.APIToken: return t("credentialTypes.api_token");
+      case CredentialType.CloudCredential: return t("credentialTypes.cloud_credential");
+      case CredentialType.Certificate: return t("credentialTypes.certificate");
+      case CredentialType.TOTPSeed: return t("credentialTypes.totp_seed");
+      default: return cred.credential_type;
     }
   }
 
   return (
-    <div className="flex flex-col h-full" data-help-article="credential-vault">
-      {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-border-subtle shrink-0">
-        <h2 className="text-sm font-semibold text-text-primary">{t("vault.credentials")}</h2>
-        {credentials.length > 0 && (
-          <span className="text-[10px] text-text-disabled">
-            {t("counts.credentials", { count: credentials.length })}
-          </span>
-        )}
-        <div className="flex-1" />
-        <button
-          onClick={() => {
-            setEditingCredential(null);
-            setFormOpen(true);
-          }}
-          className="flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg bg-interactive-default hover:bg-interactive-hover text-text-primary transition-colors duration-[var(--duration-short)]"
-        >
-          <Plus size={13} />
-          {t("vault.add")}
-        </button>
-      </div>
+    <div className="fixed inset-0 z-[8000] flex items-stretch" data-help-article="credential-vault">
+      {/* Backdrop */}
+      <div
+        className="absolute inset-0 bg-black/40 backdrop-blur-[2px]"
+        onClick={onClose}
+        aria-hidden="true"
+      />
 
-      {/* List */}
-      <div className="flex-1 overflow-y-auto">
-        {(() => {
-          if (loading && credentials.length === 0) {
-            return (
-              <div className="flex items-center justify-center h-32">
-                <Loader2 size={20} className="animate-spin text-accent-primary" />
-              </div>
-            );
-          }
-          if (credentials.length === 0) {
-            return (
-              <div className="flex flex-col items-center justify-center h-full text-center px-6">
-                <div className="w-14 h-14 rounded-2xl bg-surface-elevated flex items-center justify-center mb-3">
-                  <Key size={24} className="text-text-disabled" />
+      {/* Drawer panel */}
+      <div className="relative ml-auto w-[520px] max-w-full bg-surface-elevated border-l border-border-default flex flex-col shadow-[var(--shadow-3)]">
+        {/* Header */}
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-border-subtle shrink-0">
+          <KeyRound size={16} className="text-accent-primary shrink-0" />
+          <h2 className="text-sm font-semibold text-text-primary">{t("vault.credentials")}</h2>
+          {credentials.length > 0 && (
+            <span className="text-[10px] text-text-disabled">
+              {t("counts.credentials", { count: credentials.length })}
+            </span>
+          )}
+          <div className="flex-1" />
+          <button
+            onClick={() => { setEditingCredential(null); setFormOpen(true); }}
+            className="flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg bg-interactive-default hover:bg-interactive-hover text-text-primary transition-colors duration-[var(--duration-short)]"
+          >
+            <Plus size={13} />
+            {t("vault.add")}
+          </button>
+          <button
+            onClick={onClose}
+            className="ml-1 p-1.5 rounded hover:bg-surface-secondary text-text-secondary hover:text-text-primary transition-colors"
+            title="Close"
+          >
+            <X size={15} />
+          </button>
+        </div>
+
+        {/* List */}
+        <div className="flex-1 overflow-y-auto">
+          {(() => {
+            if (loading && credentials.length === 0) {
+              return (
+                <div className="flex items-center justify-center h-32">
+                  <Loader2 size={20} className="animate-spin text-accent-primary" />
                 </div>
-                <p className="text-sm text-text-primary mb-1">{t("vault.noCredentials")}</p>
-                <p className="text-xs text-text-secondary mb-4">
-                  {t("vault.noCredentialsHint")}
-                </p>
-                <button
-                  onClick={() => setFormOpen(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-interactive-default hover:bg-interactive-hover text-text-primary transition-colors duration-[var(--duration-short)]"
-                >
-                  <Plus size={13} />
-                  {t("vault.addCredential")}
-                </button>
-              </div>
-            );
-          }
-          return (
-            <div className="divide-y divide-border-subtle">
-            {credentials.map((cred) => (
-              <div
-                key={cred.id}
-                className="flex items-center gap-3 px-4 py-2.5 hover:bg-surface-elevated/50 transition-colors duration-[var(--duration-micro)] group"
-              >
-                <div className="shrink-0 w-8 h-8 rounded-lg bg-surface-secondary flex items-center justify-center">
-                  {TYPE_ICONS[cred.credential_type as CredentialType]}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-text-primary truncate">{cred.name}</p>
-                  <p className="text-[10px] text-text-secondary truncate">{getSubtitle(cred)}</p>
-                </div>
-                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-[var(--duration-micro)]">
+              );
+            }
+            if (credentials.length === 0) {
+              return (
+                <div className="flex flex-col items-center justify-center h-full text-center px-8 py-12">
+                  <div className="w-14 h-14 rounded-2xl bg-surface-secondary flex items-center justify-center mb-3">
+                    <Key size={24} className="text-text-disabled" />
+                  </div>
+                  <p className="text-sm text-text-primary mb-1">{t("vault.noCredentials")}</p>
+                  <p className="text-xs text-text-secondary mb-4">{t("vault.noCredentialsHint")}</p>
                   <button
-                    onClick={() => {
-                      setEditingCredential(cred);
-                      setFormOpen(true);
-                    }}
-                    className="p-1 rounded hover:bg-surface-secondary text-text-secondary hover:text-text-primary transition-colors duration-[var(--duration-micro)]"
-                    title={t("sessions.edit")}
+                    onClick={() => setFormOpen(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-interactive-default hover:bg-interactive-hover text-text-primary transition-colors duration-[var(--duration-short)]"
                   >
-                    <Pencil size={13} />
-                  </button>
-                  <button
-                    onClick={() => deleteCredential(cred.id)}
-                    className="p-1 rounded hover:bg-status-disconnected/10 text-text-secondary hover:text-status-disconnected transition-colors duration-[var(--duration-micro)]"
-                    title={t("sessions.delete")}
-                  >
-                    <Trash2 size={13} />
+                    <Plus size={13} />
+                    {t("vault.addCredential")}
                   </button>
                 </div>
+              );
+            }
+            return (
+              <div className="divide-y divide-border-subtle">
+                {credentials.map((cred) => (
+                  <div
+                    key={cred.id}
+                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-surface-primary/50 transition-colors duration-[var(--duration-micro)] group"
+                  >
+                    <div className="shrink-0 w-8 h-8 rounded-lg bg-surface-secondary flex items-center justify-center">
+                      {TYPE_ICONS[cred.credential_type as CredentialType]}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-text-primary truncate">{cred.name}</p>
+                      <p className="text-[10px] text-text-secondary truncate">{getSubtitle(cred)}</p>
+                    </div>
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-[var(--duration-micro)]">
+                      <button
+                        onClick={() => { setEditingCredential(cred); setFormOpen(true); }}
+                        className="p-1 rounded hover:bg-surface-secondary text-text-secondary hover:text-text-primary transition-colors duration-[var(--duration-micro)]"
+                        title={t("sessions.edit")}
+                      >
+                        <Pencil size={13} />
+                      </button>
+                      <button
+                        onClick={() => deleteCredential(cred.id)}
+                        className="p-1 rounded hover:bg-status-disconnected/10 text-text-secondary hover:text-status-disconnected transition-colors duration-[var(--duration-micro)]"
+                        title={t("sessions.delete")}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        );
-        })()}
+            );
+          })()}
+        </div>
       </div>
 
-      {/* Modal */}
+      {/* Credential form modal (renders on top of this panel) */}
       {formOpen && (
         <CredentialForm
           credential={editingCredential}
-          onClose={() => {
-            setFormOpen(false);
-            setEditingCredential(null);
-          }}
+          onClose={() => { setFormOpen(false); setEditingCredential(null); }}
         />
       )}
     </div>

@@ -17,12 +17,27 @@ import {
   Filter,
   Wifi,
   ShieldAlert,
+  History,
+  CheckCircle2,
+  AlertCircle,
+  Clock,
 } from 'lucide-react';
 import type { ExploreResult, ExploreProgress, ExploreHostFound, ServiceFilter, Session } from '@/types';
 import { SessionType } from '@/types';
 import { useSessionStore } from '@/stores/sessionStore';
+import { useToast } from '@/components/Shared/Toast';
 import WifiScanner from '@/components/NetworkTools/WifiScanner';
 import AircrackPanel from '@/components/NetworkTools/AircrackPanel';
+
+interface ConnectionAttempt {
+  id: string;
+  host: string;
+  hostname: string | null;
+  serviceType: string;
+  status: 'connecting' | 'success' | 'failed';
+  timestamp: number;
+  error?: string;
+}
 
 const WELL_KNOWN_SERVICES: { id: ServiceFilter; label: string; port: number }[] = [
   { id: 'ssh', label: 'SSH (22)', port: 22 },
@@ -87,6 +102,7 @@ const SESSION_TYPE_MAP: Record<string, SessionType> = {
 export default function NetworkExplorer() {
   const { t } = useTranslation();
   const { addSession, openTab } = useSessionStore();
+  const { toast } = useToast();
   const [toolTab, setToolTab] = useState<'explore' | 'wifi' | 'aircrack'>('explore');
   const [cidr, setCidr] = useState('');
   const [scanning, setScanning] = useState(false);
@@ -100,6 +116,8 @@ export default function NetworkExplorer() {
   const [filterService, setFilterService] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'ip' | 'ports' | 'response'>('ip');
   const [saveCount, setSaveCount] = useState<number | null>(null);
+  const [connectionHistory, setConnectionHistory] = useState<ConnectionAttempt[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
   const scanIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -163,13 +181,32 @@ export default function NetworkExplorer() {
 
   const handleConnect = useCallback(async (result: ExploreResult) => {
     const svcType = result.suggested_session_type;
-    if (!svcType) return;
+    if (!svcType) {
+      toast('warning', `No connectable service detected for ${result.hostname ?? result.ip}`);
+      return;
+    }
     const sessionType = SESSION_TYPE_MAP[svcType];
-    if (!sessionType) return;
+    if (!sessionType) {
+      toast('info', `${svcType.toUpperCase()} is not directly connectable from CrossTerm`);
+      return;
+    }
     const port =
       result.open_ports.find((p) => p.service_name === svcType)?.port ??
       SERVICE_DEFAULT_PORTS[svcType] ??
       22;
+
+    const attemptId = crypto.randomUUID();
+    const attempt: ConnectionAttempt = {
+      id: attemptId,
+      host: result.ip,
+      hostname: result.hostname ?? null,
+      serviceType: svcType,
+      status: 'connecting',
+      timestamp: Date.now(),
+    };
+    setConnectionHistory((prev) => [attempt, ...prev.slice(0, 49)]);
+    setShowHistory(true);
+
     try {
       const session = await invoke<Session>('session_create', {
         request: {
@@ -190,12 +227,26 @@ export default function NetworkExplorer() {
           settings_override: null,
         },
       });
+      if (!session) {
+        setConnectionHistory((prev) =>
+          prev.map((a) => a.id === attemptId ? { ...a, status: 'failed', error: 'Backend unavailable' } : a)
+        );
+        toast('warning', 'Backend is not available — session was not created');
+        return;
+      }
       addSession(session);
       openTab(session);
-    } catch {
-      // no-op: user stays on screen, can retry
+      setConnectionHistory((prev) =>
+        prev.map((a) => a.id === attemptId ? { ...a, status: 'success' } : a)
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setConnectionHistory((prev) =>
+        prev.map((a) => a.id === attemptId ? { ...a, status: 'failed', error: msg } : a)
+      );
+      toast('error', `Failed to connect to ${result.hostname ?? result.ip}: ${msg}`);
     }
-  }, [addSession, openTab]);
+  }, [addSession, openTab, toast]);
 
   const handleSaveAsSessions = useCallback(async () => {
     const candidates = results.filter(
@@ -547,6 +598,54 @@ export default function NetworkExplorer() {
             <span className="text-xs text-text-secondary">
               {saveCount} {saveCount === 1 ? 'session' : 'sessions'} saved
             </span>
+          )}
+        </div>
+      )}
+
+      {/* Connection history */}
+      {connectionHistory.length > 0 && (
+        <div className="flex flex-col gap-1.5 rounded-md border border-border-subtle bg-surface-secondary p-3">
+          <button
+            onClick={() => setShowHistory((v) => !v)}
+            className="flex items-center gap-1.5 text-xs font-medium text-text-secondary hover:text-text-primary transition-colors"
+          >
+            <History size={12} />
+            Connection History ({connectionHistory.length})
+            {showHistory ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+          </button>
+          {showHistory && (
+            <div className="flex flex-col gap-1 mt-1">
+              {connectionHistory.map((attempt) => {
+                const label = attempt.hostname ?? attempt.host;
+                let statusIcon;
+                if (attempt.status === 'success') {
+                  statusIcon = <CheckCircle2 size={12} className="text-status-connected shrink-0" />;
+                } else if (attempt.status === 'failed') {
+                  statusIcon = <AlertCircle size={12} className="text-status-disconnected shrink-0" />;
+                } else {
+                  statusIcon = <Clock size={12} className="text-text-disabled shrink-0 animate-pulse" />;
+                }
+                const time = new Date(attempt.timestamp).toLocaleTimeString([], {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit',
+                });
+                return (
+                  <div key={attempt.id} className="flex items-start gap-2 rounded px-2 py-1.5 hover:bg-surface-primary text-xs">
+                    {statusIcon}
+                    <div className="flex-1 min-w-0">
+                      <span className="text-text-primary">{label}</span>
+                      <span className="text-text-disabled mx-1">·</span>
+                      <span className="text-text-secondary uppercase">{attempt.serviceType}</span>
+                      {attempt.error && (
+                        <p className="text-status-disconnected truncate mt-0.5">{attempt.error}</p>
+                      )}
+                    </div>
+                    <span className="text-text-disabled tabular-nums shrink-0">{time}</span>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       )}

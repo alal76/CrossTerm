@@ -35,6 +35,7 @@ const DEFAULT_PORTS: Partial<Record<SessionType, number>> = {
 
 interface SessionEditorProps {
   readonly session?: Session | null;
+  readonly defaultType?: SessionType;
   readonly onClose: () => void;
 }
 
@@ -44,7 +45,7 @@ interface FormErrors {
   port?: string;
 }
 
-export default function SessionEditor({ session, onClose }: SessionEditorProps) {
+export default function SessionEditor({ session, defaultType, onClose }: SessionEditorProps) {
   const { t } = useTranslation();
   const addSession = useSessionStore((s) => s.addSession);
   const updateSession = useSessionStore((s) => s.updateSession);
@@ -53,7 +54,7 @@ export default function SessionEditor({ session, onClose }: SessionEditorProps) 
   const isEdit = !!session;
 
   const [name, setName] = useState(session?.name ?? "");
-  const [type, setType] = useState<SessionType>(session?.type ?? SessionType.SSH);
+  const [type, setType] = useState<SessionType>(session?.type ?? defaultType ?? SessionType.SSH);
   const [host, setHost] = useState(session?.connection.host ?? "");
   const [port, setPort] = useState(String(session?.connection.port ?? DEFAULT_PORTS[SessionType.SSH] ?? 22));
   const [group, setGroup] = useState(session?.group ?? "");
