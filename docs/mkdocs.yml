@@ -1,8 +1,8 @@
 site_name: CrossTerm Documentation
 site_description: "Cross-platform terminal emulator and remote access suite"
-site_url: https://aalmonstorth.github.io/CrossTerm/
-repo_url: https://github.com/AAlmonstorth/CrossTerm
-repo_name: AAlmonstorth/CrossTerm
+site_url: https://alal76.github.io/CrossTerm/
+repo_url: https://github.com/alal76/CrossTerm
+repo_name: alal76/CrossTerm
 
 docs_dir: help
 
@@ -32,18 +32,23 @@ theme:
 
 nav:
   - Home: index.md
+  - Installation: installation.md
   - Getting Started: getting-started.md
   - User Guide:
     - SSH Connections: ssh-connections.md
     - SFTP File Transfer: sftp-file-transfer.md
     - Credential Vault: credential-vault.md
+    - Network Explorer: network-explorer.md
+  - Reference:
+    - Settings: settings.md
+    - Keyboard Shortcuts: keyboard-shortcuts.md
+    - Customization: customization.md
+    - Plugin API: plugin-api-guide.md
   - Protocol References:
     - SSH: ssh-protocol-reference.md
     - RDP: rdp-protocol-reference.md
     - VNC: vnc-protocol-reference.md
     - Serial: serial-protocol-reference.md
-  - Customization: customization.md
-  - Keyboard Shortcuts: keyboard-shortcuts.md
   - Security: security-guide.md
   - Troubleshooting: troubleshooting.md
 

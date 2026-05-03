@@ -9,7 +9,10 @@ keywords: ["start", "setup", "first", "connect", "session", "terminal", "new", "
 
 # Getting Started with CrossTerm
 
-Welcome to CrossTerm — a cross-platform terminal emulator and remote access suite. This guide will walk you through your first steps.
+Welcome to CrossTerm — a cross-platform terminal emulator and remote access suite. This guide walks you through the interface and your first connections.
+
+!!! tip "Not installed yet?"
+    See the [Installation & Upgrade](installation.md) guide for macOS (Homebrew), Windows (MSI/exe), and Linux (deb/rpm/AppImage) instructions.
 
 ## Creating Your First Session
 
