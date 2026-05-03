@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@/i18n';
 import NetworkExplorer from '@/components/NetworkTools/NetworkExplorer';
 import { ToastProvider } from '@/components/Shared/Toast';
@@ -14,47 +14,47 @@ function renderWithToast(ui: React.ReactElement) {
 describe('NetworkExplorer', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: network_local_subnets returns empty (no auto-populate)
+    mockInvoke.mockResolvedValue([]);
   });
 
   it('renders the explore heading and CIDR input', () => {
     renderWithToast(<NetworkExplorer />);
-    expect(screen.getByRole('heading', { name: 'Network Explore' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2 })).toBeInTheDocument();
     expect(
-      screen.getByPlaceholderText(/Enter CIDR range/)
+      screen.getByPlaceholderText(/192\.168/)
     ).toBeInTheDocument();
   });
 
   it('disables scan button when CIDR is empty', () => {
     renderWithToast(<NetworkExplorer />);
-    const buttons = screen.getAllByRole('button');
-    const scanButton = buttons.find((b) => b.textContent?.includes('Network Explore') && b.hasAttribute('disabled'));
-    expect(scanButton).toBeDisabled();
+    expect(screen.getByTestId('scan-start-btn')).toBeDisabled();
   });
 
   it('enables scan button when CIDR is entered', () => {
     renderWithToast(<NetworkExplorer />);
-    const input = screen.getByPlaceholderText(/Enter CIDR range/);
-    fireEvent.change(input, { target: { value: '192.168.1.0/24' } });
-    const buttons = screen.getAllByRole('button');
-    const scanButton = buttons.find((b) => b.textContent?.includes('Scan') || (b.textContent?.includes('Network Explore') && !b.className.includes('border-b-2')));
-    expect(scanButton).not.toBeDisabled();
+    fireEvent.change(screen.getByPlaceholderText(/192\.168/), { target: { value: '192.168.1.0/24' } });
+    expect(screen.getByTestId('scan-start-btn')).not.toBeDisabled();
   });
 
   it('invokes network_explore_start on scan', async () => {
-    mockInvoke.mockResolvedValueOnce('scan-id-123');
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'network_local_subnets') return Promise.resolve([]);
+      if (cmd === 'network_explore_start') return Promise.resolve('scan-id-123');
+      return Promise.resolve(undefined);
+    });
     renderWithToast(<NetworkExplorer />);
-    const input = screen.getByPlaceholderText(/Enter CIDR range/);
-    fireEvent.change(input, { target: { value: '10.0.0.0/28' } });
-    const buttons = screen.getAllByRole('button');
-    const scanButton = buttons.find((b) => b.textContent?.includes('Network Explore') && !b.className.includes('border-b-2'));
-    fireEvent.click(scanButton!);
+    fireEvent.change(screen.getByPlaceholderText(/192\.168/), { target: { value: '10.0.0.0/28' } });
+    fireEvent.click(screen.getByTestId('scan-start-btn'));
 
-    expect(mockInvoke).toHaveBeenCalledWith('network_explore_start', {
-      target: {
-        cidr: '10.0.0.0/28',
-        services: expect.arrayContaining(['ssh', 'rdp', 'vnc']),
-        extra_ports: [],
-      },
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith('network_explore_start', {
+        target: {
+          cidr: '10.0.0.0/28',
+          services: expect.arrayContaining(['ssh', 'rdp', 'vnc']),
+          extra_ports: [],
+        },
+      });
     });
   });
 

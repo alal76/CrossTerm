@@ -21,6 +21,9 @@ import {
   CheckCircle2,
   AlertCircle,
   Clock,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
 } from 'lucide-react';
 import type { ExploreResult, ExploreProgress, ExploreHostFound, ServiceFilter, Session } from '@/types';
 import { SessionType } from '@/types';
@@ -37,6 +40,12 @@ interface ConnectionAttempt {
   status: 'connecting' | 'success' | 'failed';
   timestamp: number;
   error?: string;
+}
+
+interface LocalSubnet {
+  interface: string;
+  cidr: string;
+  ip: string;
 }
 
 const WELL_KNOWN_SERVICES: { id: ServiceFilter; label: string; port: number }[] = [
@@ -99,6 +108,18 @@ const SESSION_TYPE_MAP: Record<string, SessionType> = {
   telnet: SessionType.Telnet,
 };
 
+type SortKey = 'ip' | 'hostname' | 'ports' | 'response';
+
+function ipToNum(ip: string): number {
+  const parts = ip.split('.').map(Number);
+  return ((parts[0] ?? 0) << 24) | ((parts[1] ?? 0) << 16) | ((parts[2] ?? 0) << 8) | (parts[3] ?? 0);
+}
+
+function SortIcon({ col, sortBy, sortDir }: { col: SortKey; sortBy: SortKey; sortDir: 'asc' | 'desc' }) {
+  if (sortBy !== col) return <ArrowUpDown size={11} className="opacity-30" />;
+  return sortDir === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />;
+}
+
 export default function NetworkExplorer() {
   const { t } = useTranslation();
   const { addSession, openTab } = useSessionStore();
@@ -107,24 +128,39 @@ export default function NetworkExplorer() {
   const [cidr, setCidr] = useState('');
   const [scanning, setScanning] = useState(false);
   const [results, setResults] = useState<ExploreResult[]>([]);
-  const [progress, setProgress] = useState<ExploreProgress | null>(null);
+  const [progressMap, setProgressMap] = useState<Map<string, ExploreProgress>>(new Map());
   const [extraPortsInput, setExtraPortsInput] = useState('');
   const [selectedServices, setSelectedServices] = useState<Set<string>>(
     () => new Set(['ssh', 'rdp', 'vnc', 'http', 'https'])
   );
   const [showFilters, setShowFilters] = useState(false);
   const [filterService, setFilterService] = useState<string>('all');
-  const [sortBy, setSortBy] = useState<'ip' | 'ports' | 'response'>('ip');
+  const [searchFilter, setSearchFilter] = useState('');
+  const [sortBy, setSortBy] = useState<SortKey>('ip');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [saveCount, setSaveCount] = useState<number | null>(null);
   const [connectionHistory, setConnectionHistory] = useState<ConnectionAttempt[]>([]);
   const [showHistory, setShowHistory] = useState(false);
-  const scanIdRef = useRef<string | null>(null);
+
+  // Set of currently active scan IDs (one per CIDR)
+  const activeScanIdsRef = useRef<Set<string>>(new Set());
+
+  // Auto-detect local subnets on mount
+  useEffect(() => {
+    invoke<LocalSubnet[]>('network_local_subnets')
+      .then((subnets) => {
+        if (Array.isArray(subnets) && subnets.length > 0) {
+          setCidr(subnets.map((s) => s.cidr).join(', '));
+        }
+      })
+      .catch(() => {}); // graceful degradation in browser/stub mode
+  }, []);
 
   useEffect(() => {
     const unlistenHost = listen<ExploreHostFound>(
       'network:explore_host_found',
       (event) => {
-        if (event.payload.scan_id === scanIdRef.current) {
+        if (activeScanIdsRef.current.has(event.payload.scan_id)) {
           setResults((prev) => [...prev, event.payload.result]);
         }
       }
@@ -133,9 +169,11 @@ export default function NetworkExplorer() {
     const unlistenProgress = listen<ExploreProgress>(
       'network:explore_progress',
       (event) => {
-        if (event.payload.scan_id === scanIdRef.current) {
-          setProgress(event.payload);
-          if (event.payload.hosts_scanned >= event.payload.total_hosts) {
+        if (!activeScanIdsRef.current.has(event.payload.scan_id)) return;
+        setProgressMap((prev) => new Map(prev).set(event.payload.scan_id, event.payload));
+        if (event.payload.hosts_scanned >= event.payload.total_hosts) {
+          activeScanIdsRef.current.delete(event.payload.scan_id);
+          if (activeScanIdsRef.current.size === 0) {
             setScanning(false);
           }
         }
@@ -146,35 +184,56 @@ export default function NetworkExplorer() {
       unlistenHost.then((fn) => fn());
       unlistenProgress.then((fn) => fn());
     };
-  }, []); // register once; scanIdRef keeps it current
+  }, []);
+
+  // Aggregate progress across all active scans
+  const aggregateProgress = useMemo(() => {
+    if (progressMap.size === 0) return null;
+    let total_hosts = 0, hosts_scanned = 0, hosts_found = 0;
+    for (const p of progressMap.values()) {
+      total_hosts += p.total_hosts;
+      hosts_scanned += p.hosts_scanned;
+      hosts_found += p.hosts_found;
+    }
+    return { scan_id: 'aggregate', total_hosts, hosts_scanned, hosts_found };
+  }, [progressMap]);
 
   const toggleService = useCallback((svc: string) => {
     setSelectedServices((prev) => {
       const next = new Set(prev);
-      if (next.has(svc)) {
-        next.delete(svc);
-      } else {
-        next.add(svc);
-      }
+      if (next.has(svc)) { next.delete(svc); } else { next.add(svc); }
       return next;
     });
   }, []);
 
   const handleScan = useCallback(async () => {
-    if (!cidr.trim()) return;
+    const cidrs = cidr.split(',').map((c) => c.trim()).filter(Boolean);
+    if (cidrs.length === 0) return;
+
     setResults([]);
     setScanning(true);
-    setProgress(null);
+    setProgressMap(new Map());
+    activeScanIdsRef.current = new Set();
 
     const services: ServiceFilter[] = Array.from(selectedServices) as ServiceFilter[];
     const extra_ports = parseExtraPorts(extraPortsInput);
 
-    try {
-      const id = await invoke<string>('network_explore_start', {
-        target: { cidr: cidr.trim(), services, extra_ports },
-      });
-      scanIdRef.current = id;
-    } catch {
+    let launched = 0;
+    for (const c of cidrs) {
+      try {
+        const id = await invoke<string>('network_explore_start', {
+          target: { cidr: c, services, extra_ports },
+        });
+        if (id) {
+          activeScanIdsRef.current.add(id);
+          launched++;
+        }
+      } catch {
+        // skip invalid CIDRs
+      }
+    }
+
+    if (launched === 0) {
       setScanning(false);
     }
   }, [cidr, selectedServices, extraPortsInput]);
@@ -207,33 +266,22 @@ export default function NetworkExplorer() {
     setConnectionHistory((prev) => [attempt, ...prev.slice(0, 49)]);
     setShowHistory(true);
 
+    // Build session locally — avoids backend "Profile not found" error
+    const now = new Date().toISOString();
+    const session: Session = {
+      id: crypto.randomUUID(),
+      name: `${result.hostname ?? result.ip} (${svcType.toUpperCase()})`,
+      type: sessionType,
+      group: 'Discovered',
+      tags: [],
+      connection: { host: result.ip, port },
+      createdAt: now,
+      updatedAt: now,
+      autoReconnect: false,
+      keepAliveIntervalSeconds: 0,
+    };
+
     try {
-      const session = await invoke<Session>('session_create', {
-        request: {
-          name: `${result.hostname ?? result.ip} (${svcType.toUpperCase()})`,
-          session_type: sessionType,
-          connection: { host: result.ip, port },
-          group: null,
-          tags: null,
-          icon: null,
-          color_label: null,
-          credential_ref: null,
-          startup_script: null,
-          environment_variables: null,
-          notes: null,
-          auto_reconnect: null,
-          keep_alive_interval_seconds: null,
-          favorite: null,
-          settings_override: null,
-        },
-      });
-      if (!session) {
-        setConnectionHistory((prev) =>
-          prev.map((a) => a.id === attemptId ? { ...a, status: 'failed', error: 'Backend unavailable' } : a)
-        );
-        toast('warning', 'Backend is not available — session was not created');
-        return;
-      }
       addSession(session);
       openTab(session);
       setConnectionHistory((prev) =>
@@ -244,7 +292,7 @@ export default function NetworkExplorer() {
       setConnectionHistory((prev) =>
         prev.map((a) => a.id === attemptId ? { ...a, status: 'failed', error: msg } : a)
       );
-      toast('error', `Failed to connect to ${result.hostname ?? result.ip}: ${msg}`);
+      toast('error', `Failed to open tab for ${result.hostname ?? result.ip}: ${msg}`);
     }
   }, [addSession, openTab, toast]);
 
@@ -255,6 +303,7 @@ export default function NetworkExplorer() {
     if (candidates.length === 0) return;
     setSaveCount(null);
     let saved = 0;
+    const now = new Date().toISOString();
     for (const result of candidates) {
       const svcType = result.suggested_session_type!;
       const sessionType = SESSION_TYPE_MAP[svcType];
@@ -262,55 +311,78 @@ export default function NetworkExplorer() {
         result.open_ports.find((p) => p.service_name === svcType)?.port ??
         SERVICE_DEFAULT_PORTS[svcType] ??
         22;
+      const session: Session = {
+        id: crypto.randomUUID(),
+        name: `${result.hostname ?? result.ip} (${svcType.toUpperCase()})`,
+        type: sessionType,
+        group: 'Discovered Hosts',
+        tags: [],
+        connection: { host: result.ip, port },
+        createdAt: now,
+        updatedAt: now,
+        autoReconnect: false,
+        keepAliveIntervalSeconds: 0,
+      };
       try {
-        const session = await invoke<Session>('session_create', {
-          request: {
-            name: `${result.hostname ?? result.ip} (${svcType.toUpperCase()})`,
-            session_type: sessionType,
-            connection: { host: result.ip, port },
-            group: 'Discovered Hosts',
-            tags: null,
-            icon: null,
-            color_label: null,
-            credential_ref: null,
-            startup_script: null,
-            environment_variables: null,
-            notes: null,
-            auto_reconnect: null,
-            keep_alive_interval_seconds: null,
-            favorite: null,
-            settings_override: null,
-          },
-        });
         addSession(session);
         saved++;
       } catch {
-        // skip hosts that fail
+        // skip
       }
     }
     setSaveCount(saved);
   }, [results, addSession]);
 
+  // Toggle column sort — same column: flip direction; new column: set asc
+  const handleSortColumn = useCallback((col: SortKey) => {
+    setSortBy((prev) => {
+      if (prev === col) {
+        setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+        return prev;
+      }
+      setSortDir('asc');
+      return col;
+    });
+  }, []);
+
   const filteredResults = useMemo(() => {
     let filtered = results;
+
+    // Service filter
     if (filterService !== 'all') {
       filtered = filtered.filter((r) =>
         r.open_ports.some((p) => p.service_name === filterService)
       );
     }
+
+    // Text search: IP or hostname
+    if (searchFilter.trim()) {
+      const q = searchFilter.toLowerCase();
+      filtered = filtered.filter(
+        (r) =>
+          r.ip.includes(q) ||
+          (r.hostname ?? '').toLowerCase().includes(q) ||
+          r.open_ports.some((p) => p.service_name.includes(q))
+      );
+    }
+
     const sorted = [...filtered];
+    const dir = sortDir === 'asc' ? 1 : -1;
     switch (sortBy) {
+      case 'hostname':
+        sorted.sort((a, b) => dir * (a.hostname ?? a.ip).localeCompare(b.hostname ?? b.ip));
+        break;
       case 'ports':
-        sorted.sort((a, b) => b.open_ports.length - a.open_ports.length);
+        sorted.sort((a, b) => dir * (a.open_ports.length - b.open_ports.length));
         break;
       case 'response':
-        sorted.sort((a, b) => a.response_time_ms - b.response_time_ms);
+        sorted.sort((a, b) => dir * (a.response_time_ms - b.response_time_ms));
         break;
-      default:
-        sorted.sort((a, b) => a.ip.localeCompare(b.ip, undefined, { numeric: true }));
+      default: // 'ip'
+        sorted.sort((a, b) => dir * (ipToNum(a.ip) - ipToNum(b.ip)));
     }
     return sorted;
-  }, [results, filterService, sortBy]);
+  }, [results, filterService, searchFilter, sortBy, sortDir]);
 
   const serviceCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -321,6 +393,8 @@ export default function NetworkExplorer() {
     }
     return counts;
   }, [results]);
+
+  const cidrPlaceholder = 'e.g. 192.168.1.0/24, 10.0.0.0/8';
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -369,297 +443,313 @@ export default function NetworkExplorer() {
       ) : toolTab === 'aircrack' ? (
         <AircrackPanel />
       ) : (
-    <div className="flex flex-col gap-3 p-3 flex-1 overflow-y-auto">
-      {/* Header */}
-      <div className="flex items-center gap-2">
-        <Radar size={20} className="text-accent-primary" />
-        <h2 className="text-sm font-semibold text-text-primary">
-          {t('network.explore')}
-        </h2>
-      </div>
-
-      {/* CIDR input row */}
-      <div className="flex gap-2">
-        <input
-          type="text"
-          value={cidr}
-          onChange={(e) => setCidr(e.target.value)}
-          placeholder={t('network.cidrPlaceholder')}
-          className="flex-1 rounded-md border border-border-default bg-surface-primary px-3 py-1.5 text-sm text-text-primary placeholder:text-text-disabled focus:border-border-focus focus:outline-none"
-          onKeyDown={(e) => e.key === 'Enter' && handleScan()}
-        />
-        <button
-          onClick={handleScan}
-          disabled={scanning || !cidr.trim()}
-          className={clsx(
-            'flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
-            scanning
-              ? 'cursor-not-allowed bg-interactive-disabled text-text-disabled'
-              : 'bg-interactive-default text-text-inverse hover:bg-interactive-hover'
-          )}
-        >
-          {scanning ? (
-            <Loader2 size={14} className="animate-spin" />
-          ) : (
-            <Search size={14} />
-          )}
-          {scanning ? t('network.scanning') : t('network.explore')}
-        </button>
-      </div>
-
-      {/* Service filter toggles */}
-      <div>
-        <button
-          onClick={() => setShowFilters(!showFilters)}
-          className="flex items-center gap-1.5 text-xs text-text-secondary hover:text-text-primary transition-colors"
-        >
-          <Filter size={12} />
-          {t('network.serviceFilters')}
-          {showFilters ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-        </button>
-
-        {showFilters && (
-          <div className="mt-2 flex flex-col gap-2 rounded-md border border-border-subtle bg-surface-secondary p-3">
-            <div className="flex flex-wrap gap-1.5">
-              {WELL_KNOWN_SERVICES.map((svc) => (
-                <button
-                  key={typeof svc.id === 'string' ? svc.id : `custom-${svc.port}`}
-                  onClick={() => toggleService(typeof svc.id === 'string' ? svc.id : String(svc.port))}
-                  className={clsx(
-                    'rounded-full px-2.5 py-1 text-xs font-medium transition-colors border',
-                    selectedServices.has(typeof svc.id === 'string' ? svc.id : String(svc.port))
-                      ? 'bg-accent-primary/20 text-accent-primary border-accent-primary/40'
-                      : 'bg-surface-primary text-text-secondary border-border-subtle hover:border-border-default'
-                  )}
-                >
-                  {svc.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Extra ports input */}
-            <div className="flex items-center gap-2">
-              <Plus size={12} className="text-text-secondary shrink-0" />
-              <input
-                type="text"
-                value={extraPortsInput}
-                onChange={(e) => setExtraPortsInput(e.target.value)}
-                placeholder={t('network.extraPortsPlaceholder')}
-                className="flex-1 rounded border border-border-default bg-surface-primary px-2 py-1 text-xs text-text-primary placeholder:text-text-disabled focus:border-border-focus focus:outline-none"
-              />
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Progress */}
-      {scanning && progress && progress.total_hosts > 0 && (
-        <div className="flex flex-col gap-1">
+        <div className="flex flex-col gap-3 p-3 flex-1 overflow-y-auto">
+          {/* Header */}
           <div className="flex items-center gap-2">
-            <div className="h-1.5 flex-1 rounded-full bg-surface-sunken">
-              <div
-                className="h-full rounded-full bg-accent-primary transition-all"
-                style={{
-                  width: `${(progress.hosts_scanned / progress.total_hosts) * 100}%`,
-                }}
-              />
-            </div>
-            <span className="text-xs text-text-secondary tabular-nums">
-              {progress.hosts_scanned}/{progress.total_hosts}
-            </span>
+            <Radar size={20} className="text-accent-primary" />
+            <h2 className="text-sm font-semibold text-text-primary">
+              {t('network.explore')}
+            </h2>
           </div>
-          <span className="text-xs text-text-secondary">
-            {t('network.hostsFound', { count: progress.hosts_found })}
-          </span>
-        </div>
-      )}
 
-      {/* Summary badges */}
-      {results.length > 0 && !scanning && (
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="flex items-center gap-1 rounded bg-surface-elevated px-2 py-1 text-xs text-text-primary">
-            <Server size={11} />
-            {t('network.hostsFound', { count: results.length })}
-          </span>
-          {Object.entries(serviceCounts).map(([svc, count]) => (
+          {/* CIDR input row — supports comma-separated subnets */}
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={cidr}
+              onChange={(e) => setCidr(e.target.value)}
+              placeholder={cidrPlaceholder}
+              className="flex-1 rounded-md border border-border-default bg-surface-primary px-3 py-1.5 text-sm text-text-primary placeholder:text-text-disabled focus:border-border-focus focus:outline-none"
+              onKeyDown={(e) => e.key === 'Enter' && handleScan()}
+            />
             <button
-              key={svc}
-              onClick={() => setFilterService(filterService === svc ? 'all' : svc)}
+              data-testid="scan-start-btn"
+              onClick={handleScan}
+              disabled={scanning || !cidr.trim()}
               className={clsx(
-                'rounded px-2 py-1 text-xs font-medium transition-colors',
-                filterService === svc
-                  ? 'bg-accent-primary/20 text-accent-primary'
-                  : SERVICE_PORT_COLORS[svc] ?? 'bg-surface-elevated text-text-secondary'
+                'flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors shrink-0',
+                scanning
+                  ? 'cursor-not-allowed bg-interactive-disabled text-text-disabled'
+                  : 'bg-interactive-default text-text-inverse hover:bg-interactive-hover'
               )}
             >
-              {svc}: {count}
+              {scanning ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+              {scanning ? t('network.scanning') : t('network.explore')}
             </button>
-          ))}
-          {filterService !== 'all' && (
+          </div>
+
+          {/* Service filter toggles */}
+          <div>
             <button
-              onClick={() => setFilterService('all')}
-              className="flex items-center gap-1 rounded px-2 py-1 text-xs text-text-secondary hover:text-text-primary"
+              onClick={() => setShowFilters(!showFilters)}
+              className="flex items-center gap-1.5 text-xs text-text-secondary hover:text-text-primary transition-colors"
             >
-              <X size={10} />
-              {t('network.clearFilter')}
+              <Filter size={12} />
+              {t('network.serviceFilters')}
+              {showFilters ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
             </button>
-          )}
-        </div>
-      )}
 
-      {/* Sort controls */}
-      {results.length > 0 && (
-        <div className="flex items-center gap-2 text-xs text-text-secondary">
-          <span>{t('network.sortBy')}:</span>
-          {(['ip', 'ports', 'response'] as const).map((key) => (
-            <button
-              key={key}
-              onClick={() => setSortBy(key)}
-              className={clsx(
-                'rounded px-2 py-0.5 transition-colors',
-                sortBy === key
-                  ? 'bg-surface-elevated text-text-primary'
-                  : 'hover:text-text-primary'
-              )}
-            >
-              {t(`network.sort_${key}`)}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Results table */}
-      {filteredResults.length > 0 && (
-        <div className="overflow-auto rounded-md border border-border-default">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border-subtle bg-surface-secondary">
-                <th className="px-3 py-2 text-left font-medium text-text-secondary">{t('network.ip')}</th>
-                <th className="px-3 py-2 text-left font-medium text-text-secondary">{t('network.hostname')}</th>
-                <th className="px-3 py-2 text-left font-medium text-text-secondary">{t('network.os')}</th>
-                <th className="px-3 py-2 text-left font-medium text-text-secondary">{t('network.openPorts')}</th>
-                <th className="px-3 py-2 text-left font-medium text-text-secondary">{t('network.responseTime')}</th>
-                <th className="px-3 py-2 text-left font-medium text-text-secondary">{t('network.sessionType')}</th>
-                <th className="px-3 py-2 text-right font-medium text-text-secondary"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredResults.map((result) => (
-                <tr key={result.ip} className="border-b border-border-subtle last:border-0 hover:bg-surface-secondary">
-                  <td className="px-3 py-2 text-text-primary">{result.ip}</td>
-                  <td className="px-3 py-2 text-text-secondary">{result.hostname ?? '—'}</td>
-                  <td className="px-3 py-2 text-text-secondary">{result.os_guess ?? '—'}</td>
-                  <td className="px-3 py-2">
-                    <div className="flex flex-wrap gap-1">
-                      {result.open_ports.map((p) => (
-                        <span
-                          key={p.port}
-                          className={clsx(
-                            'rounded bg-surface-elevated px-1.5 py-0.5 text-xs text-text-secondary',
-                            SERVICE_PORT_COLORS[p.service_name] ?? ''
-                          )}
-                        >
-                          {p.port}/{p.service_name}
-                        </span>
-                      ))}
-                    </div>
-                  </td>
-                  <td className="px-3 py-2 text-text-secondary">{result.response_time_ms.toFixed(0)}ms</td>
-                  <td className="px-3 py-2 text-text-secondary">{result.suggested_session_type ? SESSION_ICON[result.suggested_session_type] ?? result.suggested_session_type : '—'}</td>
-                  <td className="px-3 py-2 text-right">
-                    {result.suggested_session_type && (
-                      <button
-                        onClick={() => handleConnect(result)}
-                        className="flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-accent-primary hover:bg-surface-elevated transition-colors"
-                      >
-                        <PlugZap size={12} />
-                        {t('network.connect')}
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Save all */}
-      {results.length > 0 && !scanning && (
-        <div className="flex items-center gap-3">
-          <button
-            onClick={handleSaveAsSessions}
-            className="flex items-center gap-2 rounded-md bg-surface-elevated px-3 py-1.5 text-xs text-text-primary hover:bg-surface-secondary transition-colors"
-          >
-            <Save size={12} />
-            {t('network.saveAsSessions')}
-          </button>
-          {saveCount !== null && (
-            <span className="text-xs text-text-secondary">
-              {saveCount} {saveCount === 1 ? 'session' : 'sessions'} saved
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* Connection history */}
-      {connectionHistory.length > 0 && (
-        <div className="flex flex-col gap-1.5 rounded-md border border-border-subtle bg-surface-secondary p-3">
-          <button
-            onClick={() => setShowHistory((v) => !v)}
-            className="flex items-center gap-1.5 text-xs font-medium text-text-secondary hover:text-text-primary transition-colors"
-          >
-            <History size={12} />
-            Connection History ({connectionHistory.length})
-            {showHistory ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-          </button>
-          {showHistory && (
-            <div className="flex flex-col gap-1 mt-1">
-              {connectionHistory.map((attempt) => {
-                const label = attempt.hostname ?? attempt.host;
-                let statusIcon;
-                if (attempt.status === 'success') {
-                  statusIcon = <CheckCircle2 size={12} className="text-status-connected shrink-0" />;
-                } else if (attempt.status === 'failed') {
-                  statusIcon = <AlertCircle size={12} className="text-status-disconnected shrink-0" />;
-                } else {
-                  statusIcon = <Clock size={12} className="text-text-disabled shrink-0 animate-pulse" />;
-                }
-                const time = new Date(attempt.timestamp).toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  second: '2-digit',
-                });
-                return (
-                  <div key={attempt.id} className="flex items-start gap-2 rounded px-2 py-1.5 hover:bg-surface-primary text-xs">
-                    {statusIcon}
-                    <div className="flex-1 min-w-0">
-                      <span className="text-text-primary">{label}</span>
-                      <span className="text-text-disabled mx-1">·</span>
-                      <span className="text-text-secondary uppercase">{attempt.serviceType}</span>
-                      {attempt.error && (
-                        <p className="text-status-disconnected truncate mt-0.5">{attempt.error}</p>
+            {showFilters && (
+              <div className="mt-2 flex flex-col gap-2 rounded-md border border-border-subtle bg-surface-secondary p-3">
+                <div className="flex flex-wrap gap-1.5">
+                  {WELL_KNOWN_SERVICES.map((svc) => (
+                    <button
+                      key={typeof svc.id === 'string' ? svc.id : `custom-${svc.port}`}
+                      onClick={() => toggleService(typeof svc.id === 'string' ? svc.id : String(svc.port))}
+                      className={clsx(
+                        'rounded-full px-2.5 py-1 text-xs font-medium transition-colors border',
+                        selectedServices.has(typeof svc.id === 'string' ? svc.id : String(svc.port))
+                          ? 'bg-accent-primary/20 text-accent-primary border-accent-primary/40'
+                          : 'bg-surface-primary text-text-secondary border-border-subtle hover:border-border-default'
                       )}
-                    </div>
-                    <span className="text-text-disabled tabular-nums shrink-0">{time}</span>
-                  </div>
-                );
-              })}
+                    >
+                      {svc.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Plus size={12} className="text-text-secondary shrink-0" />
+                  <input
+                    type="text"
+                    value={extraPortsInput}
+                    onChange={(e) => setExtraPortsInput(e.target.value)}
+                    placeholder={t('network.extraPortsPlaceholder')}
+                    className="flex-1 rounded border border-border-default bg-surface-primary px-2 py-1 text-xs text-text-primary placeholder:text-text-disabled focus:border-border-focus focus:outline-none"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Progress */}
+          {scanning && aggregateProgress && aggregateProgress.total_hosts > 0 && (
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-2">
+                <div className="h-1.5 flex-1 rounded-full bg-surface-sunken">
+                  <div
+                    className="h-full rounded-full bg-accent-primary transition-all"
+                    style={{ width: `${(aggregateProgress.hosts_scanned / aggregateProgress.total_hosts) * 100}%` }}
+                  />
+                </div>
+                <span className="text-xs text-text-secondary tabular-nums">
+                  {aggregateProgress.hosts_scanned}/{aggregateProgress.total_hosts}
+                </span>
+              </div>
+              <span className="text-xs text-text-secondary">
+                {t('network.hostsFound', { count: aggregateProgress.hosts_found })}
+                {activeScanIdsRef.current.size > 1 && (
+                  <span className="ml-1 text-text-disabled">({activeScanIdsRef.current.size} subnets)</span>
+                )}
+              </span>
+            </div>
+          )}
+
+          {/* Summary badges + search */}
+          {results.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="flex items-center gap-1 rounded bg-surface-elevated px-2 py-1 text-xs text-text-primary">
+                  <Server size={11} />
+                  {t('network.hostsFound', { count: results.length })}
+                </span>
+                {Object.entries(serviceCounts).map(([svc, count]) => (
+                  <button
+                    key={svc}
+                    onClick={() => setFilterService(filterService === svc ? 'all' : svc)}
+                    className={clsx(
+                      'rounded px-2 py-1 text-xs font-medium transition-colors',
+                      filterService === svc
+                        ? 'bg-accent-primary/20 text-accent-primary'
+                        : SERVICE_PORT_COLORS[svc] ?? 'bg-surface-elevated text-text-secondary'
+                    )}
+                  >
+                    {svc}: {count}
+                  </button>
+                ))}
+                {filterService !== 'all' && (
+                  <button
+                    onClick={() => setFilterService('all')}
+                    className="flex items-center gap-1 rounded px-2 py-1 text-xs text-text-secondary hover:text-text-primary"
+                  >
+                    <X size={10} />
+                    {t('network.clearFilter')}
+                  </button>
+                )}
+              </div>
+              {/* Search input */}
+              <div className="relative">
+                <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-disabled pointer-events-none" />
+                <input
+                  type="text"
+                  value={searchFilter}
+                  onChange={(e) => setSearchFilter(e.target.value)}
+                  placeholder="Filter by IP, hostname or service…"
+                  className="w-full rounded border border-border-subtle bg-surface-primary pl-7 pr-3 py-1.5 text-xs text-text-primary placeholder:text-text-disabled focus:border-border-focus focus:outline-none"
+                />
+                {searchFilter && (
+                  <button
+                    onClick={() => setSearchFilter('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-text-disabled hover:text-text-primary"
+                  >
+                    <X size={11} />
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Results table */}
+          {filteredResults.length > 0 && (
+            <div className="overflow-auto rounded-md border border-border-default">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border-subtle bg-surface-secondary">
+                    {(
+                      [
+                        { key: 'ip' as SortKey, label: t('network.ip') },
+                        { key: 'hostname' as SortKey, label: t('network.hostname') },
+                        { key: null, label: t('network.os') },
+                        { key: 'ports' as SortKey, label: t('network.openPorts') },
+                        { key: 'response' as SortKey, label: t('network.responseTime') },
+                        { key: null, label: t('network.sessionType') },
+                        { key: null, label: '' },
+                      ] as { key: SortKey | null; label: string }[]
+                    ).map((col, i) => (
+                      <th
+                        key={i}
+                        className={clsx(
+                          'px-3 py-2 text-left font-medium text-text-secondary select-none',
+                          col.key && 'cursor-pointer hover:text-text-primary transition-colors'
+                        )}
+                        onClick={col.key ? () => handleSortColumn(col.key!) : undefined}
+                      >
+                        <span className="flex items-center gap-1">
+                          {col.label}
+                          {col.key && <SortIcon col={col.key} sortBy={sortBy} sortDir={sortDir} />}
+                        </span>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredResults.map((result) => (
+                    <tr key={result.ip} className="border-b border-border-subtle last:border-0 hover:bg-surface-secondary">
+                      <td className="px-3 py-2 text-text-primary font-mono text-xs">{result.ip}</td>
+                      <td className="px-3 py-2 text-text-secondary">{result.hostname ?? '—'}</td>
+                      <td className="px-3 py-2 text-text-secondary">{result.os_guess ?? '—'}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex flex-wrap gap-1">
+                          {result.open_ports.map((p) => (
+                            <span
+                              key={p.port}
+                              className={clsx(
+                                'rounded bg-surface-elevated px-1.5 py-0.5 text-xs text-text-secondary',
+                                SERVICE_PORT_COLORS[p.service_name] ?? ''
+                              )}
+                            >
+                              {p.port}/{p.service_name}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-text-secondary">{result.response_time_ms.toFixed(0)}ms</td>
+                      <td className="px-3 py-2 text-text-secondary">
+                        {result.suggested_session_type
+                          ? SESSION_ICON[result.suggested_session_type] ?? result.suggested_session_type
+                          : '—'}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {result.suggested_session_type && SESSION_TYPE_MAP[result.suggested_session_type] && (
+                          <button
+                            onClick={() => handleConnect(result)}
+                            className="flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-accent-primary hover:bg-surface-elevated transition-colors"
+                          >
+                            <PlugZap size={12} />
+                            {t('network.connect')}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Save all */}
+          {results.length > 0 && !scanning && (
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleSaveAsSessions}
+                className="flex items-center gap-2 rounded-md bg-surface-elevated px-3 py-1.5 text-xs text-text-primary hover:bg-surface-secondary transition-colors"
+              >
+                <Save size={12} />
+                {t('network.saveAsSessions')}
+              </button>
+              {saveCount !== null && (
+                <span className="text-xs text-text-secondary">
+                  {saveCount} {saveCount === 1 ? 'session' : 'sessions'} saved
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Connection history */}
+          {connectionHistory.length > 0 && (
+            <div className="flex flex-col gap-1.5 rounded-md border border-border-subtle bg-surface-secondary p-3">
+              <button
+                onClick={() => setShowHistory((v) => !v)}
+                className="flex items-center gap-1.5 text-xs font-medium text-text-secondary hover:text-text-primary transition-colors"
+              >
+                <History size={12} />
+                Connection History ({connectionHistory.length})
+                {showHistory ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+              </button>
+              {showHistory && (
+                <div className="flex flex-col gap-1 mt-1">
+                  {connectionHistory.map((attempt) => {
+                    const label = attempt.hostname ?? attempt.host;
+                    let statusIcon;
+                    if (attempt.status === 'success') {
+                      statusIcon = <CheckCircle2 size={12} className="text-status-connected shrink-0" />;
+                    } else if (attempt.status === 'failed') {
+                      statusIcon = <AlertCircle size={12} className="text-status-disconnected shrink-0" />;
+                    } else {
+                      statusIcon = <Clock size={12} className="text-text-disabled shrink-0 animate-pulse" />;
+                    }
+                    const time = new Date(attempt.timestamp).toLocaleTimeString([], {
+                      hour: '2-digit', minute: '2-digit', second: '2-digit',
+                    });
+                    return (
+                      <div key={attempt.id} className="flex items-start gap-2 rounded px-2 py-1.5 hover:bg-surface-primary text-xs">
+                        {statusIcon}
+                        <div className="flex-1 min-w-0">
+                          <span className="text-text-primary">{label}</span>
+                          <span className="text-text-disabled mx-1">·</span>
+                          <span className="text-text-secondary uppercase">{attempt.serviceType}</span>
+                          {attempt.error && (
+                            <p className="text-status-disconnected truncate mt-0.5">{attempt.error}</p>
+                          )}
+                        </div>
+                        <span className="text-text-disabled tabular-nums shrink-0">{time}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Empty state */}
+          {!scanning && results.length === 0 && (
+            <div className="flex flex-col items-center justify-center gap-3 py-8 text-center flex-1">
+              <Radar size={32} className="text-text-disabled" />
+              <p className="text-xs text-text-secondary px-4">
+                {t('network.exploreEmptyState')}
+              </p>
             </div>
           )}
         </div>
-      )}
-
-      {/* Empty state */}
-      {!scanning && results.length === 0 && (
-        <div className="flex flex-col items-center justify-center gap-3 py-8 text-center flex-1">
-          <Radar size={32} className="text-text-disabled" />
-          <p className="text-xs text-text-secondary px-4">
-            {t('network.exploreEmptyState')}
-          </p>
-        </div>
-      )}
-    </div>
       )}
     </div>
   );

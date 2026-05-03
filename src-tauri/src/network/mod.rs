@@ -41,6 +41,7 @@ use tokio::net::{TcpStream, UdpSocket};
 use tokio::sync::Semaphore;
 use uuid::Uuid;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use if_addrs;
 
 // ── Error ───────────────────────────────────────────────────────────────
 
@@ -1445,6 +1446,48 @@ async fn platform_wifi_scan() -> Result<(Vec<WifiNetwork>, Option<WifiNetwork>, 
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 async fn platform_wifi_scan() -> Result<(Vec<WifiNetwork>, Option<WifiNetwork>, Option<String>), NetworkError> {
     Err(NetworkError::Io("WiFi scanning not supported on this platform".into()))
+}
+
+// ── Local subnet detection ──────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LocalSubnet {
+    pub interface: String,
+    pub cidr: String,
+    pub ip: String,
+}
+
+#[tauri::command]
+pub async fn network_local_subnets() -> Vec<LocalSubnet> {
+    let mut subnets: Vec<LocalSubnet> = Vec::new();
+
+    if let Ok(interfaces) = if_addrs::get_if_addrs() {
+        for iface in interfaces {
+            if iface.is_loopback() {
+                continue;
+            }
+            if let if_addrs::IfAddr::V4(v4) = iface.addr {
+                let ip = v4.ip;
+                let octets = ip.octets();
+                // Skip loopback range and link-local (169.254.x.x)
+                if octets[0] == 127 || (octets[0] == 169 && octets[1] == 254) {
+                    continue;
+                }
+                let netmask = v4.netmask;
+                let prefix = u32::from(netmask).count_ones() as u8;
+                let network = Ipv4Addr::from(u32::from(ip) & u32::from(netmask));
+                subnets.push(LocalSubnet {
+                    interface: iface.name.clone(),
+                    cidr: format!("{}/{}", network, prefix),
+                    ip: ip.to_string(),
+                });
+            }
+        }
+    }
+
+    subnets.sort_by(|a, b| a.cidr.cmp(&b.cidr));
+    subnets.dedup_by(|a, b| a.cidr == b.cidr);
+    subnets
 }
 
 #[tauri::command]

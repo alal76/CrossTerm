@@ -12,7 +12,6 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
-  ChevronDown,
   User,
   Sun,
   Moon,
@@ -114,160 +113,6 @@ function StatusDot({ status }: { readonly status: ConnectionStatus }) {
 }
 
 // ─── Region A: Title Bar ───────────────────────────────────────
-
-interface TitleBarActions {
-  onNewLocalShell: () => void;
-  onNewSSH: () => void;
-  onNewConnection: (type: SessionType) => void;
-  onOpenNetworkExplorer: () => void;
-  onOpenCredentials: () => void;
-  onOpenSettings: () => void;
-  onLockVault: () => void;
-  onDeleteVault: () => void;
-  onChangePassword: () => void;
-}
-
-function ConnectionsMenu({
-  anchorRef,
-  onClose,
-  onNewLocalShell,
-  onNewSSH,
-  onNewConnection,
-  onOpenNetworkExplorer,
-}: {
-  readonly anchorRef: React.RefObject<HTMLButtonElement | null>;
-  readonly onClose: () => void;
-  readonly onNewLocalShell: () => void;
-  readonly onNewSSH: () => void;
-  readonly onNewConnection: (type: SessionType) => void;
-  readonly onOpenNetworkExplorer: () => void;
-}) {
-  const { t } = useTranslation();
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (
-        menuRef.current && !menuRef.current.contains(e.target as Node) &&
-        anchorRef.current && !anchorRef.current.contains(e.target as Node)
-      ) { onClose(); }
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [onClose, anchorRef]);
-
-  const rect = anchorRef.current?.getBoundingClientRect();
-  const left = rect ? rect.left : 0;
-  const top = rect ? rect.bottom + 2 : 40;
-
-  const items = [
-    { label: t("newTabMenu.localShell"), icon: <Terminal size={13} />, action: onNewLocalShell },
-    { label: t("newTabMenu.ssh"), icon: <Globe size={13} />, action: onNewSSH },
-    { label: t("sessionTypes.telnet"), icon: <Radio size={13} />, action: () => onNewConnection(SessionType.Telnet) },
-    { label: t("sessionTypes.rdp"), icon: <Monitor size={13} />, action: () => onNewConnection(SessionType.RDP) },
-    { label: t("sessionTypes.vnc"), icon: <Tv2 size={13} />, action: () => onNewConnection(SessionType.VNC) },
-    { label: t("newTabMenu.sftp"), icon: <FolderTree size={13} />, action: () => onNewConnection(SessionType.SFTP) },
-  ];
-
-  return (
-    <div
-      ref={menuRef}
-      className="fixed z-[9000] min-w-[200px] bg-surface-elevated border border-border-default rounded-lg shadow-[var(--shadow-3)] py-1 overflow-hidden"
-      style={{ left, top, animation: "paletteIn var(--duration-short) var(--ease-decelerate)" }}
-    >
-      {items.map((item) => (
-        <button
-          key={item.label}
-          onClick={() => { item.action(); onClose(); }}
-          className="flex items-center gap-2.5 w-full px-3 py-1.5 text-xs text-left text-text-secondary hover:bg-surface-secondary hover:text-text-primary transition-colors"
-        >
-          <span className="shrink-0 text-text-disabled">{item.icon}</span>
-          {item.label}
-        </button>
-      ))}
-      <div className="h-px bg-border-subtle mx-2 my-1" />
-      <button
-        onClick={() => { onOpenNetworkExplorer(); onClose(); }}
-        className="flex items-center gap-2.5 w-full px-3 py-1.5 text-xs text-left text-text-secondary hover:bg-surface-secondary hover:text-text-primary transition-colors"
-      >
-        <Radar size={13} className="shrink-0 text-text-disabled" />
-        {t("network.explore")}
-      </button>
-    </div>
-  );
-}
-
-function VaultMenu({
-  anchorRef,
-  onClose,
-  onOpenCredentials,
-  onLockVault,
-  onDeleteVault,
-  onChangePassword,
-}: {
-  readonly anchorRef: React.RefObject<HTMLButtonElement | null>;
-  readonly onClose: () => void;
-  readonly onOpenCredentials: () => void;
-  readonly onLockVault: () => void;
-  readonly onDeleteVault: () => void;
-  readonly onChangePassword: () => void;
-}) {
-  const { t } = useTranslation();
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (
-        menuRef.current && !menuRef.current.contains(e.target as Node) &&
-        anchorRef.current && !anchorRef.current.contains(e.target as Node)
-      ) { onClose(); }
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [onClose, anchorRef]);
-
-  const rect = anchorRef.current?.getBoundingClientRect();
-  const left = rect ? rect.left : 0;
-  const top = rect ? rect.bottom + 2 : 40;
-
-  return (
-    <div
-      ref={menuRef}
-      className="fixed z-[9000] min-w-[200px] bg-surface-elevated border border-border-default rounded-lg shadow-[var(--shadow-3)] py-1 overflow-hidden"
-      style={{ left, top, animation: "paletteIn var(--duration-short) var(--ease-decelerate)" }}
-    >
-      <button
-        onClick={() => { onOpenCredentials(); onClose(); }}
-        className="flex items-center gap-2.5 w-full px-3 py-1.5 text-xs text-left text-text-secondary hover:bg-surface-secondary hover:text-text-primary transition-colors"
-      >
-        <KeyRound size={13} className="shrink-0 text-text-disabled" />
-        {t("vault.credentials")}
-      </button>
-      <button
-        onClick={() => { onChangePassword(); onClose(); }}
-        className="flex items-center gap-2.5 w-full px-3 py-1.5 text-xs text-left text-text-secondary hover:bg-surface-secondary hover:text-text-primary transition-colors"
-      >
-        <Lock size={13} className="shrink-0 text-text-disabled" />
-        {t("vault.changePassword")}
-      </button>
-      <div className="h-px bg-border-subtle mx-2 my-1" />
-      <button
-        onClick={() => { onLockVault(); onClose(); }}
-        className="flex items-center gap-2.5 w-full px-3 py-1.5 text-xs text-left text-text-secondary hover:bg-surface-secondary hover:text-text-primary transition-colors"
-      >
-        <Lock size={13} className="shrink-0 text-text-disabled" />
-        {t("vault.lockAll")}
-      </button>
-      <button
-        onClick={() => { onDeleteVault(); onClose(); }}
-        className="flex items-center gap-2.5 w-full px-3 py-1.5 text-xs text-left text-status-disconnected hover:bg-status-disconnected/10 transition-colors"
-      >
-        <Trash2 size={13} className="shrink-0" />
-        {t("vault.deleteVault")}
-      </button>
-    </div>
-  );
-}
 
 function VaultDeleteDialog({ onClose }: { readonly onClose: () => void }) {
   const { t } = useTranslation();
@@ -442,19 +287,15 @@ function ChangePasswordDialog({ onClose }: { readonly onClose: () => void }) {
   );
 }
 
-function TitleBar({ actions }: { readonly actions: TitleBarActions }) {
+function TitleBar() {
   const { t } = useTranslation();
   const activeProfileId = useAppStore((s) => s.activeProfileId);
   const profiles = useAppStore((s) => s.profiles);
   const theme = useAppStore((s) => s.theme);
   const setTheme = useAppStore((s) => s.setTheme);
+  const setSettingsOpen = useAppStore((s) => s.setSettingsOpen);
   const showNotificationHistory = useAppStore((s) => s.showNotificationHistory);
   const setShowNotificationHistory = useAppStore((s) => s.setShowNotificationHistory);
-
-  const [showConnMenu, setShowConnMenu] = useState(false);
-  const [showVaultMenu, setShowVaultMenu] = useState(false);
-  const connBtnRef = useRef<HTMLButtonElement | null>(null);
-  const vaultBtnRef = useRef<HTMLButtonElement | null>(null);
 
   const activeProfile = profiles.find((p) => p.id === activeProfileId);
 
@@ -479,67 +320,15 @@ function TitleBar({ actions }: { readonly actions: TitleBarActions }) {
         CrossTerm
       </span>
 
-      {/* Connections menu */}
-      <button
-        ref={connBtnRef}
-        onClick={() => { setShowConnMenu((v) => !v); setShowVaultMenu(false); }}
-        className={clsx(
-          "flex items-center gap-1 px-2.5 py-1 rounded text-xs transition-colors shrink-0",
-          showConnMenu
-            ? "bg-surface-elevated text-text-primary"
-            : "text-text-secondary hover:text-text-primary hover:bg-surface-elevated"
-        )}
-      >
-        Connect
-        <ChevronDown size={11} className={clsx("transition-transform", showConnMenu && "rotate-180")} />
-      </button>
-      {showConnMenu && (
-        <ConnectionsMenu
-          anchorRef={connBtnRef}
-          onClose={() => setShowConnMenu(false)}
-          onNewLocalShell={actions.onNewLocalShell}
-          onNewSSH={actions.onNewSSH}
-          onNewConnection={actions.onNewConnection}
-          onOpenNetworkExplorer={actions.onOpenNetworkExplorer}
-        />
-      )}
-
-      {/* Vault menu */}
-      <button
-        ref={vaultBtnRef}
-        onClick={() => { setShowVaultMenu((v) => !v); setShowConnMenu(false); }}
-        className={clsx(
-          "flex items-center gap-1 px-2.5 py-1 rounded text-xs transition-colors shrink-0",
-          showVaultMenu
-            ? "bg-surface-elevated text-text-primary"
-            : "text-text-secondary hover:text-text-primary hover:bg-surface-elevated"
-        )}
-      >
-        Vault
-        <ChevronDown size={11} className={clsx("transition-transform", showVaultMenu && "rotate-180")} />
-      </button>
-      {showVaultMenu && (
-        <VaultMenu
-          anchorRef={vaultBtnRef}
-          onClose={() => setShowVaultMenu(false)}
-          onOpenCredentials={actions.onOpenCredentials}
-          onLockVault={actions.onLockVault}
-          onDeleteVault={actions.onDeleteVault}
-          onChangePassword={actions.onChangePassword}
-        />
-      )}
-
       <div className="flex-1" data-tauri-drag-region />
 
-      {/* Settings */}
       <button
-        onClick={actions.onOpenSettings}
+        onClick={() => setSettingsOpen(true)}
         className="p-1.5 rounded hover:bg-surface-elevated text-text-secondary hover:text-text-primary transition-colors"
         title="Settings (Ctrl+,)"
       >
         <Settings size={14} />
       </button>
-
       <button
         onClick={() => setShowNotificationHistory(!showNotificationHistory)}
         className="p-1.5 rounded hover:bg-surface-elevated text-text-secondary hover:text-text-primary transition-colors"
@@ -709,12 +498,24 @@ function NewTabDropdown({
   onNewLocalShell,
   onNewSSH,
   onNewSFTP,
+  onNewConnection,
+  onOpenNetworkExplorer,
+  onOpenCredentials,
+  onLockVault,
+  onDeleteVault,
+  onChangePassword,
   onClose,
   anchorRef,
 }: {
   readonly onNewLocalShell: () => void;
   readonly onNewSSH: () => void;
   readonly onNewSFTP: () => void;
+  readonly onNewConnection: (type: SessionType) => void;
+  readonly onOpenNetworkExplorer: () => void;
+  readonly onOpenCredentials: () => void;
+  readonly onLockVault: () => void;
+  readonly onDeleteVault: () => void;
+  readonly onChangePassword: () => void;
   readonly onClose: () => void;
   readonly anchorRef: React.RefObject<HTMLButtonElement | null>;
 }) {
@@ -738,32 +539,68 @@ function NewTabDropdown({
   const left = rect ? rect.left : 0;
   const top = rect ? rect.bottom + 2 : 0;
 
+  const menuItemCls = "flex items-center gap-2.5 w-full px-3 py-1.5 text-xs text-left text-text-secondary hover:bg-surface-secondary hover:text-text-primary transition-colors";
+
   return (
     <div
       ref={menuRef}
-      className="fixed z-[8000] min-w-[180px] bg-surface-elevated border border-border-default rounded-lg shadow-[var(--shadow-3)] py-1"
+      className="fixed z-[8000] min-w-[210px] bg-surface-elevated border border-border-default rounded-lg shadow-[var(--shadow-3)] py-1"
       style={{ left, top, animation: "paletteIn var(--duration-short) var(--ease-decelerate)" }}
     >
-      <button
-        onClick={() => { onNewLocalShell(); onClose(); }}
-        className="flex items-center gap-2.5 w-full px-3 py-1.5 text-xs text-left text-text-secondary hover:bg-surface-secondary hover:text-text-primary transition-colors"
-      >
-        <Terminal size={13} className="shrink-0" />
+      <div className="px-3 pt-1 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-text-disabled">
+        Connect
+      </div>
+      <button onClick={() => { onNewLocalShell(); onClose(); }} className={menuItemCls}>
+        <Terminal size={13} className="shrink-0 text-text-disabled" />
         {t("newTabMenu.localShell")}
       </button>
-      <button
-        onClick={() => { onNewSSH(); onClose(); }}
-        className="flex items-center gap-2.5 w-full px-3 py-1.5 text-xs text-left text-text-secondary hover:bg-surface-secondary hover:text-text-primary transition-colors"
-      >
-        <Globe size={13} className="shrink-0" />
+      <button onClick={() => { onNewSSH(); onClose(); }} className={menuItemCls}>
+        <Globe size={13} className="shrink-0 text-text-disabled" />
         {t("newTabMenu.ssh")}
       </button>
-      <button
-        onClick={() => { onNewSFTP(); onClose(); }}
-        className="flex items-center gap-2.5 w-full px-3 py-1.5 text-xs text-left text-text-secondary hover:bg-surface-secondary hover:text-text-primary transition-colors"
-      >
-        <FolderTree size={13} className="shrink-0" />
+      <button onClick={() => { onNewConnection(SessionType.Telnet); onClose(); }} className={menuItemCls}>
+        <Radio size={13} className="shrink-0 text-text-disabled" />
+        {t("sessionTypes.telnet")}
+      </button>
+      <button onClick={() => { onNewConnection(SessionType.RDP); onClose(); }} className={menuItemCls}>
+        <Monitor size={13} className="shrink-0 text-text-disabled" />
+        {t("sessionTypes.rdp")}
+      </button>
+      <button onClick={() => { onNewConnection(SessionType.VNC); onClose(); }} className={menuItemCls}>
+        <Tv2 size={13} className="shrink-0 text-text-disabled" />
+        {t("sessionTypes.vnc")}
+      </button>
+      <button onClick={() => { onNewSFTP(); onClose(); }} className={menuItemCls}>
+        <FolderTree size={13} className="shrink-0 text-text-disabled" />
         {t("newTabMenu.sftp")}
+      </button>
+      <div className="h-px bg-border-subtle mx-2 my-1" />
+      <button onClick={() => { onOpenNetworkExplorer(); onClose(); }} className={menuItemCls}>
+        <Radar size={13} className="shrink-0 text-text-disabled" />
+        {t("network.explore")}
+      </button>
+      <div className="h-px bg-border-subtle mx-2 my-1" />
+      <div className="px-3 pt-1 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-text-disabled">
+        Vault
+      </div>
+      <button onClick={() => { onOpenCredentials(); onClose(); }} className={menuItemCls}>
+        <KeyRound size={13} className="shrink-0 text-text-disabled" />
+        {t("vault.credentials")}
+      </button>
+      <button onClick={() => { onChangePassword(); onClose(); }} className={menuItemCls}>
+        <Lock size={13} className="shrink-0 text-text-disabled" />
+        {t("vault.changePassword")}
+      </button>
+      <button onClick={() => { onLockVault(); onClose(); }} className={menuItemCls}>
+        <Lock size={13} className="shrink-0 text-text-disabled" />
+        {t("vault.lockAll")}
+      </button>
+      <button
+        onClick={() => { onDeleteVault(); onClose(); }}
+        className="flex items-center gap-2.5 w-full px-3 py-1.5 text-xs text-left text-status-disconnected hover:bg-status-disconnected/10 transition-colors"
+      >
+        <Trash2 size={13} className="shrink-0" />
+        {t("vault.deleteVault")}
       </button>
     </div>
   );
@@ -773,10 +610,22 @@ function TabBar({
   onNewLocalShell,
   onNewSSH,
   onNewSFTP,
+  onNewConnection,
+  onOpenNetworkExplorer,
+  onOpenCredentials,
+  onLockVault,
+  onDeleteVault,
+  onChangePassword,
 }: {
   readonly onNewLocalShell: () => void;
   readonly onNewSSH: () => void;
   readonly onNewSFTP: () => void;
+  readonly onNewConnection: (type: SessionType) => void;
+  readonly onOpenNetworkExplorer: () => void;
+  readonly onOpenCredentials: () => void;
+  readonly onLockVault: () => void;
+  readonly onDeleteVault: () => void;
+  readonly onChangePassword: () => void;
 }) {
   const { t } = useTranslation();
   const openTabs = useSessionStore((s) => s.openTabs);
@@ -925,6 +774,12 @@ function TabBar({
             onNewLocalShell={onNewLocalShell}
             onNewSSH={onNewSSH}
             onNewSFTP={onNewSFTP}
+            onNewConnection={onNewConnection}
+            onOpenNetworkExplorer={onOpenNetworkExplorer}
+            onOpenCredentials={onOpenCredentials}
+            onLockVault={onLockVault}
+            onDeleteVault={onDeleteVault}
+            onChangePassword={onChangePassword}
             onClose={() => setShowNewTabDropdown(false)}
             anchorRef={newTabBtnRef}
           />
@@ -1827,21 +1682,7 @@ export default function App() {
             {liveAnnouncement}
           </div>
           {/* Region A */}
-          <TitleBar actions={{
-            onNewLocalShell: handleNewLocalShell,
-            onNewSSH: () => setShowQuickConnect(true),
-            onNewConnection: (type) => {
-              setNewSessionDefaultType(type);
-              setEditingSession(null);
-              setShowSessionEditor(true);
-            },
-            onOpenNetworkExplorer: handleOpenNetworkTab,
-            onOpenCredentials: () => setShowCredentialManager(true),
-            onOpenSettings: () => setSettingsOpen(true),
-            onLockVault: () => lockAllVaults(),
-            onDeleteVault: () => setShowVaultDeleteDialog(true),
-            onChangePassword: () => setShowChangePasswordDialog(true),
-          }} />
+          <TitleBar />
 
           <div className="flex flex-1 min-h-0">
             {/* Region C - hidden on compact via Sidebar internal logic */}
@@ -1862,6 +1703,16 @@ export default function App() {
                   setBottomPanelMode(BottomPanelMode.SFTP);
                   if (!bottomPanelVisible) toggleBottomPanel();
                 }}
+                onNewConnection={(type) => {
+                  setNewSessionDefaultType(type);
+                  setEditingSession(null);
+                  setShowSessionEditor(true);
+                }}
+                onOpenNetworkExplorer={handleOpenNetworkTab}
+                onOpenCredentials={() => setShowCredentialManager(true)}
+                onLockVault={() => lockAllVaults()}
+                onDeleteVault={() => setShowVaultDeleteDialog(true)}
+                onChangePassword={() => setShowChangePasswordDialog(true)}
               />
 
               {/* Region D */}
