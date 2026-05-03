@@ -171,8 +171,8 @@ describe("VaultUnlock", () => {
       expect(mockInvoke).toHaveBeenCalledWith("vault_create", {
         profileId: "default",
         masterPassword: "strongpassword123",
-        name: undefined,
-        isDefault: undefined,
+        name: "My Vault",
+        isDefault: true,
       });
     });
   });

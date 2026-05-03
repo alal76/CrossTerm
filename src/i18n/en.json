@@ -157,7 +157,14 @@
     "currentPassword": "Current password",
     "newPassword": "New password",
     "confirmPassword": "Confirm new password",
-    "currentPasswordPlaceholder": "Enter current master password"
+    "currentPasswordPlaceholder": "Enter current master password",
+    "addNewVault": "Add new vault",
+    "newVaultName": "Vault name",
+    "newVaultNamePlaceholder": "My Vault",
+    "deleteVaultTitle": "Delete vault",
+    "deleteVaultPasswordHint": "Enter the vault password to confirm deletion",
+    "cancelAction": "Cancel",
+    "backToUnlock": "Back to unlock"
   },
   "snippets": {
     "title": "Snippets",
@@ -339,7 +346,6 @@
     "gpuAcceleration": "GPU Acceleration",
     "gpuAccelerationDescription": "Use hardware-accelerated rendering",
     "defaultShell": "Default Shell",
-
     "connections": "Connections",
     "connectionsDescription": "Timeout, reconnect, and concurrency limits",
     "fileTransfer": "File Transfer",
@@ -350,7 +356,6 @@
     "notificationsDescription": "Alerts and desktop notifications",
     "advancedCategory": "Advanced",
     "advancedDescription": "Logging, performance, and developer options",
-
     "fontLigatures": "Font Ligatures",
     "fontLigaturesDescription": "Render programming ligatures (e.g. => ≤ !=)",
     "lineHeight": "Line Height",
@@ -367,7 +372,6 @@
     "scrollOnKeystrokeDescription": "Jump to the latest output when you start typing",
     "wordSeparators": "Word Separators",
     "wordSeparatorsDescription": "Characters that delimit words for double-click selection",
-
     "sshPort": "Default SSH Port",
     "sshPortDescription": "Port used for new SSH connections (default 22)",
     "sshKeepalive": "SSH Keep-Alive Interval",
@@ -380,7 +384,6 @@
     "sshAgentForwardingDescription": "Forward local SSH agent to remote host",
     "sshX11Forwarding": "X11 Forwarding",
     "sshX11ForwardingDescription": "Forward X11 display over SSH tunnel",
-
     "connectionTimeout": "Connection Timeout",
     "connectionTimeoutDescription": "Seconds before a pending connection is aborted",
     "reconnectOnDisconnect": "Auto-Reconnect",
@@ -391,7 +394,6 @@
     "reconnectMaxAttemptsDescription": "Stop retrying after this many failed attempts (0 = unlimited)",
     "maxConcurrentConnections": "Max Concurrent Connections",
     "maxConcurrentConnectionsDescription": "Hard limit on simultaneous open sessions",
-
     "sftpDefaultDir": "Default Remote Directory",
     "sftpDefaultDirDescription": "Initial directory opened by the SFTP browser",
     "sftpEncoding": "SFTP Encoding",
@@ -402,7 +404,6 @@
     "transferPreserveTimestampsDescription": "Keep original file modification times after transfer",
     "transferConcurrentJobs": "Concurrent Transfer Jobs",
     "transferConcurrentJobsDescription": "Number of files to transfer in parallel",
-
     "startupBehavior": "On Launch",
     "startupBehaviorDescription": "What to do when CrossTerm starts",
     "confirmCloseTab": "Confirm Tab Close",
@@ -411,7 +412,6 @@
     "showStatusBarDescription": "Display the status bar at the bottom of the window",
     "windowAlwaysOnTop": "Always on Top",
     "windowAlwaysOnTopDescription": "Keep CrossTerm window above all other windows",
-
     "backspaceSendsDelete": "Backspace Sends DEL",
     "backspaceSendsDeleteDescription": "Send ASCII DEL (127) instead of BS (8) for the backspace key",
     "altIsMeta": "Alt Key as Meta",
@@ -422,7 +422,6 @@
     "homeEndScrollBufferDescription": "Home / End keys jump to the top or bottom of the scrollback buffer",
     "rightClickAction": "Right-Click Action",
     "rightClickActionDescription": "What happens when you right-click in the terminal",
-
     "notifyOnDisconnect": "Notify on Disconnect",
     "notifyOnDisconnectDescription": "Show a desktop notification when a session disconnects",
     "notifyOnBell": "Notify on Bell",
@@ -433,7 +432,6 @@
     "longProcessThresholdDescription": "Minimum seconds before a running command triggers an alert",
     "flashTabOnBell": "Flash Tab on Bell",
     "flashTabOnBellDescription": "Briefly highlight the tab header when the terminal bell fires",
-
     "logLevel": "Log Level",
     "logLevelDescription": "Verbosity of the application log (restart required)",
     "telemetryEnabled": "Send Crash Reports",
@@ -1037,7 +1035,6 @@
     "export": "Export Log",
     "noEntries": "No audit entries yet."
   },
-
   "android": {
     "sessions": "Sessions",
     "terminal": "Terminal",
