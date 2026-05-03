@@ -1,12 +1,37 @@
 import type { HelpArticle } from "@/types";
 
-// ── Raw help content bundled at build time ──
-//
-// Locale fallback pattern:
-// Help articles can be loaded from locale-specific paths under docs/help/{locale}/
-// (e.g. docs/help/en/, docs/help/de/). When a locale-specific article is not found,
-// the system falls back to the default English content defined below.
-// To add a new locale, create docs/help/{locale}/ with matching markdown files.
+/**
+ * helpContent.ts — in-app help articles bundled at build time.
+ *
+ * SOURCE OF TRUTH: docs/help/*.md
+ * This file is kept in sync with the MkDocs site source so the same prose
+ * appears both in the deployed documentation and in the in-app Help panel
+ * (F1 / ⌘? / sidebar help icon). When updating an article, edit the markdown
+ * file in docs/help/ first, then mirror the change here.
+ *
+ * MkDocs-specific syntax (admonitions: !!! tip, !!! note) is converted to
+ * plain markdown blockquotes or bold text because the in-app MarkdownRenderer
+ * uses a basic remark pipeline without the MkDocs extensions.
+ *
+ * LOCALE FALLBACK:
+ * Articles can be loaded from locale-specific paths under docs/help/{locale}/
+ * (e.g. docs/help/de/). When a locale-specific article is not found the system
+ * falls back to the English content defined here.
+ * To add a new locale, create docs/help/{locale}/ with matching markdown files.
+ *
+ * ARTICLE CATEGORIES (rendered as sections in the Help panel):
+ *   basics            — Installation & Getting Started
+ *   connections       — SSH, SFTP
+ *   security          — Credential Vault, Security Guide
+ *   tools             — Network Explorer
+ *   reference         — Keyboard Shortcuts, Settings, Customization
+ *   support           — Troubleshooting
+ *   protocol-reference — SSH / RDP / VNC / Serial deep-dive
+ *   developers        — Plugin API
+ *
+ * The `order` field controls sort order within the Help panel article list.
+ * Category display order is determined by the order of first appearance.
+ */
 
 const rawArticles: Array<{
   slug: string;
@@ -79,7 +104,7 @@ rm -rf ~/Library/Caches/com.crossterm.app
 
 Every release includes a \`.sha256\` file. To verify:
 \`\`\`bash
-shasum -a 256 -c CrossTerm_0.2.3_aarch64.dmg.sha256
+shasum -a 256 -c CrossTerm_0.2.4_aarch64.dmg.sha256
 \`\`\`
 
 ---
@@ -102,19 +127,19 @@ The \`.msi\` package supports silent/unattended installation via Group Policy or
 
 **Silent install:**
 \`\`\`powershell
-msiexec /i CrossTerm_0.2.3_x64_en-US.msi /quiet /norestart
+msiexec /i CrossTerm_0.2.4_x64_en-US.msi /quiet /norestart
 \`\`\`
 
 **Silent uninstall:**
 \`\`\`powershell
-msiexec /x CrossTerm_0.2.3_x64_en-US.msi /quiet /norestart
+msiexec /x CrossTerm_0.2.4_x64_en-US.msi /quiet /norestart
 \`\`\`
 
 ### Verify checksum (optional)
 
 \`\`\`powershell
-Get-FileHash CrossTerm_0.2.3_x64-setup.exe -Algorithm SHA256
-# Compare output to CrossTerm_0.2.3_x64-setup.exe.sha256
+Get-FileHash CrossTerm_0.2.4_x64-setup.exe -Algorithm SHA256
+# Compare output to CrossTerm_0.2.4_x64-setup.exe.sha256
 \`\`\`
 
 ---
@@ -125,10 +150,10 @@ Get-FileHash CrossTerm_0.2.3_x64-setup.exe -Algorithm SHA256
 
 \`\`\`bash
 # Download
-wget https://github.com/alal76/CrossTerm/releases/latest/download/CrossTerm_0.2.3_amd64.deb
+wget https://github.com/alal76/CrossTerm/releases/latest/download/CrossTerm_0.2.4_amd64.deb
 
 # Install
-sudo dpkg -i CrossTerm_0.2.3_amd64.deb
+sudo dpkg -i CrossTerm_0.2.4_amd64.deb
 
 # Fix any missing dependencies
 sudo apt-get install -f
@@ -150,7 +175,7 @@ sudo dpkg -r crossterm
 
 \`\`\`bash
 # Fedora / RHEL
-sudo dnf install CrossTerm-0.2.3-1.x86_64.rpm
+sudo dnf install CrossTerm-0.2.4-1.x86_64.rpm
 \`\`\`
 
 **Upgrade:**
@@ -169,11 +194,11 @@ AppImages run on any modern Linux distribution without installation.
 
 \`\`\`bash
 # Download and make executable
-wget https://github.com/alal76/CrossTerm/releases/latest/download/CrossTerm_0.2.3_amd64.AppImage
-chmod +x CrossTerm_0.2.3_amd64.AppImage
+wget https://github.com/alal76/CrossTerm/releases/latest/download/CrossTerm_0.2.4_amd64.AppImage
+chmod +x CrossTerm_0.2.4_amd64.AppImage
 
 # Run directly
-./CrossTerm_0.2.3_amd64.AppImage
+./CrossTerm_0.2.4_amd64.AppImage
 \`\`\`
 
 **Upgrade:** download the new AppImage, make it executable, and replace the old file.
@@ -1889,8 +1914,15 @@ Users install plugins from **Settings → Plugins → Browse Registry** or via t
   },
 ];
 
+/** All help articles sorted by the `order` field for display in the Help panel. */
 export const helpArticles: HelpArticle[] = [...rawArticles].sort((a, b) => a.order - b.order);
 
+/**
+ * Full-text search across article titles, body content, and keyword tags.
+ * Returns all articles when the query is blank (used to populate the initial list).
+ * Case-insensitive; no stemming — a simple substring match is sufficient for
+ * the volume of content and avoids a dependency on a search library.
+ */
 export function searchArticles(query: string): HelpArticle[] {
   if (!query.trim()) return helpArticles;
   const lower = query.toLowerCase();

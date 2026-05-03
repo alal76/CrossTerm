@@ -1610,7 +1610,11 @@ export default function App() {
     openTab(session);
   }, [addSession, openTab]);
 
-  // Ref kept fresh every render so native menu actions never hold stale closures
+  // Native menu callbacks are stored in a ref that is overwritten every render.
+  // This pattern avoids the "stale closure" problem: buildNativeMenu runs once
+  // (empty dep array) and captures `cb` (the ref object), but every action
+  // reads `cb.current` at call time, which always points to the latest handlers
+  // including whatever state they closed over in the most recent render.
   const nativeMenuCbs = useRef({
     newLocalShell: handleNewLocalShell,
     openNetworkTab: handleOpenNetworkTab,
@@ -1640,10 +1644,15 @@ export default function App() {
     openSettings: () => setSettingsOpen(true),
   };
 
-  // Build native OS menu bar (macOS menu bar / Windows+Linux window menu)
+  // Build the native OS menu bar once on mount. The Tauri menu API is
+  // dynamically imported so the module is excluded from the Vite bundle when
+  // the app runs outside Tauri (browser preview, Vitest). The empty dep array
+  // is intentional — rebuilding the menu on every render would flicker the
+  // macOS menu bar and re-register accelerators redundantly.
   useEffect(() => {
     async function buildNativeMenu() {
       try {
+        // Dynamic import keeps @tauri-apps/api/menu out of the browser bundle.
         const { Menu, Submenu, MenuItem, PredefinedMenuItem } = await import('@tauri-apps/api/menu');
         const cb = nativeMenuCbs;
 
@@ -1697,7 +1706,8 @@ export default function App() {
         await defaultMenu.insert([connectSubmenu, vaultSubmenu, settingsSubmenu], 1);
         await defaultMenu.setAsAppMenu();
       } catch {
-        // Not running in Tauri (browser / test) — skip
+        // Outside Tauri (browser dev server, Vitest) the dynamic import or
+        // Menu.default() throws — silently ignore so the app still loads.
       }
     }
     buildNativeMenu();
