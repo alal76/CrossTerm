@@ -113,7 +113,7 @@ jobs:
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
-          git clone https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/alal76/homebrew-tap.git tap
+          git clone https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/alal76/homebrew-crossterm.git tap
           cp packaging/homebrew/crossterm.rb tap/Casks/crossterm.rb
           cd tap
           git config user.name "github-actions[bot]"
