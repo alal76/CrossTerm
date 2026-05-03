@@ -49,7 +49,26 @@
       "Bash(grep -E \"\\\\.\\(tsx|ts|jsx|js\\)$\")",
       "Bash(lsof -ti:1420)",
       "Bash(xargs kill *)",
-      "Bash(pkill -f \"tauri dev\")"
+      "Bash(pkill -f \"tauri dev\")",
+      "Bash(node -e \"const m = require\\('./node_modules/@tauri-apps/api/menu/index.js'\\); console.log\\(Object.keys\\(m\\).slice\\(0,20\\)\\)\")",
+      "Bash(node -e \"const {createRequire} = require\\('module'\\); const r = createRequire\\(process.cwd\\(\\)+'/x'\\); const m = r\\('./node_modules/@tauri-apps/api/menu.js'\\); console.log\\(Object.keys\\(m\\)\\)\")",
+      "Bash(git -C /Users/alal/Code/CrossTerm add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json src-tauri/src/config/mod.rs src/App.tsx src/components/Settings/ProfileSync.tsx src/components/Settings/SettingsPanel.tsx src/components/Settings/__tests__/SettingsPanel.test.tsx src/i18n/en.json)",
+      "Bash(git -C /Users/alal/Code/CrossTerm ls-files src-tauri/Cargo.lock)",
+      "Bash(git -C /Users/alal/Code/CrossTerm add .github/workflows/ci.yml)",
+      "Bash(git -C /Users/alal/Code/CrossTerm add src-tauri/src/config/mod.rs)",
+      "Bash(gh repo *)",
+      "Bash(gh secret *)",
+      "Bash(git -C /Users/alal/Code/CrossTerm add packaging/homebrew/crossterm.rb .github/workflows/ci.yml)",
+      "Bash(gh auth *)",
+      "Bash(git -C /Users/alal/Code/CrossTerm tag v0.2.3)",
+      "Bash(git -C /Users/alal/Code/CrossTerm push origin v0.2.3)",
+      "Read(//tmp/**)",
+      "Bash(brew tap *)",
+      "Bash(git -C /Users/alal/Code/CrossTerm add .github/workflows/release.yml .github/workflows/ci.yml)",
+      "Bash(git -C /Users/alal/Code/CrossTerm commit -m \"fix: update tap repo name to homebrew-crossterm\")",
+      "Bash(brew install *)",
+      "Bash(git -C /Users/alal/Code/CrossTerm add README.md docs/mkdocs.yml docs/help/installation.md docs/help/settings.md docs/help/network-explorer.md docs/help/index.md docs/help/getting-started.md)",
+      "Bash(git -C /Users/alal/Code/CrossTerm add src/components/Vault/VaultUnlock.tsx src/components/Vault/__tests__/VaultUnlock.test.tsx src/i18n/en.json)"
     ],
     "additionalDirectories": [
       "/Users/alal/.cache/gh"
