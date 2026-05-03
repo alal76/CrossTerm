@@ -1614,6 +1614,7 @@ mod tests {
             gpu_acceleration: false,
             bell_style: "sound".into(),
             terminal_opacity: 0.9,
+            ..Default::default()
         };
 
         do_settings_update(env.id(), new_settings).unwrap();
