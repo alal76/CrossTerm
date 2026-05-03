@@ -35,47 +35,161 @@ impl Serialize for ConfigError {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
+    // ── Appearance ─────────────────────────────────────────────────────
     pub theme: String,
     pub font_size: u32,
     pub font_family: String,
     pub font_ligatures: bool,
+    pub line_height: f64,
+    pub letter_spacing: f64,
+
+    // ── Terminal ───────────────────────────────────────────────────────
     pub cursor_style: String,
     pub cursor_blink: bool,
     pub scrollback_lines: u32,
-    pub line_height: f64,
-    pub letter_spacing: f64,
+    pub terminal_opacity: f64,
+    pub bell_style: String,
+    pub terminal_encoding: String,
+    pub scroll_on_output: bool,
+    pub scroll_on_keystroke: bool,
+    pub scrollbar_visible: bool,
+    pub word_separators: String,
+
+    // ── SSH / Protocol ─────────────────────────────────────────────────
     pub tab_title_format: String,
     pub default_shell: Option<String>,
+    pub ssh_port: u16,
+    pub ssh_keepalive_interval: u32,
+    pub ssh_strict_host_check: bool,
+    pub ssh_compression: bool,
+    pub ssh_agent_forwarding: bool,
+    pub ssh_x11_forwarding: bool,
+
+    // ── Connections ────────────────────────────────────────────────────
+    pub connection_timeout_secs: u32,
+    pub reconnect_on_disconnect: bool,
+    pub reconnect_delay_secs: u32,
+    pub reconnect_max_attempts: u32,
+    pub max_concurrent_connections: u32,
+
+    // ── File Transfer ──────────────────────────────────────────────────
+    pub sftp_default_remote_dir: String,
+    pub sftp_encoding: String,
+    pub transfer_confirm_overwrite: bool,
+    pub transfer_preserve_timestamps: bool,
+    pub transfer_concurrent_jobs: u32,
+
+    // ── General / UI ──────────────────────────────────────────────────
+    pub auto_update: bool,
+    pub gpu_acceleration: bool,
+    pub startup_behavior: String,
+    pub confirm_close_tab: bool,
+    pub show_status_bar: bool,
+    pub window_always_on_top: bool,
+
+    // ── Keyboard ──────────────────────────────────────────────────────
+    pub backspace_sends_delete: bool,
+    pub alt_is_meta: bool,
+    pub ctrl_h_is_backspace: bool,
+    pub home_end_scroll_buffer: bool,
+    pub right_click_action: String,
+
+    // ── Notifications ─────────────────────────────────────────────────
+    pub notify_on_disconnect: bool,
+    pub notify_on_bell: bool,
+    pub notify_on_long_process: bool,
+    pub long_process_threshold_secs: u32,
+    pub flash_tab_on_bell: bool,
+
+    // ── Security ──────────────────────────────────────────────────────
     pub copy_on_select: bool,
     pub paste_warning_lines: u32,
     pub idle_lock_timeout_secs: u64,
-    pub auto_update: bool,
-    pub gpu_acceleration: bool,
-    pub bell_style: String,
-    pub terminal_opacity: f64,
+    pub clipboard_history_size: u32,
+
+    // ── Advanced ──────────────────────────────────────────────────────
+    pub log_level: String,
+    pub telemetry_enabled: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            // Appearance
             theme: "dark".into(),
             font_size: 14,
             font_family: "JetBrains Mono".into(),
             font_ligatures: true,
+            line_height: 1.2,
+            letter_spacing: 0.0,
+
+            // Terminal
             cursor_style: "block".into(),
             cursor_blink: true,
             scrollback_lines: 10_000,
-            line_height: 1.2,
-            letter_spacing: 0.0,
+            terminal_opacity: 1.0,
+            bell_style: "visual".into(),
+            terminal_encoding: "utf-8".into(),
+            scroll_on_output: true,
+            scroll_on_keystroke: true,
+            scrollbar_visible: true,
+            word_separators: " ,;:\"'()[]{}".into(),
+
+            // SSH / Protocol
             tab_title_format: "{name} - {host}".into(),
             default_shell: None,
+            ssh_port: 22,
+            ssh_keepalive_interval: 60,
+            ssh_strict_host_check: true,
+            ssh_compression: false,
+            ssh_agent_forwarding: false,
+            ssh_x11_forwarding: false,
+
+            // Connections
+            connection_timeout_secs: 30,
+            reconnect_on_disconnect: false,
+            reconnect_delay_secs: 5,
+            reconnect_max_attempts: 3,
+            max_concurrent_connections: 20,
+
+            // File Transfer
+            sftp_default_remote_dir: "~".into(),
+            sftp_encoding: "utf-8".into(),
+            transfer_confirm_overwrite: true,
+            transfer_preserve_timestamps: true,
+            transfer_concurrent_jobs: 4,
+
+            // General / UI
+            auto_update: true,
+            gpu_acceleration: true,
+            startup_behavior: "restore".into(),
+            confirm_close_tab: false,
+            show_status_bar: true,
+            window_always_on_top: false,
+
+            // Keyboard
+            backspace_sends_delete: false,
+            alt_is_meta: true,
+            ctrl_h_is_backspace: false,
+            home_end_scroll_buffer: true,
+            right_click_action: "context_menu".into(),
+
+            // Notifications
+            notify_on_disconnect: true,
+            notify_on_bell: false,
+            notify_on_long_process: true,
+            long_process_threshold_secs: 10,
+            flash_tab_on_bell: true,
+
+            // Security
             copy_on_select: false,
             paste_warning_lines: 5,
             idle_lock_timeout_secs: 900,
-            auto_update: true,
-            gpu_acceleration: true,
-            bell_style: "visual".into(),
-            terminal_opacity: 1.0,
+            clipboard_history_size: 50,
+
+            // Advanced
+            log_level: "info".into(),
+            telemetry_enabled: false,
         }
     }
 }

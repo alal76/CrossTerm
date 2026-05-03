@@ -1610,6 +1610,99 @@ export default function App() {
     openTab(session);
   }, [addSession, openTab]);
 
+  // Ref kept fresh every render so native menu actions never hold stale closures
+  const nativeMenuCbs = useRef({
+    newLocalShell: handleNewLocalShell,
+    openNetworkTab: handleOpenNetworkTab,
+    openQuickConnect: () => setShowQuickConnect(true),
+    openCredentials: () => setShowCredentialManager(true),
+    openChangePassword: () => setShowChangePasswordDialog(true),
+    openDeleteVault: () => setShowVaultDeleteDialog(true),
+    lockVault: () => lockAllVaults(),
+    openTelnet: () => { setNewSessionDefaultType(SessionType.Telnet); setEditingSession(null); setShowSessionEditor(true); },
+    openRDP:    () => { setNewSessionDefaultType(SessionType.RDP);    setEditingSession(null); setShowSessionEditor(true); },
+    openVNC:    () => { setNewSessionDefaultType(SessionType.VNC);    setEditingSession(null); setShowSessionEditor(true); },
+    openSFTP:   () => { setNewSessionDefaultType(SessionType.SFTP);   setEditingSession(null); setShowSessionEditor(true); },
+    openSettings: () => setSettingsOpen(true),
+  });
+  nativeMenuCbs.current = {
+    newLocalShell: handleNewLocalShell,
+    openNetworkTab: handleOpenNetworkTab,
+    openQuickConnect: () => setShowQuickConnect(true),
+    openCredentials: () => setShowCredentialManager(true),
+    openChangePassword: () => setShowChangePasswordDialog(true),
+    openDeleteVault: () => setShowVaultDeleteDialog(true),
+    lockVault: () => lockAllVaults(),
+    openTelnet: () => { setNewSessionDefaultType(SessionType.Telnet); setEditingSession(null); setShowSessionEditor(true); },
+    openRDP:    () => { setNewSessionDefaultType(SessionType.RDP);    setEditingSession(null); setShowSessionEditor(true); },
+    openVNC:    () => { setNewSessionDefaultType(SessionType.VNC);    setEditingSession(null); setShowSessionEditor(true); },
+    openSFTP:   () => { setNewSessionDefaultType(SessionType.SFTP);   setEditingSession(null); setShowSessionEditor(true); },
+    openSettings: () => setSettingsOpen(true),
+  };
+
+  // Build native OS menu bar (macOS menu bar / Windows+Linux window menu)
+  useEffect(() => {
+    async function buildNativeMenu() {
+      try {
+        const { Menu, Submenu, MenuItem, PredefinedMenuItem } = await import('@tauri-apps/api/menu');
+        const cb = nativeMenuCbs;
+
+        const sep = () => PredefinedMenuItem.new({ item: 'Separator' });
+
+        const connectSubmenu = await Submenu.new({
+          text: 'Connect',
+          items: [
+            await MenuItem.new({ text: 'New Local Shell', accelerator: 'CmdOrCtrl+T', action: () => cb.current.newLocalShell() }),
+            await MenuItem.new({ text: 'New SSH Session', accelerator: 'CmdOrCtrl+Shift+N', action: () => cb.current.openQuickConnect() }),
+            await sep(),
+            await MenuItem.new({ text: 'Telnet…',   action: () => cb.current.openTelnet() }),
+            await MenuItem.new({ text: 'RDP…',       action: () => cb.current.openRDP() }),
+            await MenuItem.new({ text: 'VNC…',       action: () => cb.current.openVNC() }),
+            await MenuItem.new({ text: 'SFTP…',      action: () => cb.current.openSFTP() }),
+            await sep(),
+            await MenuItem.new({ text: 'Network Explorer', action: () => cb.current.openNetworkTab() }),
+          ],
+        });
+
+        const vaultSubmenu = await Submenu.new({
+          text: 'Vault',
+          items: [
+            await MenuItem.new({ text: 'Manage Credentials…', action: () => cb.current.openCredentials() }),
+            await MenuItem.new({ text: 'Change Password…',    action: () => cb.current.openChangePassword() }),
+            await sep(),
+            await MenuItem.new({ text: 'Lock All Vaults',     action: () => cb.current.lockVault() }),
+            await MenuItem.new({ text: 'Delete Vault…',       action: () => cb.current.openDeleteVault() }),
+          ],
+        });
+
+        const settingsSubmenu = await Submenu.new({
+          text: 'Settings',
+          items: [
+            await MenuItem.new({ text: 'Preferences…', accelerator: 'CmdOrCtrl+,', action: () => cb.current.openSettings() }),
+            await sep(),
+            await MenuItem.new({ text: 'General',       action: () => cb.current.openSettings() }),
+            await MenuItem.new({ text: 'Appearance',    action: () => cb.current.openSettings() }),
+            await MenuItem.new({ text: 'Terminal',      action: () => cb.current.openSettings() }),
+            await MenuItem.new({ text: 'SSH',           action: () => cb.current.openSettings() }),
+            await MenuItem.new({ text: 'Connections',   action: () => cb.current.openSettings() }),
+            await MenuItem.new({ text: 'File Transfer', action: () => cb.current.openSettings() }),
+            await MenuItem.new({ text: 'Keyboard',      action: () => cb.current.openSettings() }),
+            await MenuItem.new({ text: 'Notifications', action: () => cb.current.openSettings() }),
+            await MenuItem.new({ text: 'Security',      action: () => cb.current.openSettings() }),
+            await MenuItem.new({ text: 'Advanced',      action: () => cb.current.openSettings() }),
+          ],
+        });
+
+        const defaultMenu = await Menu.default();
+        await defaultMenu.insert([connectSubmenu, vaultSubmenu, settingsSubmenu], 1);
+        await defaultMenu.setAsAppMenu();
+      } catch {
+        // Not running in Tauri (browser / test) — skip
+      }
+    }
+    buildNativeMenu();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Tab navigation helpers
   const switchToTabByOffset = useCallback(
     (offset: number) => {

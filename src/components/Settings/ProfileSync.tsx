@@ -20,7 +20,7 @@ export default function ProfileSync() {
   const loadStatus = useCallback(async () => {
     try {
       const result = await invoke<SyncStatus>("sync_get_status");
-      setStatus(result);
+      if (result) setStatus(result);
     } catch {
       // Status fetch failed
     }

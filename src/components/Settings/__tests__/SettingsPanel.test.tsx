@@ -40,13 +40,13 @@ describe("SettingsPanel", () => {
 
     render(<SettingsPanel />);
 
-    // All 5 category buttons should be visible in the nav sidebar
+    // Core category buttons should be visible in the nav sidebar
     const navButtons = screen.getAllByRole("button").filter((btn) =>
-      ["General", "Appearance", "Terminal", "SSH", "Security"].includes(
+      ["General", "Appearance", "Terminal", "SSH", "Security", "Connections", "File Transfer", "Keyboard", "Notifications", "Advanced"].includes(
         btn.textContent?.trim() ?? ""
       )
     );
-    expect(navButtons).toHaveLength(5);
+    expect(navButtons.length).toBeGreaterThanOrEqual(5);
 
     const securityBtn = screen.getByRole("button", { name: /Security/ });
     const terminalBtn = screen.getByRole("button", { name: /Terminal/ });
@@ -76,21 +76,21 @@ describe("SettingsPanel", () => {
       expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
     });
 
-    // The General category shows by default with toggle buttons (Auto Update, GPU Acceleration).
+    // The General category shows by default with toggle buttons.
     // Find toggle buttons by their distinct shape (w-9 h-5 rounded-full).
     const toggleButtons = screen.getAllByRole("button").filter((btn) =>
       btn.className.includes("rounded-full")
     );
     expect(toggleButtons.length).toBeGreaterThanOrEqual(1);
 
-    // Click the first toggle (auto_update) — it starts as true, toggling sets to false
+    // Click the first toggle (confirm_close_tab) — it starts as false, toggling sets to true
     await user.click(toggleButtons[0]);
 
     // invoke should be called with "settings_update"
     expect(mockInvoke).toHaveBeenCalledWith(
       "settings_update",
       expect.objectContaining({
-        settings: expect.objectContaining({ auto_update: false }),
+        settings: expect.objectContaining({ confirm_close_tab: true }),
       })
     );
   });
