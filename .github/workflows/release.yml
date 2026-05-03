@@ -82,3 +82,42 @@ jobs:
         with:
           draft: false
           files: src-tauri/target/release/bundle/**/*.sha256
+
+  homebrew-publish:
+    runs-on: macos-latest
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download macOS DMG checksum
+        uses: robinraju/release-downloader@v1
+        with:
+          tag: ${{ github.ref_name }}
+          fileName: "CrossTerm_*_aarch64.dmg.sha256"
+          out-file-path: artifacts/
+
+      - name: Read SHA256
+        id: sha
+        run: |
+          SHA=$(awk '{print $1}' artifacts/CrossTerm_*_aarch64.dmg.sha256)
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Update Homebrew cask formula
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          sed -i '' "s/version \".*\"/version \"$VERSION\"/" packaging/homebrew/crossterm.rb
+          sed -i '' "s/sha256 \".*\"/sha256 \"${{ steps.sha.outputs.sha256 }}\"/" packaging/homebrew/crossterm.rb
+
+      - name: Publish to Homebrew tap
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          git clone https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/alal76/homebrew-tap.git tap
+          cp packaging/homebrew/crossterm.rb tap/Casks/crossterm.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Casks/crossterm.rb
+          git commit -m "Update CrossTerm to ${GITHUB_REF_NAME#v}"
+          git push
