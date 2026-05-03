@@ -536,7 +536,7 @@ function NewTabDropdown({
   }, [onClose, anchorRef]);
 
   const rect = anchorRef.current?.getBoundingClientRect();
-  const left = rect ? rect.left : 0;
+  const right = rect ? window.innerWidth - rect.right : 0;
   const top = rect ? rect.bottom + 2 : 0;
 
   const menuItemCls = "flex items-center gap-2.5 w-full px-3 py-1.5 text-xs text-left text-text-secondary hover:bg-surface-secondary hover:text-text-primary transition-colors";
@@ -545,7 +545,7 @@ function NewTabDropdown({
     <div
       ref={menuRef}
       className="fixed z-[8000] min-w-[210px] bg-surface-elevated border border-border-default rounded-lg shadow-[var(--shadow-3)] py-1"
-      style={{ left, top, animation: "paletteIn var(--duration-short) var(--ease-decelerate)" }}
+      style={{ right, top, animation: "paletteIn var(--duration-short) var(--ease-decelerate)" }}
     >
       <div className="px-3 pt-1 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-text-disabled">
         Connect

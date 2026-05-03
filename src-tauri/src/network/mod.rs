@@ -41,7 +41,6 @@ use tokio::net::{TcpStream, UdpSocket};
 use tokio::sync::Semaphore;
 use uuid::Uuid;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use if_addrs;
 
 // ── Error ───────────────────────────────────────────────────────────────
 
