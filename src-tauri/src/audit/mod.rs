@@ -178,6 +178,426 @@ pub fn audit_log_export_csv(
     Ok(events_to_csv(&events))
 }
 
+// ── Phase 3-5: Syslog Forwarding ────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyslogConfig {
+    pub host: String,
+    pub port: u16,
+    pub protocol: SyslogProtocol,
+    /// Syslog facility number (1 = user, 3 = daemon, 16-23 = local0-local7)
+    pub facility: u8,
+    pub app_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyslogProtocol {
+    Udp,
+    Tcp,
+}
+
+/// Format an `AuditEvent` as an RFC 5424 syslog message.
+///
+/// RFC 5424 format:
+/// `<PRI>VERSION TIMESTAMP HOSTNAME APP-NAME PROCID MSGID STRUCTURED-DATA MSG`
+fn format_syslog_message(entry: &AuditEvent, config: &SyslogConfig) -> String {
+    // Severity: map audit events to syslog severity 6 (Informational) by default.
+    let severity: u8 = 6;
+    let pri = (config.facility as u16) * 8 + (severity as u16);
+
+    let hostname = hostname::get()
+        .ok()
+        .and_then(|h| h.into_string().ok())
+        .unwrap_or_else(|| "-".to_string());
+
+    // Structured data: encode event_type and details as SD params.
+    let event_type_str = serde_json::to_string(&entry.event_type)
+        .unwrap_or_else(|_| "\"unknown\"".to_string());
+    let event_type_str = event_type_str.trim_matches('"');
+
+    // Escape ] " \ inside SD param values per RFC 5424 §6.3.3.
+    let escaped_details = entry
+        .details
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace(']', "\\]");
+
+    format!(
+        "<{pri}>1 {ts} {host} {app} - - [crossterm@57137 event_type=\"{et}\" details=\"{det}\"] {msg}",
+        pri = pri,
+        ts = entry.timestamp.to_rfc3339(),
+        host = hostname,
+        app = config.app_name,
+        et = event_type_str,
+        det = escaped_details,
+        msg = format!("{}: {}", event_type_str, entry.details),
+    )
+}
+
+/// Send a single audit event to the configured syslog server.
+pub fn send_to_syslog(entry: &AuditEvent, config: &SyslogConfig) -> Result<(), String> {
+    use std::io::Write as _;
+    use std::net::{TcpStream, UdpSocket};
+
+    let message = format_syslog_message(entry, config);
+    let addr = format!("{}:{}", config.host, config.port);
+
+    match config.protocol {
+        SyslogProtocol::Udp => {
+            let socket =
+                UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("UDP bind error: {e}"))?;
+            socket
+                .send_to(message.as_bytes(), &addr)
+                .map_err(|e| format!("UDP send error: {e}"))?;
+        }
+        SyslogProtocol::Tcp => {
+            let mut stream = TcpStream::connect(&addr)
+                .map_err(|e| format!("TCP connect error: {e}"))?;
+            // RFC 6587 §3.4.1: octet-counting framing
+            let framed = format!("{} {}", message.len(), message);
+            stream
+                .write_all(framed.as_bytes())
+                .map_err(|e| format!("TCP write error: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
+// Global syslog config store (guarded by a Mutex for interior mutability).
+static SYSLOG_CONFIG: std::sync::OnceLock<std::sync::Mutex<Option<SyslogConfig>>> =
+    std::sync::OnceLock::new();
+
+fn syslog_config_lock() -> &'static std::sync::Mutex<Option<SyslogConfig>> {
+    SYSLOG_CONFIG.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+#[tauri::command]
+pub fn audit_configure_syslog(config: SyslogConfig) -> Result<(), String> {
+    *syslog_config_lock()
+        .lock()
+        .map_err(|e| format!("lock error: {e}"))? = Some(config);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn audit_test_syslog() -> Result<(), String> {
+    let guard = syslog_config_lock()
+        .lock()
+        .map_err(|e| format!("lock error: {e}"))?;
+    let config = guard
+        .as_ref()
+        .ok_or_else(|| "Syslog not configured — call audit_configure_syslog first".to_string())?;
+
+    let test_event = AuditEvent {
+        timestamp: Utc::now(),
+        event_type: AuditEventType::SettingsUpdate,
+        details: "CrossTerm syslog connectivity test".to_string(),
+    };
+    send_to_syslog(&test_event, config)
+}
+
+// ── Phase 3-5: Anomaly Detection ────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnomalyAlert {
+    pub alert_type: AnomalyType,
+    pub severity: AnomalySeverity,
+    pub description: String,
+    pub related_entry_ids: Vec<String>,
+    pub detected_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum AnomalyType {
+    /// Login at an unusual hour (midnight–05:00 local time).
+    UnusualHour,
+    /// 5+ failed auth attempts within a 5-minute rolling window.
+    RapidFailedAuth,
+    /// First time a specific host appears in the audit log.
+    NewHostFirstConnect,
+    /// 10+ sessions created within a 60-second rolling window.
+    BulkSessionCreation,
+    /// Admin/privileged action outside business hours (before 08:00 or after 18:00 local).
+    PrivilegedAfterHours,
+    /// SFTP data transfer exceeding 1 GiB.
+    LargeDataTransfer,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum AnomalySeverity {
+    Info,
+    Warning,
+    Critical,
+}
+
+/// Extract a host identifier from an `AuditEvent`'s details string.
+/// Looks for a "host:" or "to " prefix as a heuristic.
+fn extract_host(details: &str) -> Option<String> {
+    // Try "host:<value>" pattern.
+    if let Some(rest) = details.strip_prefix("host:") {
+        let host = rest.split_whitespace().next()?.to_string();
+        return Some(host);
+    }
+    // Try "connected to <host>" pattern.
+    if let Some(rest) = details.to_lowercase().strip_prefix("connected to ") {
+        let host = rest.split_whitespace().next()?.to_string();
+        return Some(host);
+    }
+    None
+}
+
+/// Returns true if the timestamp falls within the "unusual hours" window
+/// (midnight inclusive to 05:00 exclusive) in local time.
+fn is_unusual_hour(ts: &DateTime<Utc>) -> bool {
+    use chrono::Timelike;
+    let local = ts.with_timezone(&chrono::Local);
+    let hour = local.hour();
+    hour < 5
+}
+
+/// Returns true if the event falls outside business hours (08:00–18:00 local).
+fn is_after_hours(ts: &DateTime<Utc>) -> bool {
+    use chrono::Timelike;
+    let local = ts.with_timezone(&chrono::Local);
+    let hour = local.hour();
+    hour < 8 || hour >= 18
+}
+
+/// Classify whether an event is considered a "failed authentication".
+/// Since `AuditEventType` has no dedicated `AuthFailed` variant, we detect
+/// it by inspecting the `details` field for known failure keywords.
+fn is_auth_failed(event: &AuditEvent) -> bool {
+    let d = event.details.to_lowercase();
+    d.contains("auth failed")
+        || d.contains("authentication failed")
+        || d.contains("login failed")
+        || d.contains("permission denied")
+        || d.contains("invalid credentials")
+}
+
+/// Analyze a window of recent audit entries for anomalies.
+pub fn detect_anomalies(entries: &[AuditEvent]) -> Vec<AnomalyAlert> {
+    let mut alerts: Vec<AnomalyAlert> = Vec::new();
+    let now = Utc::now().to_rfc3339();
+
+    // --- UnusualHour: auth-related events between 00:00 and 05:00 local time ---
+    for (idx, entry) in entries.iter().enumerate() {
+        match &entry.event_type {
+            AuditEventType::VaultUnlock | AuditEventType::SessionConnect => {
+                if is_unusual_hour(&entry.timestamp) {
+                    alerts.push(AnomalyAlert {
+                        alert_type: AnomalyType::UnusualHour,
+                        severity: AnomalySeverity::Warning,
+                        description: format!(
+                            "Authentication/session event at unusual hour: {} (local)",
+                            entry
+                                .timestamp
+                                .with_timezone(&chrono::Local)
+                                .format("%H:%M")
+                        ),
+                        related_entry_ids: vec![idx.to_string()],
+                        detected_at: now.clone(),
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // --- RapidFailedAuth: 5+ auth-failed events within any 5-minute window ---
+    {
+        use std::time::Duration;
+        let failed_indices: Vec<usize> = entries
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| is_auth_failed(e))
+            .map(|(i, _)| i)
+            .collect();
+
+        // Sliding window over failed auth events.
+        let window_secs: i64 = 300; // 5 minutes
+        let threshold = 5usize;
+        let mut reported = false;
+        for (wi, &start_idx) in failed_indices.iter().enumerate() {
+            if reported {
+                break;
+            }
+            let start_ts = entries[start_idx].timestamp;
+            let window_end = start_ts + chrono::Duration::seconds(window_secs);
+            let window_events: Vec<usize> = failed_indices[wi..]
+                .iter()
+                .copied()
+                .filter(|&i| entries[i].timestamp <= window_end)
+                .collect();
+            if window_events.len() >= threshold {
+                alerts.push(AnomalyAlert {
+                    alert_type: AnomalyType::RapidFailedAuth,
+                    severity: AnomalySeverity::Critical,
+                    description: format!(
+                        "{} failed authentication attempts within a 5-minute window",
+                        window_events.len()
+                    ),
+                    related_entry_ids: window_events.iter().map(|i| i.to_string()).collect(),
+                    detected_at: now.clone(),
+                });
+                reported = true;
+            }
+        }
+        // Suppress unused import warning for Duration which is from std.
+        let _ = Duration::from_secs(0);
+    }
+
+    // --- BulkSessionCreation: 10+ SessionCreate within 60 seconds ---
+    {
+        let create_indices: Vec<usize> = entries
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.event_type == AuditEventType::SessionCreate)
+            .map(|(i, _)| i)
+            .collect();
+
+        let window_secs: i64 = 60;
+        let threshold = 10usize;
+        let mut reported = false;
+        for (wi, &start_idx) in create_indices.iter().enumerate() {
+            if reported {
+                break;
+            }
+            let start_ts = entries[start_idx].timestamp;
+            let window_end = start_ts + chrono::Duration::seconds(window_secs);
+            let window_events: Vec<usize> = create_indices[wi..]
+                .iter()
+                .copied()
+                .filter(|&i| entries[i].timestamp <= window_end)
+                .collect();
+            if window_events.len() >= threshold {
+                alerts.push(AnomalyAlert {
+                    alert_type: AnomalyType::BulkSessionCreation,
+                    severity: AnomalySeverity::Warning,
+                    description: format!(
+                        "{} sessions created within a 60-second window",
+                        window_events.len()
+                    ),
+                    related_entry_ids: window_events.iter().map(|i| i.to_string()).collect(),
+                    detected_at: now.clone(),
+                });
+                reported = true;
+            }
+        }
+    }
+
+    // --- NewHostFirstConnect: first time a host appears ---
+    {
+        let mut seen_hosts: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for (idx, entry) in entries.iter().enumerate() {
+            if entry.event_type == AuditEventType::SessionConnect {
+                if let Some(host) = extract_host(&entry.details) {
+                    if seen_hosts.insert(host.clone()) {
+                        // First occurrence.
+                        alerts.push(AnomalyAlert {
+                            alert_type: AnomalyType::NewHostFirstConnect,
+                            severity: AnomalySeverity::Info,
+                            description: format!("First-time connection to host: {host}"),
+                            related_entry_ids: vec![idx.to_string()],
+                            detected_at: now.clone(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // --- PrivilegedAfterHours: privileged events outside 08:00–18:00 local ---
+    {
+        let privileged_types = [
+            AuditEventType::VaultUnlock,
+            AuditEventType::CredentialAccess,
+            AuditEventType::KeygenGenerate,
+            AuditEventType::KeygenDeploy,
+            AuditEventType::ProfileImport,
+            AuditEventType::ProfileExport,
+        ];
+        for (idx, entry) in entries.iter().enumerate() {
+            if privileged_types.contains(&entry.event_type) && is_after_hours(&entry.timestamp) {
+                alerts.push(AnomalyAlert {
+                    alert_type: AnomalyType::PrivilegedAfterHours,
+                    severity: AnomalySeverity::Warning,
+                    description: format!(
+                        "Privileged action {:?} outside business hours at {}",
+                        entry.event_type,
+                        entry
+                            .timestamp
+                            .with_timezone(&chrono::Local)
+                            .format("%H:%M")
+                    ),
+                    related_entry_ids: vec![idx.to_string()],
+                    detected_at: now.clone(),
+                });
+            }
+        }
+    }
+
+    // --- LargeDataTransfer: SFTP transfer > 1 GiB noted in details ---
+    {
+        for (idx, entry) in entries.iter().enumerate() {
+            // Look for byte counts in SFTP-related details.
+            let d = entry.details.to_lowercase();
+            if d.contains("sftp") || d.contains("transfer") {
+                // Parse the first integer-looking token and treat it as bytes.
+                for token in entry.details.split_whitespace() {
+                    if let Ok(bytes) = token.trim_matches(|c: char| !c.is_ascii_digit()).parse::<u64>() {
+                        if bytes > 1_073_741_824 {
+                            alerts.push(AnomalyAlert {
+                                alert_type: AnomalyType::LargeDataTransfer,
+                                severity: AnomalySeverity::Warning,
+                                description: format!(
+                                    "Large data transfer detected: {} bytes (>{:.1} GiB)",
+                                    bytes,
+                                    bytes as f64 / 1_073_741_824.0
+                                ),
+                                related_entry_ids: vec![idx.to_string()],
+                                detected_at: now.clone(),
+                            });
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    alerts
+}
+
+/// Load all audit entries for the active profile, run `detect_anomalies`, and return results.
+#[tauri::command]
+pub fn audit_detect_anomalies(
+    config_state: tauri::State<'_, crate::config::ConfigState>,
+) -> Result<Vec<AnomalyAlert>, String> {
+    let profile_id = config_state
+        .active_profile_id
+        .read()
+        .map_err(|e| format!("lock error: {e}"))?
+        .clone()
+        .ok_or_else(|| "No active profile".to_string())?;
+
+    let entries =
+        read_events(&profile_id).map_err(|e| format!("read_events error: {e}"))?;
+    Ok(detect_anomalies(&entries))
+}
+
+/// Return all persisted anomaly alerts. Currently re-runs detection on each call;
+/// a production implementation would persist alerts to a separate store.
+#[tauri::command]
+pub fn audit_list_alerts(
+    config_state: tauri::State<'_, crate::config::ConfigState>,
+) -> Result<Vec<AnomalyAlert>, String> {
+    audit_detect_anomalies(config_state)
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]
