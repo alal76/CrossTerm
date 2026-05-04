@@ -14,10 +14,11 @@ describe("HelpPanel", () => {
   it("FT-H-01: renders article list and markdown content", () => {
     render(<HelpPanel open={true} onClose={onClose} />);
 
-    // Article sidebar should contain article titles
-    expect(screen.getAllByText("Getting Started").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("SSH Connections")).toBeInTheDocument();
-    expect(screen.getByText("Credential Vault")).toBeInTheDocument();
+    // Use role-based queries for sidebar buttons so we don't accidentally match
+    // article body text that contains the same string as a title (e.g. "SSH
+    // Connections" appears both as a button and as link text in Getting Started).
+    expect(screen.getByRole("button", { name: "SSH Connections" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Credential Vault" })).toBeInTheDocument();
 
     // Default active article ("Getting Started") content should render
     expect(
@@ -35,13 +36,15 @@ describe("HelpPanel", () => {
     // SFTP File Transfer should remain visible
     expect(screen.getByText("SFTP File Transfer")).toBeInTheDocument();
 
-    // "Keyboard Shortcuts" article should be filtered out
-    // (it doesn't match "SFTP" in title, keywords, or body)
+    // "Customization" article should be filtered out — it contains no SFTP
+    // content in its title, keywords, or body.
+    // (Keyboard Shortcuts is not used here because it gained an SFTP Browser
+    // shortcuts section and now legitimately matches the "SFTP" query.)
     const buttons = screen.getAllByRole("button");
-    const shortcutsBtn = buttons.find(
-      (btn) => btn.textContent?.trim() === "Keyboard Shortcuts"
+    const customizationBtn = buttons.find(
+      (btn) => btn.textContent?.trim() === "Customization"
     );
-    expect(shortcutsBtn).toBeUndefined();
+    expect(customizationBtn).toBeUndefined();
   });
 
   // FT-H-03: Deep link navigates to correct article section
