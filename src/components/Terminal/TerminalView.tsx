@@ -79,6 +79,7 @@ export default function TerminalView({ terminalId, isActive }: TerminalViewProps
   const cursorBlink = useAppStore((state) => state.cursorBlink);
 
   const [searchVisible, setSearchVisible] = useState(false);
+  const [regexMode, setRegexMode] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [pasteConfirm, setPasteConfirm] = useState<{ text: string; lines: string[] } | null>(null);
   const [suppressPasteConfirm, setSuppressPasteConfirm] = useState(false);
@@ -351,13 +352,15 @@ export default function TerminalView({ terminalId, isActive }: TerminalViewProps
   ];
 
   return (
-    <div className="relative w-full h-full">
+    <div className="relative w-full h-full flex flex-col">
       {bellFlash ? <div className="absolute inset-0 z-20 bg-text-primary/10 pointer-events-none animate-bell-flash" /> : null}
 
       <TerminalSearch
         searchAddon={searchAddonRef.current}
         visible={searchVisible}
         onClose={() => setSearchVisible(false)}
+        regexMode={regexMode}
+        onRegexToggle={() => setRegexMode((prev) => !prev)}
       />
 
       {pasteConfirm ? (
@@ -442,10 +445,13 @@ export default function TerminalView({ terminalId, isActive }: TerminalViewProps
         ref={containerRef}
         role="application"
         aria-label="Terminal"
-        className="w-full h-full bg-[var(--terminal-bg)]"
+        className="w-full flex-1 min-h-0 bg-[var(--terminal-bg)]"
         style={{ padding: "4px 0 0 4px" }}
         onContextMenu={handleContextMenu}
       />
+      <div className="h-5 px-2 flex items-center text-xs text-gray-500 bg-gray-900 border-t border-gray-700 shrink-0">
+        {/Mac/i.test(navigator.userAgent) ? "⌘+Shift+F — Search scrollback" : "Ctrl+Shift+F — Search scrollback"}
+      </div>
     </div>
   );
 }

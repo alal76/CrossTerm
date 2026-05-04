@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
@@ -8,6 +8,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { ConnectionStatus } from "@/types";
+import ReconnectOverlay from "@/components/Shared/ReconnectOverlay";
 import "@xterm/xterm/css/xterm.css";
 
 interface SshTerminalViewProps {
@@ -44,12 +45,25 @@ function getTerminalTheme(): Record<string, string> {
   };
 }
 
+// Shape of the session_health Tauri event payload
+interface SessionHealth {
+  sessionId: string;
+  status: "ok" | "degraded" | "dropped";
+  latencyMs: number | null;
+  lastSeenSecs: number;
+}
+
 export default function SshTerminalView({ connectionId, isActive }: SshTerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const updateTerminalDimensions = useTerminalStore((s) => s.updateTerminalDimensions);
   const updateTerminalStatus = useTerminalStore((s) => s.updateTerminalStatus);
+
+  // ── Health / reconnect state ──────────────────────────────────────────────
+  const [healthStatus, setHealthStatus] = useState<"ok" | "degraded" | "dropped">("ok");
+  const [healthLatency, setHealthLatency] = useState<number | null>(null);
+  const [reconnectAttempt, setReconnectAttempt] = useState(0);
 
   const handleResize = useCallback(() => {
     const fitAddon = fitAddonRef.current;
@@ -188,11 +202,54 @@ export default function SshTerminalView({ connectionId, isActive }: SshTerminalV
     }
   }, [isActive, handleResize]);
 
+  // ── Session health monitor ────────────────────────────────────────────────
+  useEffect(() => {
+    invoke("ssh_start_health_monitor", { connectionId }).catch(console.error);
+
+    const unlistenPromise = listen<SessionHealth>("session_health", (event) => {
+      const payload = event.payload;
+      if (payload.sessionId !== connectionId) return;
+
+      setHealthStatus((prev) => {
+        // Transition from dropped → ok resets the attempt counter
+        if (prev === "dropped" && payload.status === "ok") {
+          setReconnectAttempt(0);
+        }
+        return payload.status;
+      });
+      setHealthLatency(payload.latencyMs);
+    });
+
+    return () => {
+      unlistenPromise.then((fn) => fn());
+    };
+  }, [connectionId]);
+
+  // ── Reconnect handler ─────────────────────────────────────────────────────
+  const handleReconnect = useCallback(() => {
+    setReconnectAttempt((a) => a + 1);
+    invoke("ssh_connect", { connectionId }).catch(console.error);
+  }, [connectionId]);
+
   return (
-    <div
-      ref={containerRef}
-      className="w-full h-full bg-[var(--terminal-bg)]"
-      style={{ padding: "4px 0 0 4px" }}
-    />
+    <div className="relative w-full h-full">
+      <div
+        ref={containerRef}
+        className="w-full h-full bg-[var(--terminal-bg)]"
+        style={{ padding: "4px 0 0 4px" }}
+      />
+      <ReconnectOverlay
+        sessionId={connectionId}
+        status={healthStatus}
+        latencyMs={healthLatency}
+        attempt={reconnectAttempt}
+        onReconnect={handleReconnect}
+        onDismiss={() => setHealthStatus("ok")}
+        onGiveUp={() => {
+          setHealthStatus("ok");
+          updateTerminalStatus(connectionId, ConnectionStatus.Disconnected);
+        }}
+      />
+    </div>
   );
 }

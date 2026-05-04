@@ -1083,3 +1083,31 @@ export interface NotificationChannel {
   description: string;
   importance: 'default' | 'high' | 'low' | 'min';
 }
+
+// ── Phase 2: Smart groups ───────────────────────────────────────────────────
+
+export type FilterExpr =
+  | { type: "tag"; value: string }
+  | { type: "protocol"; value: SessionType }
+  | { type: "status"; value: ConnectionStatus }
+  | { type: "last_connected_before"; days: number }
+  | { type: "name_contains"; value: string }
+  | { type: "host_contains"; value: string }
+  | { type: "and"; children: FilterExpr[] }
+  | { type: "or"; children: FilterExpr[] }
+  | { type: "not"; child: FilterExpr };
+
+export interface SmartGroup {
+  id: string;
+  name: string;
+  icon?: string;
+  color?: string;
+  filter: FilterExpr;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MultiSelectRange {
+  anchorId: string;
+  cursorId: string;
+}
