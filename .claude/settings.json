@@ -78,7 +78,10 @@
       "Bash(git -C /Users/alal/Code/CrossTerm diff --stat HEAD)",
       "Bash(git -C /Users/alal/Code/CrossTerm status --short)",
       "Bash(git -C /Users/alal/Code/CrossTerm log --oneline -3)",
-      "Bash(git -C /Users/alal/Code/CrossTerm add package.json src-tauri/Cargo.lock src-tauri/Cargo.toml src-tauri/tauri.conf.json src-tauri/src/config/mod.rs src-tauri/src/lib.rs src-tauri/src/ssh/mod.rs src-tauri/src/vault/mod.rs src-tauri/src/error.rs src-tauri/src/importer/ src/components/Shared/ImportWizard.tsx src/components/Vault/VaultUnlock.tsx src/stores/__tests__/vaultStore.test.ts src/utils/__tests__/ src/utils/errorMessages.ts vite.config.ts)"
+      "Bash(git -C /Users/alal/Code/CrossTerm add package.json src-tauri/Cargo.lock src-tauri/Cargo.toml src-tauri/tauri.conf.json src-tauri/src/config/mod.rs src-tauri/src/lib.rs src-tauri/src/ssh/mod.rs src-tauri/src/vault/mod.rs src-tauri/src/error.rs src-tauri/src/importer/ src/components/Shared/ImportWizard.tsx src/components/Vault/VaultUnlock.tsx src/stores/__tests__/vaultStore.test.ts src/utils/__tests__/ src/utils/errorMessages.ts vite.config.ts)",
+      "Bash(cargo search *)",
+      "Bash(npm ls *)",
+      "Bash(git -C /Users/alal/Code/CrossTerm add -A)"
     ],
     "additionalDirectories": [
       "/Users/alal/.cache/gh"

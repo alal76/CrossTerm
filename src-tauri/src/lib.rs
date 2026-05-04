@@ -100,6 +100,9 @@ pub fn run() {
             vault::vault_fido2_register_complete,
             vault::vault_fido2_auth_begin,
             vault::vault_fido2_auth_complete,
+            // Vault: TOTP second factor (BE-VAULT-10)
+            vault::vault_has_totp,
+            vault::vault_verify_totp,
             vault::credential_create,
             vault::credential_list,
             vault::credential_get,

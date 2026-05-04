@@ -535,13 +535,7 @@ export default function VaultUnlock() {
                 <button
                   type="button"
                   data-delete-btn
-                  onClick={() => {
-                    if (pendingDeleteId === lockedVaults[0].id) {
-                      handleStartDelete(lockedVaults[0]);
-                    } else {
-                      setPendingDeleteId(lockedVaults[0].id);
-                    }
-                  }}
+                  onClick={() => handleDeleteGuard(lockedVaults[0])}
                   title={pendingDeleteId === lockedVaults[0].id ? "Click again to delete" : t("vault.deleteVault")}
                   className={clsx(
                     "p-1 rounded transition-colors",

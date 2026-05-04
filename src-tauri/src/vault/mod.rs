@@ -1623,7 +1623,7 @@ fn vault_has_totp_inner(vault: &Vault, vault_id: &str) -> Result<bool, String> {
 /// a 6-digit decimal code from the 20-byte HMAC output.
 fn hotp_sha1(key: &[u8], counter: u64) -> u32 {
     use hmac::{Hmac, Mac};
-    use sha2::Sha1;
+    use sha1::Sha1;
 
     // RFC 4226 §5.2: counter is big-endian 8-byte unsigned integer.
     let counter_bytes = counter.to_be_bytes();
