@@ -104,7 +104,7 @@ rm -rf ~/Library/Caches/com.crossterm.app
 
 Every release includes a \`.sha256\` file. To verify:
 \`\`\`bash
-shasum -a 256 -c CrossTerm_0.2.4_aarch64.dmg.sha256
+shasum -a 256 -c CrossTerm_0.2.5_aarch64.dmg.sha256
 \`\`\`
 
 ---
@@ -127,19 +127,19 @@ The \`.msi\` package supports silent/unattended installation via Group Policy or
 
 **Silent install:**
 \`\`\`powershell
-msiexec /i CrossTerm_0.2.4_x64_en-US.msi /quiet /norestart
+msiexec /i CrossTerm_0.2.5_x64_en-US.msi /quiet /norestart
 \`\`\`
 
 **Silent uninstall:**
 \`\`\`powershell
-msiexec /x CrossTerm_0.2.4_x64_en-US.msi /quiet /norestart
+msiexec /x CrossTerm_0.2.5_x64_en-US.msi /quiet /norestart
 \`\`\`
 
 ### Verify checksum (optional)
 
 \`\`\`powershell
-Get-FileHash CrossTerm_0.2.4_x64-setup.exe -Algorithm SHA256
-# Compare output to CrossTerm_0.2.4_x64-setup.exe.sha256
+Get-FileHash CrossTerm_0.2.5_x64-setup.exe -Algorithm SHA256
+# Compare output to CrossTerm_0.2.5_x64-setup.exe.sha256
 \`\`\`
 
 ---
@@ -150,10 +150,10 @@ Get-FileHash CrossTerm_0.2.4_x64-setup.exe -Algorithm SHA256
 
 \`\`\`bash
 # Download
-wget https://github.com/alal76/CrossTerm/releases/latest/download/CrossTerm_0.2.4_amd64.deb
+wget https://github.com/alal76/CrossTerm/releases/latest/download/CrossTerm_0.2.5_amd64.deb
 
 # Install
-sudo dpkg -i CrossTerm_0.2.4_amd64.deb
+sudo dpkg -i CrossTerm_0.2.5_amd64.deb
 
 # Fix any missing dependencies
 sudo apt-get install -f
@@ -175,7 +175,7 @@ sudo dpkg -r crossterm
 
 \`\`\`bash
 # Fedora / RHEL
-sudo dnf install CrossTerm-0.2.4-1.x86_64.rpm
+sudo dnf install CrossTerm-0.2.5-1.x86_64.rpm
 \`\`\`
 
 **Upgrade:**
@@ -194,11 +194,11 @@ AppImages run on any modern Linux distribution without installation.
 
 \`\`\`bash
 # Download and make executable
-wget https://github.com/alal76/CrossTerm/releases/latest/download/CrossTerm_0.2.4_amd64.AppImage
-chmod +x CrossTerm_0.2.4_amd64.AppImage
+wget https://github.com/alal76/CrossTerm/releases/latest/download/CrossTerm_0.2.5_amd64.AppImage
+chmod +x CrossTerm_0.2.5_amd64.AppImage
 
 # Run directly
-./CrossTerm_0.2.4_amd64.AppImage
+./CrossTerm_0.2.5_amd64.AppImage
 \`\`\`
 
 **Upgrade:** download the new AppImage, make it executable, and replace the old file.

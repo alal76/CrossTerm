@@ -853,7 +853,7 @@ export default function SettingsPanel() {
               else platform = "Linux";
             }
             return [
-              { label: "Version", value: "0.2.4" },
+              { label: "Version", value: "0.2.5" },
               { label: "Platform", value: platform },
               { label: "Renderer", value: settings.gpu_acceleration ? "GPU (WebGL)" : "CPU (Canvas)" },
             ].map(({ label, value }) => (

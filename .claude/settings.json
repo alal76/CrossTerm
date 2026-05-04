@@ -68,7 +68,11 @@
       "Bash(git -C /Users/alal/Code/CrossTerm commit -m \"fix: update tap repo name to homebrew-crossterm\")",
       "Bash(brew install *)",
       "Bash(git -C /Users/alal/Code/CrossTerm add README.md docs/mkdocs.yml docs/help/installation.md docs/help/settings.md docs/help/network-explorer.md docs/help/index.md docs/help/getting-started.md)",
-      "Bash(git -C /Users/alal/Code/CrossTerm add src/components/Vault/VaultUnlock.tsx src/components/Vault/__tests__/VaultUnlock.test.tsx src/i18n/en.json)"
+      "Bash(git -C /Users/alal/Code/CrossTerm add src/components/Vault/VaultUnlock.tsx src/components/Vault/__tests__/VaultUnlock.test.tsx src/i18n/en.json)",
+      "Bash(npx vitest *)",
+      "Bash(sed -i '' 's/\"version\": \"0\\\\.2\\\\.4\"/\"version\": \"0.2.5\"/g' /Users/alal/Code/CrossTerm/package.json /Users/alal/Code/CrossTerm/src-tauri/tauri.conf.json)",
+      "Bash(sed -i '' 's/^version = \"0\\\\.2\\\\.4\"/version = \"0.2.5\"/' /Users/alal/Code/CrossTerm/src-tauri/Cargo.toml)",
+      "Bash(sed -i '' 's/0\\\\.2\\\\.4/0.2.5/g' /Users/alal/Code/CrossTerm/src/components/Settings/SettingsPanel.tsx /Users/alal/Code/CrossTerm/src/components/Help/helpContent.ts /Users/alal/Code/CrossTerm/docs/help/installation.md)"
     ],
     "additionalDirectories": [
       "/Users/alal/.cache/gh"
