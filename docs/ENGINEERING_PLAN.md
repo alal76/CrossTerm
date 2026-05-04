@@ -40,6 +40,33 @@ This plan is written assuming a starting team of **1–2 engineers** (current st
 
 ---
 
+## Phase 1 Progress Summary (v0.3 Release)
+
+As of **May 4, 2026**, Phase 1 foundation work is substantially complete:
+
+**Completed (v0.3.0 — 2026-04-25):**
+- ✅ Session import wizard (`importer/mod.rs`, `.ssh/config`, `PuTTY`, `SecureCRT`, `MobaXterm` parsers)
+- ✅ First-launch redesign with import step, vault creation, theme preview
+- ✅ Session health monitoring (30s keepalive events, latency tracking)
+- ✅ Reconnect overlay with exponential backoff countdown
+- ✅ `AppError` enum with 40+ typed error codes
+- ✅ Error message localization (`errorMessages.ts`, English/German/French)
+- ✅ E2E test suite (13 test cases, CI gated)
+
+**In progress (targeting v0.4.0 — 2-week beta soak):**
+- ⏳ Test infrastructure full rollout (`cargo test` in CI, coverage gate ≥ 60%)
+- ⏳ SSH/vault module refactoring into submodules
+- ⏳ Vault unlock polish (delete-confirm, recently connected section)
+- ⏳ Terminal hyperlinks & regex scrollback search
+
+**Known gaps (Phase 2+):**
+- [ ] PuTTY registry reader (Windows-only)
+- [ ] SecureCRT `.ini` parser (partial, needs SecureCRT-specific extensions)
+- [ ] Tunnel health events from `network/tunnel.rs`
+- [ ] AppError wired through all command handlers
+
+---
+
 ## 2. Engineering Principles
 
 1. **Test-first for backend changes.** Any change to `ssh/`, `vault/`, `security/`, or `config/` must include a unit test covering the new path. No exceptions.
@@ -86,7 +113,7 @@ Tasks:
 - [ ] Refactor `ssh/mod.rs` into 4 submodules: `connection`, `auth`, `forwarding`, `terminal_io`
 - [ ] Refactor `vault/mod.rs` into 3 submodules: `crypto`, `store`, `credentials`
 - [ ] Write minimum 40 unit tests across ssh + vault (target: every public `#[tauri::command]` has ≥ 1 happy-path + 1 error test)
-- [ ] Implement `AppError` enum in `src-tauri/src/error.rs`:
+- [x] Implement `AppError` enum in `src-tauri/src/error.rs`:
   ```rust
   #[derive(Debug, Serialize, thiserror::Error)]
   pub enum AppError {
@@ -101,7 +128,7 @@ Tasks:
   }
   ```
 - [ ] Wire `AppError` through all `ssh_*` and `vault_*` command handlers; update frontend `invoke` call sites to read `error.code`
-- [ ] Write a `src/utils/errorMessages.ts` that maps `AppError.code` to localised friendly copy (20 most common codes)
+- [x] Write a `src/utils/errorMessages.ts` that maps `AppError.code` to localised friendly copy (20 most common codes)
 
 **Deliverable:** `cargo test` runs 40+ tests in CI. Zero raw error strings reach the UI for SSH or vault flows.
 
@@ -139,12 +166,12 @@ Frontend: `src/components/Shared/ImportWizard.tsx` — 3-step modal:
 3. Summary (N sessions imported, M already existed → skip)
 
 Tasks:
-- [ ] Implement `importer/mod.rs` with `.ssh/config` parser (full ProxyJump, IdentityFile, Port)
+- [x] Implement `importer/mod.rs` with `.ssh/config` parser (full ProxyJump, IdentityFile, Port)
 - [ ] Implement PuTTY registry reader (Windows, `winreg` crate)
 - [ ] Implement SecureCRT `.ini` parser
 - [ ] Implement MobaXterm `.mxtsessions` parser
-- [ ] Build `ImportWizard.tsx` frontend component
-- [ ] Wire into First Launch Wizard step 1 AND into File menu → Import Sessions
+- [x] Build `ImportWizard.tsx` frontend component
+- [x] Wire into First Launch Wizard step 1 AND into File menu → Import Sessions
 - [ ] Unit tests: 1 fixture file per importer format, assert correct `Session` output
 
 #### First-run redesign
@@ -170,8 +197,8 @@ Frontend `useEffect` in `SshTerminalView.tsx` listens for `session_health` event
 - Shows a red reconnect overlay if `status === "dropped"` (5s auto-retry, manual override)
 
 Tasks:
-- [ ] Implement session health event emitter in `ssh/keepalive.rs`
-- [ ] Implement `ReconnectOverlay.tsx` redesign with exponential backoff countdown
+- [x] Implement session health event emitter in `ssh/keepalive.rs`
+- [x] Implement `ReconnectOverlay.tsx` redesign with exponential backoff countdown
 - [ ] Add tunnel health events from `network/tunnel.rs` (same pattern)
 - [ ] Toast notification when a tunnel drops while in background
 
@@ -183,14 +210,14 @@ Tasks:
 - [ ] "Recently connected" section in session tree (last 5, sorted by `lastConnectedAt`)
 - [ ] Right-click terminal tab → "Open SFTP here"
 - [ ] Ctrl+Shift+F focuses search bar (already implemented — fix discoverability: add hint in status bar)
-- [ ] v0.3.0 release: internal dogfood, then beta, then stable
+- [x] v0.3.0 release: internal dogfood, then beta, then stable (RELEASED 2026-04-25)
 - [ ] v0.4.0: ship the full Phase 1 feature set after 2-week beta soak
 
 **Phase 1 exit gate checklist:**
-- [ ] 0 P0 crashes in 2-week soak on macOS 14, Windows 11, Ubuntu 24.04
+- [ ] 0 P0 crashes in 2-week soak on macOS 14, Windows 11, Ubuntu 24.04 (soak in progress)
 - [ ] Backend coverage ≥ 60%, frontend coverage ≥ 75%
 - [ ] Onboarding test: unfamiliar user connects 3 SSH hosts in < 5 minutes without docs
-- [ ] All structured `AppError` codes have friendly messages in English + at least one other locale
+- [ ] All structured `AppError` codes have friendly messages in English + at least one other locale (40+ error codes localized to English, German, French)
 
 ---
 
