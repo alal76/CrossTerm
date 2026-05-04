@@ -19,7 +19,7 @@ import { invoke } from "@tauri-apps/api/core";
 import clsx from "clsx";
 import {
   Lock, Eye, EyeOff, ShieldCheck, Loader2, Fingerprint, KeyRound,
-  Vault as VaultIcon, Plus, Trash2, ArrowLeft,
+  Vault as VaultIcon, Plus, Trash2, ArrowLeft, AlertTriangle,
 } from "lucide-react";
 import { useVaultStore } from "@/stores/vaultStore";
 import type { VaultInfo } from "@/types";
@@ -118,17 +118,25 @@ function VaultHeader({
  * The row is split into a wide select button and a narrow delete button so that
  * clicking anywhere on the vault name selects it without accidentally triggering
  * deletion — the trash icon is intentionally small and offset to the right.
+ *
+ * When `pendingDelete` is true the icon changes to a red AlertTriangle with a
+ * pulse animation, and clicking it for the second time calls `onDelete`.
+ * Clicking anything else (or waiting 3 s) clears the pending state.
  */
 function VaultListItem({
   vault,
   onSelect,
   selected,
   onDelete,
+  pendingDelete,
+  onPendingDelete,
 }: {
   readonly vault: VaultInfo;
   readonly onSelect: (v: VaultInfo) => void;
   readonly selected: boolean;
   readonly onDelete: (v: VaultInfo) => void;
+  readonly pendingDelete: boolean;
+  readonly onPendingDelete: (id: string) => void;
 }) {
   return (
     <div className={clsx(
@@ -152,11 +160,22 @@ function VaultListItem({
       </button>
       <button
         type="button"
-        onClick={() => onDelete(vault)}
-        title="Delete vault"
-        className="shrink-0 p-1 rounded text-text-disabled hover:text-status-disconnected hover:bg-status-disconnected/10 transition-colors"
+        onClick={() => {
+          if (pendingDelete) {
+            onDelete(vault);
+          } else {
+            onPendingDelete(vault.id);
+          }
+        }}
+        title={pendingDelete ? "Click again to delete" : "Delete vault"}
+        className={clsx(
+          "shrink-0 p-1 rounded transition-colors",
+          pendingDelete
+            ? "text-status-disconnected bg-status-disconnected/10 animate-pulse"
+            : "text-text-disabled hover:text-status-disconnected hover:bg-status-disconnected/10",
+        )}
       >
-        <Trash2 size={14} />
+        {pendingDelete ? <AlertTriangle size={14} /> : <Trash2 size={14} />}
       </button>
     </div>
   );
@@ -260,6 +279,29 @@ export default function VaultUnlock() {
   const [showDeletePassword, setShowDeletePassword] = useState(false);
   const deleteInputRef = useRef<HTMLInputElement>(null);
 
+  // Two-click delete guard: first click arms the target; second click triggers delete.
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+
+  // Auto-cancel the armed delete after 3 seconds of inactivity.
+  useEffect(() => {
+    if (!pendingDeleteId) return;
+    const timer = setTimeout(() => setPendingDeleteId(null), 3000);
+    return () => clearTimeout(timer);
+  }, [pendingDeleteId]);
+
+  // Clear armed delete when the user clicks anywhere that isn't a delete button.
+  useEffect(() => {
+    if (!pendingDeleteId) return;
+    function handleDocClick(e: MouseEvent) {
+      const target = e.target as HTMLElement | null;
+      if (!target?.closest("[data-delete-btn]")) {
+        setPendingDeleteId(null);
+      }
+    }
+    document.addEventListener("mousedown", handleDocClick);
+    return () => document.removeEventListener("mousedown", handleDocClick);
+  }, [pendingDeleteId]);
+
   const vaults = useVaultStore((s) => s.vaults);
   const vaultLocked = useVaultStore((s) => s.vaultLocked);
   const vaultLockStates = useVaultStore((s) => s.vaultLockStates);
@@ -318,6 +360,20 @@ export default function VaultUnlock() {
     setConfirmPassword("");
     setDeletePassword("");
     setDeleteTarget(null);
+  }
+
+  /**
+   * Guards a delete action with the two-click confirmation: first call arms the
+   * vault id; second call (while still armed) proceeds to `handleStartDelete`.
+   * Extracted so it can be reused by both the single-vault row and the multi-vault
+   * list without inlining conditional logic inside JSX (reduces cognitive complexity).
+   */
+  function handleDeleteGuard(vault: VaultInfo) {
+    if (pendingDeleteId === vault.id) {
+      handleStartDelete(vault);
+    } else {
+      setPendingDeleteId(vault.id);
+    }
   }
 
   // Enters delete mode for a specific vault. Stashing the target in state (not
@@ -466,6 +522,8 @@ export default function VaultUnlock() {
                     onSelect={setSelectedVault}
                     selected={selectedVault?.id === v.id}
                     onDelete={handleStartDelete}
+                    pendingDelete={pendingDeleteId === v.id}
+                    onPendingDelete={setPendingDeleteId}
                   />
                 ))}
               </div>
@@ -476,11 +534,23 @@ export default function VaultUnlock() {
                 <span className="text-xs text-text-secondary truncate">{lockedVaults[0].name}</span>
                 <button
                   type="button"
-                  onClick={() => handleStartDelete(lockedVaults[0])}
-                  title={t("vault.deleteVault")}
-                  className="p-1 rounded text-text-disabled hover:text-status-disconnected hover:bg-status-disconnected/10 transition-colors"
+                  data-delete-btn
+                  onClick={() => {
+                    if (pendingDeleteId === lockedVaults[0].id) {
+                      handleStartDelete(lockedVaults[0]);
+                    } else {
+                      setPendingDeleteId(lockedVaults[0].id);
+                    }
+                  }}
+                  title={pendingDeleteId === lockedVaults[0].id ? "Click again to delete" : t("vault.deleteVault")}
+                  className={clsx(
+                    "p-1 rounded transition-colors",
+                    pendingDeleteId === lockedVaults[0].id
+                      ? "text-status-disconnected bg-status-disconnected/10 animate-pulse"
+                      : "text-text-disabled hover:text-status-disconnected hover:bg-status-disconnected/10",
+                  )}
                 >
-                  <Trash2 size={13} />
+                  {pendingDeleteId === lockedVaults[0].id ? <AlertTriangle size={13} /> : <Trash2 size={13} />}
                 </button>
               </div>
             )}

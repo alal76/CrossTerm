@@ -2682,3 +2682,410 @@ mod tests {
         ));
     }
 }
+
+// ── Cryptographic unit tests ────────────────────────────────────────────
+
+#[cfg(test)]
+mod crypto_tests {
+    use super::*;
+
+    // ── 1. Argon2id key derivation is deterministic ──────────────────
+
+    #[test]
+    fn test_argon2id_deterministic() {
+        let password = b"my-super-secret-password";
+        let salt = [0x42u8; SALT_LEN];
+
+        let key1 = derive_key(password, &salt).unwrap();
+        let key2 = derive_key(password, &salt).unwrap();
+
+        assert_eq!(
+            key1.as_slice(),
+            key2.as_slice(),
+            "Same password + same salt must yield identical key"
+        );
+        assert_eq!(key1.len(), KEY_LEN, "Key must be KEY_LEN bytes");
+    }
+
+    // ── 2. AES-GCM round-trip: encrypt then decrypt recovers plaintext ─
+
+    #[test]
+    fn test_aes_gcm_roundtrip() {
+        let key = [0x11u8; KEY_LEN];
+        let plaintext = b"hello, AES-GCM world!";
+
+        let (ciphertext, nonce) = encrypt(plaintext, &key).unwrap();
+        let recovered = decrypt(&ciphertext, &nonce, &key).unwrap();
+
+        assert_eq!(recovered, plaintext, "Decrypted bytes must match original");
+    }
+
+    // ── 3. Wrong password produces different key → decrypt fails ──────
+
+    #[test]
+    fn test_wrong_password_key_decryption_fails() {
+        let salt = [0x55u8; SALT_LEN];
+
+        let correct_key = derive_key(b"correct-password", &salt).unwrap();
+        let wrong_key = derive_key(b"wrong-password", &salt).unwrap();
+
+        assert_ne!(
+            correct_key.as_slice(),
+            wrong_key.as_slice(),
+            "Different passwords must produce different keys"
+        );
+
+        let plaintext = b"sensitive data";
+        let (ciphertext, nonce) = encrypt(plaintext, &correct_key).unwrap();
+
+        let result = decrypt(&ciphertext, &nonce, &wrong_key);
+        assert!(
+            result.is_err(),
+            "Decryption with wrong key must fail"
+        );
+    }
+
+    // ── 4. VaultError serializes to a plain string (not a JSON object) ─
+
+    #[test]
+    fn test_vault_error_serializes_to_plain_string() {
+        let e = VaultError::Locked;
+        let json = serde_json::to_value(&e).unwrap();
+        // Must be a JSON string, not an object
+        assert!(json.is_string(), "VaultError must serialize to a JSON string");
+        assert_eq!(json.as_str().unwrap(), "Vault is locked");
+
+        let e2 = VaultError::InvalidPassword;
+        let json2 = serde_json::to_value(&e2).unwrap();
+        assert!(json2.is_string());
+        assert_eq!(json2.as_str().unwrap(), "Invalid master password");
+
+        let e3 = VaultError::CredentialNotFound("cred-abc".into());
+        let json3 = serde_json::to_value(&e3).unwrap();
+        assert!(json3.is_string());
+        assert!(json3.as_str().unwrap().contains("cred-abc"));
+    }
+
+    // ── 5. CredentialType enum serialization matches snake_case strings ─
+
+    #[test]
+    fn test_credential_type_snake_case_serialization() {
+        let cases = vec![
+            (CredentialType::Password, "password"),
+            (CredentialType::SshKey, "ssh_key"),
+            (CredentialType::Certificate, "certificate"),
+            (CredentialType::ApiToken, "api_token"),
+            (CredentialType::CloudCredential, "cloud_credential"),
+            (CredentialType::TotpSeed, "totp_seed"),
+        ];
+
+        for (variant, expected) in cases {
+            let json = serde_json::to_value(&variant).unwrap();
+            assert!(json.is_string(), "CredentialType must serialize to a JSON string");
+            assert_eq!(
+                json.as_str().unwrap(),
+                expected,
+                "CredentialType::{:?} must serialize to \"{}\"",
+                variant,
+                expected
+            );
+        }
+    }
+
+    // ── 6. RateLimited error includes the seconds value ───────────────
+
+    #[test]
+    fn test_rate_limited_error_includes_seconds() {
+        let e = VaultError::RateLimited(42);
+        let text = e.to_string();
+        assert!(
+            text.contains("42"),
+            "RateLimited error message must include the retry seconds: {text}"
+        );
+
+        let json = serde_json::to_value(&e).unwrap();
+        assert!(json.is_string());
+        assert!(json.as_str().unwrap().contains("42"));
+    }
+
+    // ── 7. derive_key: empty password still produces KEY_LEN bytes ────
+
+    #[test]
+    fn test_derive_key_empty_password() {
+        let salt = [0xAAu8; SALT_LEN];
+        let key = derive_key(b"", &salt).unwrap();
+        assert_eq!(key.len(), KEY_LEN);
+    }
+
+    // ── 8. derive_key: different passwords → different keys ───────────
+
+    #[test]
+    fn test_derive_key_different_passwords_differ() {
+        let salt = [0xBBu8; SALT_LEN];
+        let k1 = derive_key(b"alpha", &salt).unwrap();
+        let k2 = derive_key(b"beta", &salt).unwrap();
+        assert_ne!(k1.as_slice(), k2.as_slice());
+    }
+
+    // ── 9. derive_key: different salts → different keys ───────────────
+
+    #[test]
+    fn test_derive_key_different_salts_differ() {
+        let password = b"same-password";
+        let salt1 = [0x01u8; SALT_LEN];
+        let salt2 = [0x02u8; SALT_LEN];
+        let k1 = derive_key(password, &salt1).unwrap();
+        let k2 = derive_key(password, &salt2).unwrap();
+        assert_ne!(k1.as_slice(), k2.as_slice());
+    }
+
+    // ── 10. encrypt produces random nonces each call ──────────────────
+
+    #[test]
+    fn test_encrypt_nonces_are_random() {
+        let key = [0x22u8; KEY_LEN];
+        let plaintext = b"determinism check";
+
+        let (_, nonce1) = encrypt(plaintext, &key).unwrap();
+        let (_, nonce2) = encrypt(plaintext, &key).unwrap();
+        let (_, nonce3) = encrypt(plaintext, &key).unwrap();
+
+        assert_ne!(nonce1, nonce2, "Nonces must differ between calls");
+        assert_ne!(nonce2, nonce3, "Nonces must differ between calls");
+    }
+
+    // ── 11. decrypt with tampered ciphertext fails ────────────────────
+
+    #[test]
+    fn test_tampered_ciphertext_fails() {
+        let key = [0x33u8; KEY_LEN];
+        let plaintext = b"integrity check";
+
+        let (mut ciphertext, nonce) = encrypt(plaintext, &key).unwrap();
+        // Flip the first byte to simulate tampering
+        ciphertext[0] ^= 0xFF;
+
+        let result = decrypt(&ciphertext, &nonce, &key);
+        assert!(result.is_err(), "Tampered ciphertext must not decrypt");
+    }
+
+    // ── 12. decrypt with wrong nonce fails ────────────────────────────
+
+    #[test]
+    fn test_wrong_nonce_fails() {
+        let key = [0x44u8; KEY_LEN];
+        let plaintext = b"nonce check";
+
+        let (ciphertext, _) = encrypt(plaintext, &key).unwrap();
+        let wrong_nonce = [0xFFu8; NONCE_LEN];
+
+        let result = decrypt(&ciphertext, &wrong_nonce, &key);
+        assert!(result.is_err(), "Wrong nonce must not decrypt successfully");
+    }
+
+    // ── 13. VaultError::CredentialNotFound includes the id ───────────
+
+    #[test]
+    fn test_credential_not_found_includes_id() {
+        let id = "cred-deadbeef-1234";
+        let e = VaultError::CredentialNotFound(id.to_string());
+        let text = e.to_string();
+        assert!(text.contains(id), "CredentialNotFound message must include id: {text}");
+    }
+
+    // ── 14. VaultError::RateLimited backoff message ───────────────────
+
+    #[test]
+    fn test_rate_limited_message_format() {
+        let e = VaultError::RateLimited(120);
+        assert_eq!(
+            e.to_string(),
+            "Too many unlock attempts. Retry after 120 seconds"
+        );
+    }
+
+    // ── 15. encrypt → decrypt round-trip with binary data ─────────────
+
+    #[test]
+    fn test_aes_gcm_roundtrip_binary() {
+        let key = [0x77u8; KEY_LEN];
+        let plaintext: Vec<u8> = (0u8..=255).collect();
+
+        let (ct, nonce) = encrypt(&plaintext, &key).unwrap();
+        let recovered = decrypt(&ct, &nonce, &key).unwrap();
+
+        assert_eq!(recovered, plaintext);
+    }
+
+    // ── 16. encrypt → decrypt round-trip with empty plaintext ─────────
+
+    #[test]
+    fn test_aes_gcm_roundtrip_empty() {
+        let key = [0x88u8; KEY_LEN];
+        let (ct, nonce) = encrypt(b"", &key).unwrap();
+        let recovered = decrypt(&ct, &nonce, &key).unwrap();
+        assert_eq!(recovered, b"");
+    }
+
+    // ── 17. VaultRegistry CRUD helpers ────────────────────────────────
+
+    #[test]
+    fn test_vault_registry_add_and_find() {
+        let mut registry = VaultRegistry::default();
+
+        let info = VaultInfo {
+            id: "vault-001".to_string(),
+            name: "Test Vault".to_string(),
+            is_default: true,
+            owner_profile_id: "profile-001".to_string(),
+            shared_with: vec![],
+            created_at: Utc::now().to_rfc3339(),
+        };
+        registry.add(info.clone());
+
+        let found = registry.find("vault-001");
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().name, "Test Vault");
+
+        let not_found = registry.find("nonexistent");
+        assert!(not_found.is_none());
+    }
+
+    // ── 18. VaultRegistry: list_for_profile and shared_with ───────────
+
+    #[test]
+    fn test_vault_registry_list_for_profile() {
+        let mut registry = VaultRegistry::default();
+
+        registry.add(VaultInfo {
+            id: "v1".to_string(),
+            name: "V1".to_string(),
+            is_default: true,
+            owner_profile_id: "p1".to_string(),
+            shared_with: vec!["p2".to_string()],
+            created_at: Utc::now().to_rfc3339(),
+        });
+        registry.add(VaultInfo {
+            id: "v2".to_string(),
+            name: "V2".to_string(),
+            is_default: false,
+            owner_profile_id: "p2".to_string(),
+            shared_with: vec![],
+            created_at: Utc::now().to_rfc3339(),
+        });
+
+        let p1_vaults = registry.list_for_profile("p1");
+        assert_eq!(p1_vaults.len(), 1, "p1 owns v1");
+
+        let p2_vaults = registry.list_for_profile("p2");
+        assert_eq!(p2_vaults.len(), 2, "p2 owns v2 and is shared on v1");
+
+        let p3_vaults = registry.list_for_profile("p3");
+        assert!(p3_vaults.is_empty());
+    }
+
+    // ── 19. VaultRegistry: remove ────────────────────────────────────
+
+    #[test]
+    fn test_vault_registry_remove() {
+        let mut registry = VaultRegistry::default();
+        registry.add(VaultInfo {
+            id: "to-remove".to_string(),
+            name: "Remove Me".to_string(),
+            is_default: false,
+            owner_profile_id: "p-any".to_string(),
+            shared_with: vec![],
+            created_at: Utc::now().to_rfc3339(),
+        });
+
+        assert!(registry.find("to-remove").is_some());
+        registry.remove("to-remove");
+        assert!(registry.find("to-remove").is_none());
+    }
+
+    // ── 20. VaultRegistry: default_for_profile ─────────────────────
+
+    #[test]
+    fn test_vault_registry_default_for_profile() {
+        let mut registry = VaultRegistry::default();
+        registry.add(VaultInfo {
+            id: "non-default".to_string(),
+            name: "Non Default".to_string(),
+            is_default: false,
+            owner_profile_id: "p-test".to_string(),
+            shared_with: vec![],
+            created_at: Utc::now().to_rfc3339(),
+        });
+        registry.add(VaultInfo {
+            id: "default-vault".to_string(),
+            name: "Default".to_string(),
+            is_default: true,
+            owner_profile_id: "p-test".to_string(),
+            shared_with: vec![],
+            created_at: Utc::now().to_rfc3339(),
+        });
+
+        let default = registry.default_for_profile("p-test");
+        assert!(default.is_some());
+        assert_eq!(default.unwrap().id, "default-vault");
+
+        let no_default = registry.default_for_profile("other-profile");
+        assert!(no_default.is_none());
+    }
+
+    // ── 21. Vault::vault_db_path returns predictable path ─────────────
+
+    #[test]
+    fn test_vault_db_path_contains_vault_id() {
+        let vid = "my-unique-vault-id";
+        let path = Vault::vault_db_path(vid);
+        let path_str = path.to_string_lossy();
+        assert!(
+            path_str.contains(vid),
+            "vault_db_path must include the vault id: {path_str}"
+        );
+        assert!(
+            path_str.ends_with("vault.db"),
+            "vault_db_path must end with vault.db: {path_str}"
+        );
+    }
+
+    // ── 22. VaultError variants display messages correctly ────────────
+
+    #[test]
+    fn test_vault_error_display_messages() {
+        assert_eq!(VaultError::Locked.to_string(), "Vault is locked");
+        assert_eq!(VaultError::AlreadyUnlocked.to_string(), "Vault is already unlocked");
+        assert_eq!(VaultError::AlreadyExists.to_string(), "Vault already exists at this path");
+        assert_eq!(VaultError::NotFound.to_string(), "Vault not found");
+        assert_eq!(VaultError::InvalidPassword.to_string(), "Invalid master password");
+        assert_eq!(
+            VaultError::Encryption("bad cipher".into()).to_string(),
+            "Encryption error: bad cipher"
+        );
+        assert_eq!(
+            VaultError::Decryption("aead fail".into()).to_string(),
+            "Decryption error: aead fail"
+        );
+    }
+
+    // ── 23. CredentialType round-trip through JSON ────────────────────
+
+    #[test]
+    fn test_credential_type_json_roundtrip() {
+        let types = vec![
+            CredentialType::Password,
+            CredentialType::SshKey,
+            CredentialType::Certificate,
+            CredentialType::ApiToken,
+            CredentialType::CloudCredential,
+            CredentialType::TotpSeed,
+        ];
+
+        for t in types {
+            let serialized = serde_json::to_string(&t).unwrap();
+            let deserialized: CredentialType = serde_json::from_str(&serialized).unwrap();
+            assert_eq!(t, deserialized, "CredentialType round-trip failed for {:?}", t);
+        }
+    }
+}

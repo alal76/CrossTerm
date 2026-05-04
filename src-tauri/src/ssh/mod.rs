@@ -1742,6 +1742,115 @@ pub async fn ssh_list_keys(
     Ok(keys)
 }
 
+// ── Session Health Watchdog ─────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionHealth {
+    pub connection_id: String,
+    pub status: SessionHealthStatus,
+    pub latency_ms: Option<u64>,
+    pub last_seen_secs: u64,
+    pub missed_keepalives: u32,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionHealthStatus {
+    Ok,
+    Degraded,
+    Dropped,
+}
+
+/// Returns a `Vec<SessionHealth>` snapshot for all currently active connections.
+///
+/// Health is derived from `SshConnectionInfo::latency_ms` (as a rough proxy for
+/// last observed activity).  Because the SSH connection struct does not yet carry
+/// an explicit `last_activity` timestamp or `missed_keepalives` counter, we use
+/// `latency_ms` to illustrate the shape and return safe placeholder values for
+/// the fields that are not yet tracked.  Future work can replace these with real
+/// per-connection activity timestamps.
+#[tauri::command]
+pub async fn ssh_get_connection_health(
+    state: tauri::State<'_, SshState>,
+) -> Result<Vec<SessionHealth>, SshError> {
+    let connections = state.connections.read().await;
+    let mut results = Vec::new();
+
+    for conn_arc in connections.values() {
+        let conn = conn_arc.lock().await;
+        // Placeholder: no real last-activity tracking yet, so last_seen_secs = 0.
+        // The status and missed_keepalives fields will be meaningful once
+        // per-connection activity timestamps are added.
+        let health = SessionHealth {
+            connection_id: conn.info.connection_id.clone(),
+            status: SessionHealthStatus::Ok,
+            latency_ms: conn.info.latency_ms,
+            last_seen_secs: 0,
+            missed_keepalives: 0,
+        };
+        results.push(health);
+    }
+
+    Ok(results)
+}
+
+/// Spawns a background task that emits `session_health` Tauri events every 15 seconds
+/// for all active SSH connections.
+///
+/// Health thresholds (using `last_seen_secs` once activity tracking is in place):
+/// - `Ok`       – last activity ≤ 30 s ago
+/// - `Degraded` – last activity > 30 s and ≤ 60 s ago
+/// - `Dropped`  – last activity > 60 s ago
+///
+/// For now, `last_seen_secs` is a placeholder (0) because per-connection activity
+/// timestamps are not yet stored on `SshConnection`.  The task still emits health
+/// events so the frontend wiring can be validated end-to-end.
+#[tauri::command]
+pub async fn ssh_start_health_monitor(
+    app_handle: AppHandle,
+    state: tauri::State<'_, SshState>,
+) -> Result<(), SshError> {
+    let connections_ref = state.connections.clone();
+    let app = app_handle.clone();
+
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
+        loop {
+            interval.tick().await;
+
+            let connections = connections_ref.read().await;
+            for conn_arc in connections.values() {
+                let conn = conn_arc.lock().await;
+
+                // Placeholder activity tracking: once SshConnection gains a
+                // `last_activity: Instant` field, replace `elapsed_secs` below
+                // with `conn.last_activity.elapsed().as_secs()`.
+                let elapsed_secs: u64 = 0;
+
+                let status = if elapsed_secs > 60 {
+                    SessionHealthStatus::Dropped
+                } else if elapsed_secs > 30 {
+                    SessionHealthStatus::Degraded
+                } else {
+                    SessionHealthStatus::Ok
+                };
+
+                let health = SessionHealth {
+                    connection_id: conn.info.connection_id.clone(),
+                    status,
+                    latency_ms: conn.info.latency_ms,
+                    last_seen_secs: elapsed_secs,
+                    missed_keepalives: 0,
+                };
+
+                let _ = app.emit("session_health", &health);
+            }
+        }
+    });
+
+    Ok(())
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -2419,5 +2528,290 @@ mod tests {
         let deserialized: SshAuthSuccessEvent = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.connection_id, "conn-xyz");
         assert_eq!(deserialized.auth_method, "password");
+    }
+
+    // ── SshAuth enum serialization/deserialization round-trips ──────────
+
+    #[test]
+    fn test_ssh_auth_none_serde() {
+        let auth = SshAuth::None;
+        let json = serde_json::to_string(&auth).unwrap();
+        assert!(json.contains("\"type\":\"none\""));
+        let deserialized: SshAuth = serde_json::from_str(&json).unwrap();
+        assert!(matches!(deserialized, SshAuth::None));
+    }
+
+    #[test]
+    fn test_ssh_auth_private_key_no_passphrase_serde() {
+        let auth = SshAuth::PrivateKey {
+            key_data: "-----BEGIN OPENSSH PRIVATE KEY-----\ntest\n-----END OPENSSH PRIVATE KEY-----".to_string(),
+            passphrase: None,
+        };
+        let json = serde_json::to_string(&auth).unwrap();
+        assert!(json.contains("\"type\":\"private_key\""));
+        let deserialized: SshAuth = serde_json::from_str(&json).unwrap();
+        match deserialized {
+            SshAuth::PrivateKey { passphrase, .. } => assert!(passphrase.is_none()),
+            _ => panic!("Expected PrivateKey variant"),
+        }
+    }
+
+    // ── SshError serialization (plain string, not JSON object) ──────────
+
+    #[test]
+    fn test_ssh_error_serialize_is_plain_string_not_object() {
+        // The Serialize impl must produce a JSON string, never a {"field":…} object.
+        let cases: Vec<SshError> = vec![
+            SshError::NotFound("id-1".into()),
+            SshError::AuthFailed,
+            SshError::ConnectionFailed("refused".into()),
+            SshError::Channel("closed".into()),
+            SshError::Key("invalid pem".into()),
+            SshError::PortForward("bind failed".into()),
+            SshError::Io("os error 2".into()),
+            SshError::HostKeyChanged("host:22".into()),
+        ];
+        for err in cases {
+            let json = serde_json::to_string(&err).unwrap();
+            // Must start and end with `"` — i.e., a JSON string.
+            assert!(json.starts_with('"') && json.ends_with('"'),
+                "SshError::serialize must produce a JSON string, got: {}", json);
+            // Must NOT look like a JSON object.
+            assert!(!json.starts_with('{'),
+                "SshError::serialize must not produce a JSON object, got: {}", json);
+        }
+    }
+
+    #[test]
+    fn test_ssh_error_from_io_error_preserves_message() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+        let msg = io_err.to_string();
+        let ssh_err = SshError::from(io_err);
+        // The converted error should carry the original message.
+        match &ssh_err {
+            SshError::Io(s) => assert!(s.contains(&msg),
+                "Io variant should contain original message '{}', got '{}'", msg, s),
+            other => panic!("Expected SshError::Io, got {:?}", other),
+        }
+        // Serialize to confirm it's a plain string that also contains the message.
+        let json = serde_json::to_string(&ssh_err).unwrap();
+        assert!(json.contains(&msg));
+    }
+
+    #[test]
+    fn test_ssh_error_from_russh_error_does_not_panic() {
+        // russh::Error has no public constructor for arbitrary messages, so we
+        // trigger one via an invalid address parse which ultimately yields a
+        // ConnectionFailed wrapper.  The important thing is that `from` doesn't
+        // panic and the result is a ConnectionFailed variant.
+        let russh_err: russh::Error = russh::Error::SendError;
+        let ssh_err = SshError::from(russh_err);
+        assert!(matches!(ssh_err, SshError::ConnectionFailed(_)));
+    }
+
+    // ── JumpHost serialization ───────────────────────────────────────────
+
+    #[test]
+    fn test_jump_host_none_auth_serde() {
+        let jh = JumpHost {
+            host: "jump.example.com".to_string(),
+            port: 2222,
+            username: "juser".to_string(),
+            auth: SshAuth::None,
+        };
+        let json = serde_json::to_string(&jh).unwrap();
+        assert!(json.contains("\"type\":\"none\""));
+        let deserialized: JumpHost = serde_json::from_str(&json).unwrap();
+        assert!(matches!(deserialized.auth, SshAuth::None));
+        assert_eq!(deserialized.port, 2222);
+    }
+
+    // ── SshState helpers ─────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_ssh_state_new_is_empty() {
+        let state = SshState::new();
+        let conns = state.connections.read().await;
+        assert!(conns.is_empty());
+        drop(conns);
+        let pending = state.pending_auth_responses.read().await;
+        assert!(pending.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_ssh_state_connection_lookup_empty_returns_not_found() {
+        // When the state is empty, trying to find any connection_id must return
+        // None (simulating what a command would turn into SshError::NotFound).
+        let state = SshState::new();
+        let connections = state.connections.read().await;
+        let result = connections.get("nonexistent-id");
+        assert!(result.is_none(),
+            "looking up a missing id on empty state should return None");
+    }
+
+    // ── build_config helpers ─────────────────────────────────────────────
+
+    #[test]
+    fn test_build_config_keepalive_max_is_always_3() {
+        for secs in [1u64, 10, 30, 60, 120] {
+            let config = build_config(Some(secs));
+            assert_eq!(config.keepalive_max, 3,
+                "keepalive_max should always be 3, got {} for secs={}", config.keepalive_max, secs);
+        }
+    }
+
+    #[test]
+    fn test_build_config_preferred_ciphers_are_secure() {
+        let config = build_config(None);
+        // chacha20-poly1305 must be the first (highest preference) cipher.
+        let first_cipher = config.preferred.cipher.first().unwrap().as_ref();
+        assert_eq!(first_cipher, russh::cipher::CHACHA20_POLY1305.as_ref());
+        // AES256-GCM must also be present.
+        let has_aes_gcm = config.preferred.cipher.iter().any(|c| c.as_ref() == russh::cipher::AES_256_GCM.as_ref());
+        assert!(has_aes_gcm, "AES-256-GCM should be in preferred cipher list");
+    }
+
+    #[test]
+    fn test_build_config_preferred_kex_uses_curve25519() {
+        let config = build_config(None);
+        let first_kex = config.preferred.kex.first().unwrap().as_ref();
+        assert_eq!(first_kex, russh::kex::CURVE25519.as_ref());
+    }
+
+    // ── SessionHealth / SessionHealthStatus serialization ────────────────
+
+    #[test]
+    fn test_session_health_status_serializes_snake_case() {
+        assert_eq!(serde_json::to_string(&SessionHealthStatus::Ok).unwrap(), "\"ok\"");
+        assert_eq!(serde_json::to_string(&SessionHealthStatus::Degraded).unwrap(), "\"degraded\"");
+        assert_eq!(serde_json::to_string(&SessionHealthStatus::Dropped).unwrap(), "\"dropped\"");
+    }
+
+    #[test]
+    fn test_session_health_status_equality() {
+        assert_eq!(SessionHealthStatus::Ok, SessionHealthStatus::Ok);
+        assert_ne!(SessionHealthStatus::Ok, SessionHealthStatus::Degraded);
+        assert_ne!(SessionHealthStatus::Degraded, SessionHealthStatus::Dropped);
+    }
+
+    #[test]
+    fn test_session_health_struct_serializes_correctly() {
+        let h = SessionHealth {
+            connection_id: "conn-health-1".to_string(),
+            status: SessionHealthStatus::Degraded,
+            latency_ms: Some(150),
+            last_seen_secs: 45,
+            missed_keepalives: 1,
+        };
+        let json = serde_json::to_string(&h).unwrap();
+        assert!(json.contains("\"connection_id\":\"conn-health-1\""));
+        assert!(json.contains("\"status\":\"degraded\""));
+        assert!(json.contains("\"latency_ms\":150"));
+        assert!(json.contains("\"last_seen_secs\":45"));
+        assert!(json.contains("\"missed_keepalives\":1"));
+    }
+
+    #[test]
+    fn test_session_health_ok_status_serialization() {
+        let h = SessionHealth {
+            connection_id: "conn-ok".to_string(),
+            status: SessionHealthStatus::Ok,
+            latency_ms: None,
+            last_seen_secs: 0,
+            missed_keepalives: 0,
+        };
+        let json = serde_json::to_string(&h).unwrap();
+        assert!(json.contains("\"status\":\"ok\""));
+        // latency_ms: None should serialize as null
+        assert!(json.contains("\"latency_ms\":null"));
+    }
+
+    #[test]
+    fn test_session_health_dropped_status_serialization() {
+        let h = SessionHealth {
+            connection_id: "conn-dropped".to_string(),
+            status: SessionHealthStatus::Dropped,
+            latency_ms: Some(9999),
+            last_seen_secs: 90,
+            missed_keepalives: 3,
+        };
+        let json = serde_json::to_string(&h).unwrap();
+        assert!(json.contains("\"status\":\"dropped\""));
+        assert!(json.contains("\"missed_keepalives\":3"));
+    }
+
+    #[test]
+    fn test_session_health_threshold_logic() {
+        // Mirror the threshold logic from ssh_start_health_monitor so it stays in sync.
+        let classify = |elapsed_secs: u64| -> SessionHealthStatus {
+            if elapsed_secs > 60 {
+                SessionHealthStatus::Dropped
+            } else if elapsed_secs > 30 {
+                SessionHealthStatus::Degraded
+            } else {
+                SessionHealthStatus::Ok
+            }
+        };
+
+        assert_eq!(classify(0), SessionHealthStatus::Ok);
+        assert_eq!(classify(30), SessionHealthStatus::Ok);
+        assert_eq!(classify(31), SessionHealthStatus::Degraded);
+        assert_eq!(classify(60), SessionHealthStatus::Degraded);
+        assert_eq!(classify(61), SessionHealthStatus::Dropped);
+        assert_eq!(classify(u64::MAX), SessionHealthStatus::Dropped);
+    }
+
+    // ── SshError variant coverage ────────────────────────────────────────
+
+    #[test]
+    fn test_ssh_error_all_variants_display() {
+        let cases = vec![
+            (SshError::NotFound("x".into()), "Connection not found: x"),
+            (SshError::AuthFailed, "Authentication failed"),
+            (SshError::ConnectionFailed("timeout".into()), "Connection failed: timeout"),
+            (SshError::Channel("eof".into()), "Channel error: eof"),
+            (SshError::Key("bad key".into()), "Key error: bad key"),
+            (SshError::PortForward("in use".into()), "Port forward error: in use"),
+            (SshError::Io("os error 5".into()), "IO error: os error 5"),
+            (SshError::AgentForward("sock gone".into()), "Agent forwarding error: sock gone"),
+        ];
+        for (err, expected) in cases {
+            assert_eq!(err.to_string(), expected);
+        }
+    }
+
+    #[test]
+    fn test_port_forward_remote_serde_roundtrip() {
+        let pf = PortForward::Remote {
+            id: "rfwd-1".to_string(),
+            bind_host: "0.0.0.0".to_string(),
+            bind_port: 9000,
+            remote_host: "localhost".to_string(),
+            remote_port: 8000,
+        };
+        let json = serde_json::to_string(&pf).unwrap();
+        assert!(json.contains("\"type\":\"remote\""));
+        let deser: PortForward = serde_json::from_str(&json).unwrap();
+        assert_eq!(deser.id(), "rfwd-1");
+    }
+
+    #[test]
+    fn test_ssh_connection_info_optional_fields_can_be_none() {
+        let info = SshConnectionInfo {
+            connection_id: "c1".to_string(),
+            session_id: "s1".to_string(),
+            host: "h".to_string(),
+            port: 22,
+            username: "u".to_string(),
+            connected_at: "2024-01-01T00:00:00Z".to_string(),
+            port_forwards: vec![],
+            cipher_algorithm: None,
+            kex_algorithm: None,
+            latency_ms: None,
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("\"cipher_algorithm\":null"));
+        assert!(json.contains("\"kex_algorithm\":null"));
+        assert!(json.contains("\"latency_ms\":null"));
     }
 }

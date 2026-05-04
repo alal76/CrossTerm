@@ -34,6 +34,7 @@ impl Serialize for ConfigError {
 // ── Models ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Settings {
     // ── Appearance ─────────────────────────────────────────────────────
     pub theme: String,
@@ -211,7 +212,7 @@ pub struct ProfileCreateRequest {
     pub settings: Option<Settings>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProfileUpdateRequest {
     pub name: Option<String>,
     pub avatar: Option<String>,
@@ -249,7 +250,7 @@ pub enum SessionType {
     DockerExec,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionDetails {
     pub host: Option<String>,
@@ -303,7 +304,7 @@ pub struct SessionCreateRequest {
     pub settings_override: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct SessionUpdateRequest {
     pub name: Option<String>,
     pub session_type: Option<SessionType>,

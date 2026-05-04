@@ -3,7 +3,9 @@ mod audit;
 mod cloud;
 mod config;
 mod editor;
+mod error;
 mod ftp;
+mod importer;
 mod keygen;
 mod keymgr;
 mod l10n;
@@ -152,6 +154,8 @@ pub fn run() {
             ssh::ssh_forget_host_key,
             ssh::ssh_generate_key,
             ssh::ssh_list_keys,
+            ssh::ssh_get_connection_health,
+            ssh::ssh_start_health_monitor,
             // SFTP
             sftp::sftp_open,
             sftp::sftp_close,
@@ -407,6 +411,9 @@ pub fn run() {
             rdp::rdp_stop_recording,
             // Security Extensions
             security::security_plugin_kv_verify_isolation,
+            // Importer
+            importer::import_detect_sources,
+            importer::import_parse_source,
             // Android
             android::android_start_foreground_service,
             android::android_stop_foreground_service,
