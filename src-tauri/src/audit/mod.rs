@@ -601,6 +601,185 @@ pub fn audit_list_alerts(
     audit_detect_anomalies(config_state)
 }
 
+// ── Phase 3: Compliance Report ──────────────────────────────────────────
+
+/// A lightweight audit event used by the compliance report generator.
+///
+/// Unlike [`AuditEvent`] (which stores a typed [`AuditEventType`] and targets
+/// are inferred from `details`), `ComplianceEvent` uses plain string fields so
+/// that the compliance engine can work with data ingested from external sources
+/// (CSV, syslog streams, etc.) without requiring the full CrossTerm event
+/// taxonomy.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComplianceEvent {
+    /// ISO 8601 timestamp string, e.g. `"2025-03-01T10:00:00Z"`.
+    pub timestamp: String,
+    /// Free-form action identifier, e.g. `"session_start"`, `"command_executed"`,
+    /// `"auth_failed"`.
+    pub action: String,
+    /// Optional target (hostname, resource path, etc.).
+    pub target: Option<String>,
+    /// Optional user / subject identifier.
+    pub user: Option<String>,
+}
+
+/// Per-profile state for the audit compliance subsystem.
+///
+/// Holds an in-memory append-only log of [`ComplianceEvent`]s that is
+/// populated either by direct Tauri-command calls or by bridging from the
+/// main [`AuditEvent`] log.  A `Mutex` guards the inner `Vec` so the state
+/// can safely be shared across Tauri command handlers.
+pub struct AuditState {
+    pub events: std::sync::Mutex<Vec<ComplianceEvent>>,
+}
+
+impl AuditState {
+    pub fn new() -> Self {
+        Self {
+            events: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl Default for AuditState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A compliance summary report covering a specified date/time range.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComplianceReport {
+    /// RFC 3339 timestamp of when the report was generated.
+    pub generated_at: String,
+    /// Inclusive start of the reporting period (ISO 8601, e.g. `"2025-01-01T00:00:00Z"`).
+    pub period_start: String,
+    /// Inclusive end of the reporting period (ISO 8601).
+    pub period_end: String,
+    /// Number of `session_start` events in the period.
+    pub total_sessions: usize,
+    /// Number of `command_executed` events in the period.
+    pub total_commands: usize,
+    /// Number of `auth_failed` events in the period.
+    pub failed_auth_attempts: usize,
+    /// Count of distinct hostnames found in the `target` field.
+    pub unique_hosts_accessed: usize,
+    /// Number of distinct users that accessed at least one vault-related event.
+    /// (Placeholder — set to 0 when user tracking is unavailable.)
+    pub users_with_vault_access: usize,
+    /// Number of anomaly alerts detected (currently always 0; intended for
+    /// cross-module integration in a future phase).
+    pub anomaly_alert_count: usize,
+    /// Top 5 most-accessed hosts, sorted descending by access count.
+    /// Each element is `(hostname, count)`.
+    pub top_accessed_hosts: Vec<(String, usize)>,
+    /// Per-day event counts.  Each element is `(date_str, count)` where
+    /// `date_str` is the first 10 characters of the event's ISO 8601 timestamp
+    /// (`"YYYY-MM-DD"`).  Sorted ascending by date.
+    pub daily_activity: Vec<(String, usize)>,
+    /// Compliance framework this report targets: `"SOC2"`, `"ISO27001"`, or
+    /// `"HIPAA"`.
+    pub framework: String,
+}
+
+/// Build a [`ComplianceReport`] from a slice of [`ComplianceEvent`]s.
+///
+/// # Arguments
+/// * `entries`       — all events to consider (will be filtered to the period).
+/// * `period_start`  — inclusive start timestamp as an ISO 8601 string.
+/// * `period_end`    — inclusive end timestamp as an ISO 8601 string.
+/// * `framework`     — one of `"SOC2"`, `"ISO27001"`, `"HIPAA"`.
+pub fn build_compliance_report(
+    entries: &[ComplianceEvent],
+    period_start: &str,
+    period_end: &str,
+    framework: &str,
+) -> ComplianceReport {
+    // Filter to the requested period using lexicographic ISO 8601 comparison.
+    let in_period: Vec<&ComplianceEvent> = entries
+        .iter()
+        .filter(|e| {
+            e.timestamp.as_str() >= period_start && e.timestamp.as_str() <= period_end
+        })
+        .collect();
+
+    // Count action types.
+    let total_sessions = in_period
+        .iter()
+        .filter(|e| e.action == "session_start")
+        .count();
+    let total_commands = in_period
+        .iter()
+        .filter(|e| e.action == "command_executed")
+        .count();
+    let failed_auth_attempts = in_period
+        .iter()
+        .filter(|e| e.action == "auth_failed")
+        .count();
+
+    // Tally host access counts.
+    let mut host_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    for event in &in_period {
+        if let Some(host) = &event.target {
+            if !host.is_empty() {
+                *host_counts.entry(host.clone()).or_insert(0) += 1;
+            }
+        }
+    }
+
+    let unique_hosts_accessed = host_counts.len();
+
+    // Build top_accessed_hosts: sort by count desc, then name asc for stability.
+    let mut host_vec: Vec<(String, usize)> = host_counts.into_iter().collect();
+    host_vec.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    let top_accessed_hosts: Vec<(String, usize)> = host_vec.into_iter().take(5).collect();
+
+    // Build daily_activity: group by the first 10 chars of timestamp (YYYY-MM-DD).
+    let mut day_counts: std::collections::BTreeMap<String, usize> =
+        std::collections::BTreeMap::new();
+    for event in &in_period {
+        let day = if event.timestamp.len() >= 10 {
+            event.timestamp[..10].to_string()
+        } else {
+            event.timestamp.clone()
+        };
+        *day_counts.entry(day).or_insert(0) += 1;
+    }
+    let daily_activity: Vec<(String, usize)> = day_counts.into_iter().collect();
+
+    ComplianceReport {
+        generated_at: Utc::now().to_rfc3339(),
+        period_start: period_start.to_string(),
+        period_end: period_end.to_string(),
+        total_sessions,
+        total_commands,
+        failed_auth_attempts,
+        unique_hosts_accessed,
+        users_with_vault_access: 0,
+        anomaly_alert_count: 0,
+        top_accessed_hosts,
+        daily_activity,
+        framework: framework.to_string(),
+    }
+}
+
+/// Generate a [`ComplianceReport`] from the events held in the [`AuditState`].
+#[tauri::command]
+pub fn audit_generate_compliance_report(
+    period_start: String,
+    period_end: String,
+    framework: String,
+    state: tauri::State<'_, AuditState>,
+) -> Result<ComplianceReport, String> {
+    let events = state
+        .events
+        .lock()
+        .map_err(|e| format!("lock error: {e}"))?;
+
+    Ok(build_compliance_report(&events, &period_start, &period_end, &framework))
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -819,5 +998,99 @@ mod tests {
         indices.sort();
         indices.dedup();
         assert_eq!(indices.len(), 10, "All 10 events should be distinct");
+    }
+
+    // ── Compliance report tests ─────────────────────────────────────
+
+    fn make_compliance_event(action: &str, target: Option<&str>, timestamp: &str) -> ComplianceEvent {
+        ComplianceEvent {
+            timestamp: timestamp.to_string(),
+            action: action.to_string(),
+            target: target.map(|t| t.to_string()),
+            user: None,
+        }
+    }
+
+    #[test]
+    fn test_compliance_report_empty() {
+        let report = build_compliance_report(
+            &[],
+            "2025-01-01T00:00:00Z",
+            "2025-12-31T23:59:59Z",
+            "SOC2",
+        );
+        assert_eq!(report.total_sessions, 0);
+        assert_eq!(report.total_commands, 0);
+        assert_eq!(report.failed_auth_attempts, 0);
+        assert_eq!(report.unique_hosts_accessed, 0);
+        assert!(report.top_accessed_hosts.is_empty());
+        assert!(report.daily_activity.is_empty());
+        assert_eq!(report.framework, "SOC2");
+        assert_eq!(report.period_start, "2025-01-01T00:00:00Z");
+        assert_eq!(report.period_end, "2025-12-31T23:59:59Z");
+    }
+
+    #[test]
+    fn test_compliance_report_counts() {
+        let events: Vec<ComplianceEvent> = {
+            let mut v = Vec::new();
+            // 3 session_start
+            for _ in 0..3 {
+                v.push(make_compliance_event("session_start", None, "2025-03-01T10:00:00Z"));
+            }
+            // 5 command_executed
+            for _ in 0..5 {
+                v.push(make_compliance_event("command_executed", None, "2025-03-01T11:00:00Z"));
+            }
+            // 2 auth_failed
+            for _ in 0..2 {
+                v.push(make_compliance_event("auth_failed", None, "2025-03-01T12:00:00Z"));
+            }
+            v
+        };
+
+        let report = build_compliance_report(
+            &events,
+            "2025-01-01T00:00:00Z",
+            "2025-12-31T23:59:59Z",
+            "ISO27001",
+        );
+
+        assert_eq!(report.total_sessions, 3, "Expected 3 session_start events");
+        assert_eq!(report.total_commands, 5, "Expected 5 command_executed events");
+        assert_eq!(report.failed_auth_attempts, 2, "Expected 2 auth_failed events");
+        assert_eq!(report.framework, "ISO27001");
+    }
+
+    #[test]
+    fn test_compliance_report_top_hosts() {
+        let events: Vec<ComplianceEvent> = {
+            let mut v = Vec::new();
+            // host-a accessed 3 times
+            for _ in 0..3 {
+                v.push(make_compliance_event("session_start", Some("host-a"), "2025-04-01T09:00:00Z"));
+            }
+            // host-b accessed 2 times
+            for _ in 0..2 {
+                v.push(make_compliance_event("session_start", Some("host-b"), "2025-04-02T09:00:00Z"));
+            }
+            // host-c accessed 1 time
+            v.push(make_compliance_event("session_start", Some("host-c"), "2025-04-03T09:00:00Z"));
+            v
+        };
+
+        let report = build_compliance_report(
+            &events,
+            "2025-01-01T00:00:00Z",
+            "2025-12-31T23:59:59Z",
+            "HIPAA",
+        );
+
+        assert_eq!(report.unique_hosts_accessed, 3, "Expected 3 unique hosts");
+        assert_eq!(report.top_accessed_hosts.len(), 3, "Expected 3 entries in top_accessed_hosts");
+        assert_eq!(report.top_accessed_hosts[0], ("host-a".to_string(), 3));
+        assert_eq!(report.top_accessed_hosts[1], ("host-b".to_string(), 2));
+        assert_eq!(report.top_accessed_hosts[2], ("host-c".to_string(), 1));
+        assert_eq!(report.framework, "HIPAA");
     }
 }

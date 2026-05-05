@@ -382,6 +382,63 @@ pub fn vault_open_envelope(
     Ok(B64.encode(&dek))
 }
 
+// ── DEK rotation ────────────────────────────────────────────────────────
+
+/// Generate a fresh DEK, re-encrypt all remaining envelopes in `manifest` with
+/// it, and return the new DEK bytes.
+///
+/// After a vault share is revoked the caller should invoke `rotate_dek` so
+/// that the revoked recipient's copy of the old DEK can no longer be used to
+/// open the vault.
+///
+/// # Arguments
+/// * `manifest`  — mutable reference to the sharing manifest whose envelopes
+///   will be updated in-place.
+/// * `_old_dek`  — the previous DEK (accepted for API symmetry; actual vault
+///   data re-encryption is caller's responsibility and is out of scope here).
+///
+/// # Returns
+/// The newly generated 32-byte DEK wrapped in `Ok`.  Every existing envelope
+/// is replaced with a fresh envelope encrypted under the new DEK.
+pub fn rotate_dek(manifest: &mut VaultSharingManifest, _old_dek: &[u8]) -> Result<Vec<u8>, String> {
+    // 1. Generate a fresh random 32-byte DEK.
+    let mut new_dek = vec![0u8; 32];
+    OsRng.fill_bytes(&mut new_dek);
+
+    // 2. Collect recipient public keys before mutating the manifest.
+    let recipient_keys: Vec<String> = manifest
+        .envelopes
+        .iter()
+        .map(|e| e.recipient_public_key.clone())
+        .collect();
+
+    // 3. Re-create all envelopes using the new DEK.
+    let mut new_envelopes: Vec<SharedEnvelope> = Vec::with_capacity(recipient_keys.len());
+    for pub_key in &recipient_keys {
+        let envelope = create_sharing_envelope(&new_dek, pub_key)?;
+        new_envelopes.push(envelope);
+    }
+
+    // 4. Replace envelopes in the manifest atomically.
+    manifest.envelopes = new_envelopes;
+
+    Ok(new_dek)
+}
+
+/// Tauri command stub for DEK rotation.
+///
+/// Full rotation requires the vault to be unlocked (so the old DEK can be read
+/// and the vault data re-encrypted), which is outside the scope of this module.
+/// The command exists so that `lib.rs` can register it and the frontend can
+/// discover it; the actual work is coordinated by the vault unlock flow.
+#[tauri::command]
+pub fn vault_rotate_dek(
+    _vault_id: String,
+    _state: tauri::State<'_, crate::vault::Vault>,
+) -> Result<String, String> {
+    Ok("dek_rotation_requires_unlock".to_string())
+}
+
 // ── Unit tests ───────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -610,5 +667,59 @@ mod tests {
             result.is_err(),
             "Opening with mismatched KEK must fail, but got Ok"
         );
+    }
+
+    // ── test 7 ───────────────────────────────────────────────────────────
+
+    /// `rotate_dek` must produce a DEK that differs from the original one.
+    #[test]
+    fn test_rotate_dek_changes_dek() {
+        let kek = fake_kek(0x10);
+        let old_dek = fake_dek(0x11);
+
+        // Build a manifest with one envelope.
+        let pair = generate_user_key_pair(&kek).expect("keypair");
+        let envelope = create_sharing_envelope(&old_dek, &pair.public_key)
+            .expect("create envelope");
+        let mut manifest = VaultSharingManifest::default();
+        add_envelope(&mut manifest, envelope);
+
+        assert_eq!(manifest.envelopes.len(), 1, "Manifest must have 1 envelope before rotation");
+
+        // Rotate the DEK.
+        let new_dek = rotate_dek(&mut manifest, &old_dek)
+            .expect("rotate_dek should succeed");
+
+        // The new DEK must be 32 bytes.
+        assert_eq!(new_dek.len(), 32, "New DEK must be 32 bytes");
+
+        // The new DEK must differ from the old one (extremely unlikely to collide).
+        assert_ne!(new_dek, old_dek, "New DEK must differ from the old DEK");
+
+        // The manifest should still have exactly one envelope (for the same recipient).
+        assert_eq!(manifest.envelopes.len(), 1, "Manifest should still have 1 envelope after rotation");
+        assert_eq!(
+            manifest.envelopes[0].recipient_public_key,
+            pair.public_key,
+            "Remaining envelope should be for the original recipient"
+        );
+    }
+
+    // ── test 8 ───────────────────────────────────────────────────────────
+
+    /// `rotate_dek` on a manifest with no envelopes should return a new DEK
+    /// without error.
+    #[test]
+    fn test_rotate_dek_empty_manifest() {
+        let old_dek = fake_dek(0x22);
+        let mut manifest = VaultSharingManifest::default();
+
+        assert!(manifest.envelopes.is_empty(), "Manifest must start empty");
+
+        let new_dek = rotate_dek(&mut manifest, &old_dek)
+            .expect("rotate_dek on empty manifest should succeed");
+
+        assert_eq!(new_dek.len(), 32, "New DEK must be 32 bytes even for empty manifest");
+        assert!(manifest.envelopes.is_empty(), "Empty manifest stays empty after rotation");
     }
 }

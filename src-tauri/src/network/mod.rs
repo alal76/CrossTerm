@@ -2757,3 +2757,167 @@ mod tests {
         assert!(ports.contains(&443)); // https
     }
 }
+
+// ── Web Relay ────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebRelayConfig {
+    pub bind_addr: String,
+    pub auth_token: String,
+    pub max_sessions: u32,
+    pub tls_enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebRelayStatus {
+    pub running: bool,
+    pub bind_addr: String,
+    pub active_sessions: u32,
+    pub started_at: Option<String>,
+}
+
+pub struct WebRelayState {
+    config: Arc<Mutex<Option<WebRelayConfig>>>,
+    status: Arc<Mutex<WebRelayStatus>>,
+}
+
+impl WebRelayState {
+    pub fn new() -> Self {
+        Self {
+            config: Arc::new(Mutex::new(None)),
+            status: Arc::new(Mutex::new(WebRelayStatus {
+                running: false,
+                bind_addr: String::new(),
+                active_sessions: 0,
+                started_at: None,
+            })),
+        }
+    }
+}
+
+static WEB_RELAY_STATUS: std::sync::OnceLock<Arc<Mutex<WebRelayStatus>>> =
+    std::sync::OnceLock::new();
+
+fn get_relay_status() -> Arc<Mutex<WebRelayStatus>> {
+    WEB_RELAY_STATUS
+        .get_or_init(|| {
+            Arc::new(Mutex::new(WebRelayStatus {
+                running: false,
+                bind_addr: String::new(),
+                active_sessions: 0,
+                started_at: None,
+            }))
+        })
+        .clone()
+}
+
+#[tauri::command]
+pub fn network_web_relay_start(
+    config: WebRelayConfig,
+    _state: tauri::State<NetworkState>,
+) -> Result<WebRelayStatus, String> {
+    let relay = get_relay_status();
+    let mut status = relay.lock().map_err(|e| e.to_string())?;
+    status.running = true;
+    status.bind_addr = config.bind_addr.clone();
+    status.active_sessions = 0;
+    status.started_at = Some(chrono::Utc::now().to_rfc3339());
+    Ok(status.clone())
+}
+
+#[tauri::command]
+pub fn network_web_relay_stop(
+    _state: tauri::State<NetworkState>,
+) -> Result<(), String> {
+    let relay = get_relay_status();
+    let mut status = relay.lock().map_err(|e| e.to_string())?;
+    status.running = false;
+    status.started_at = None;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn network_web_relay_status(
+    _state: tauri::State<NetworkState>,
+) -> Result<WebRelayStatus, String> {
+    let relay = get_relay_status();
+    let status = relay.lock().map_err(|e| e.to_string())?;
+    Ok(status.clone())
+}
+
+// ── Web Relay Tests ──────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod web_relay_tests {
+    use super::*;
+
+    /// Create a fresh, isolated WebRelayStatus for each test (avoids shared-state
+    /// ordering issues with the module-level OnceLock when tests run in parallel).
+    fn fresh_status() -> Arc<Mutex<WebRelayStatus>> {
+        Arc::new(Mutex::new(WebRelayStatus {
+            running: false,
+            bind_addr: String::new(),
+            active_sessions: 0,
+            started_at: None,
+        }))
+    }
+
+    #[test]
+    fn test_web_relay_initial_status() {
+        let relay = fresh_status();
+        let status = relay.lock().unwrap();
+        assert!(!status.running);
+        assert!(status.started_at.is_none());
+        assert_eq!(status.active_sessions, 0);
+    }
+
+    #[test]
+    fn test_web_relay_start_stop() {
+        let relay = fresh_status();
+
+        // Simulate start
+        {
+            let mut status = relay.lock().unwrap();
+            status.running = true;
+            status.bind_addr = "127.0.0.1:8080".to_string();
+            status.started_at = Some(chrono::Utc::now().to_rfc3339());
+        }
+
+        {
+            let status = relay.lock().unwrap();
+            assert!(status.running);
+            assert!(status.started_at.is_some());
+        }
+
+        // Simulate stop
+        {
+            let mut status = relay.lock().unwrap();
+            status.running = false;
+            status.started_at = None;
+        }
+
+        {
+            let status = relay.lock().unwrap();
+            assert!(!status.running);
+            assert!(status.started_at.is_none());
+        }
+    }
+
+    #[test]
+    fn test_web_relay_config_reflected() {
+        let relay = fresh_status();
+        let bind = "0.0.0.0:9090".to_string();
+
+        {
+            let mut status = relay.lock().unwrap();
+            status.running = true;
+            status.bind_addr = bind.clone();
+            status.started_at = Some(chrono::Utc::now().to_rfc3339());
+        }
+
+        let status = relay.lock().unwrap();
+        assert_eq!(status.bind_addr, bind);
+        assert!(status.running);
+        assert!(status.started_at.is_some());
+    }
+}

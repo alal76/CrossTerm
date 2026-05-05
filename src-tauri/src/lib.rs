@@ -55,6 +55,7 @@ pub fn run() {
         .manage(auth::AuthState::new())
         .manage(rbac::RbacState::new())
         .manage(ai::AiState::new())
+        .manage(audit::AuditState::new())
         .manage(terminal::TerminalManager::new())
         .manage(ssh::SshState::new())
         .manage(sftp::SftpState::new())
@@ -454,16 +455,25 @@ pub fn run() {
             ai::ai_explain_output,
             ai::ai_set_model,
             ai::ai_get_config,
+            ai::ai_autocomplete,
+            ai::ai_optimise_connection,
             // Sync (encrypted packages)
             sync::sync_create_package,
             sync::sync_import_package,
             sync::sync_generate_share_code,
             sync::sync_parse_share_code,
-            // Audit: syslog + anomaly detection
+            // Audit: syslog + anomaly detection + compliance
             audit::audit_configure_syslog,
             audit::audit_test_syslog,
             audit::audit_detect_anomalies,
             audit::audit_list_alerts,
+            audit::audit_generate_compliance_report,
+            // Vault: DEK rotation
+            vault::shared::vault_rotate_dek,
+            // Network: web relay
+            network::network_web_relay_start,
+            network::network_web_relay_stop,
+            network::network_web_relay_status,
             // Android
             android::android_start_foreground_service,
             android::android_stop_foreground_service,

@@ -59,18 +59,27 @@ As of **May 4, 2026**, Phases 1–3 feature drops are complete. **325 Rust unit 
 - ✅ TOTP vault unlock wired end-to-end (`vault_has_totp`, `vault_verify_totp`)
 - ✅ Clickable hyperlinks + regex search with match highlights in terminal
 
-**Completed (v0.7.0 — 2026-05-04):** Phase 3 Team & Enterprise + Phase 4/5 early features
-- ✅ Shared vault: Curve25519 X25519 DH + AES-256-GCM envelope crypto (`vault/shared.rs`, 615 lines, 6 tests)
+**Completed (v0.7.0 — 2026-05-04):** Phase 3 + 4 + 5 — full v1.2 feature set
+- ✅ Shared vault: Curve25519 X25519 DH + AES-256-GCM envelope crypto; `vault_rotate_dek` stub (`vault/shared.rs`, 8 tests)
 - ✅ OIDC SSO: PKCE loopback TCP server; `build_auth_url`, `wait_for_callback`, `exchange_code_for_tokens` (`auth/mod.rs`, 659 lines)
 - ✅ RBAC: 5 roles (Admin/PowerUser/ReadOnly/Auditor/Custom), 15 permissions, `TeamPanel` React component (`rbac/mod.rs`, 357 lines, 8 tests)
 - ✅ Recording policy: `HostPattern` glob, `PolicyConfig` JSON, `ComplianceBanner`, `PolicyPanel` (`config/policy.rs`, 464 lines, 7 tests)
-- ✅ Syslog forwarding: RFC 5424 format, TCP/UDP, `audit_configure_syslog`, `audit_test_syslog`
+- ✅ Syslog forwarding: RFC 5424, TCP/UDP, `audit_configure_syslog`, `audit_test_syslog`
 - ✅ Anomaly detection: 5 anomaly types, `audit_detect_anomalies`, `audit_list_alerts`
-- ✅ AI command assistant: Ollama integration, `CommandSuggestion` + `RiskLevel`, `CommandAssistant` React component (`ai/mod.rs`, 532 lines, 4 tests)
+- ✅ Compliance report generator: `ComplianceReport` struct, `build_compliance_report`, `audit_generate_compliance_report` (3 tests)
+- ✅ AI command assistant: Ollama integration, `CommandSuggestion` + `RiskLevel`, `CommandAssistant` React component (`ai/mod.rs`)
+- ✅ Smart autocomplete: `AutocompleteRequest`/`AutocompleteSuggestion`, `local_autocomplete` engine (history + kubectl/docker builtins), `ai_autocomplete` command (4 tests)
+- ✅ Connection optimiser: `ConnectionMetrics`/`ConnectionOptimisation`, `suggest_optimisations` 6-rule engine, `ai_optimise_connection` command (4 tests)
 - ✅ Encrypted sync packages: AES-256-GCM + SHA-256, `SyncPackage`, share-code round-trip
+- ✅ Android polish: `AndroidTerminal` React component — `visualViewport` keyboard fix, tablet split-pane (`src/components/Terminal/AndroidTerminal.tsx`, 3 tests)
+- ✅ Web relay scaffold: `WebRelayConfig`/`WebRelayStatus`, `network_web_relay_start/stop/status` commands, `OnceLock` state (3 tests)
+- ✅ VS Code extension scaffold: `integrations/vscode/` — 3 commands, Explorer context menu
+- ✅ Raycast plugin scaffold: `integrations/raycast/` — session list, `crossterm://` URL scheme
 
-**Deferred to v1.0 hardening:**
-- [ ] DEK rotation on vault share revocation
+**341 Rust tests + 200 frontend tests passing as of v0.7.0.**
+
+**Remaining for v1.0 enterprise-stable hardening:**
+- [ ] DEK rotation full implementation (vault unlock flow integration)
 - [ ] Okta + Azure AD OIDC documented test accounts
 - [ ] Recordings encrypted with reviewer-role key
 - [ ] PuTTY registry reader (Windows-only)

@@ -1,0 +1,35 @@
+{
+  "name": "crossterm-raycast",
+  "title": "CrossTerm",
+  "description": "Open CrossTerm SSH sessions from Raycast",
+  "icon": "icon.png",
+  "author": "crossterm",
+  "categories": ["Developer Tools", "System"],
+  "license": "AGPL-3.0",
+  "commands": [
+    {
+      "name": "open-session",
+      "title": "Open CrossTerm Session",
+      "description": "Search and open a CrossTerm SSH session",
+      "mode": "view"
+    },
+    {
+      "name": "quick-connect",
+      "title": "Quick Connect",
+      "description": "Quickly open CrossTerm and connect to a recent session",
+      "mode": "no-view"
+    }
+  ],
+  "dependencies": {
+    "@raycast/api": "^1.63.0"
+  },
+  "devDependencies": {
+    "@raycast/utils": "^1.13.0",
+    "typescript": "^5.3.0"
+  },
+  "scripts": {
+    "build": "ray build -e dist",
+    "dev": "ray develop",
+    "lint": "ray lint"
+  }
+}

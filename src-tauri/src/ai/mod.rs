@@ -421,6 +421,293 @@ pub fn ai_get_config(state: tauri::State<'_, AiState>) -> serde_json::Value {
     })
 }
 
+// ── Feature 1: Smart command autocomplete ───────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutocompleteRequest {
+    pub partial_command: String,
+    pub session_history: Vec<String>, // last N commands typed
+    pub session_type: String,         // "ssh" | "docker" | "kubernetes" | "generic"
+    pub current_directory: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutocompleteSuggestion {
+    pub completion: String,   // the full completed command
+    pub description: String,  // short description of what it does
+    pub source: String,        // "history" | "builtin" | "ai"
+    pub confidence: f32,       // 0.0–1.0
+}
+
+/// Return autocomplete suggestions from session history and built-in command lists.
+pub fn local_autocomplete(req: &AutocompleteRequest) -> Vec<AutocompleteSuggestion> {
+    use std::collections::HashMap;
+
+    let mut best: HashMap<String, AutocompleteSuggestion> = HashMap::new();
+
+    // 1. History prefix matches
+    for entry in &req.session_history {
+        if entry.starts_with(&req.partial_command) {
+            let suggestion = AutocompleteSuggestion {
+                completion: entry.clone(),
+                description: "From session history".to_string(),
+                source: "history".to_string(),
+                confidence: 0.9,
+            };
+            best
+                .entry(entry.clone())
+                .and_modify(|existing| {
+                    if suggestion.confidence > existing.confidence {
+                        *existing = suggestion.clone();
+                    }
+                })
+                .or_insert(suggestion);
+        }
+    }
+
+    // 2. Built-in completions for kubernetes
+    if req.session_type == "kubernetes" {
+        let kubectl_builtins = [
+            ("kubectl get pods", "List all pods in the current namespace"),
+            ("kubectl get services", "List all services in the current namespace"),
+            ("kubectl get deployments", "List all deployments in the current namespace"),
+            ("kubectl describe pod", "Show detailed information about a pod"),
+            ("kubectl logs", "Fetch logs from a pod"),
+            ("kubectl exec -it", "Execute a command in a running container interactively"),
+            ("kubectl apply -f", "Apply a configuration file to the cluster"),
+            ("kubectl delete", "Delete resources by file, stdin, or resource/name"),
+            ("kubectl rollout status", "Show the rollout status of a resource"),
+        ];
+        for (cmd, desc) in &kubectl_builtins {
+            if cmd.starts_with(&req.partial_command) {
+                let suggestion = AutocompleteSuggestion {
+                    completion: cmd.to_string(),
+                    description: desc.to_string(),
+                    source: "builtin".to_string(),
+                    confidence: 0.7,
+                };
+                best
+                    .entry(cmd.to_string())
+                    .and_modify(|existing| {
+                        if suggestion.confidence > existing.confidence {
+                            *existing = suggestion.clone();
+                        }
+                    })
+                    .or_insert(suggestion);
+            }
+        }
+    }
+
+    // 3. Built-in completions for docker
+    if req.session_type == "docker" {
+        let docker_builtins = [
+            ("docker ps", "List running containers"),
+            ("docker ps -a", "List all containers including stopped ones"),
+            ("docker images", "List local Docker images"),
+            ("docker run -it", "Run a container interactively"),
+            ("docker exec -it", "Execute a command in a running container interactively"),
+            ("docker logs", "Fetch logs of a container"),
+            ("docker stop", "Stop one or more running containers"),
+            ("docker rm", "Remove one or more containers"),
+            ("docker pull", "Pull an image from a registry"),
+            ("docker-compose up -d", "Start services defined in docker-compose.yml in detached mode"),
+            ("docker-compose down", "Stop and remove containers defined in docker-compose.yml"),
+        ];
+        for (cmd, desc) in &docker_builtins {
+            if cmd.starts_with(&req.partial_command) {
+                let suggestion = AutocompleteSuggestion {
+                    completion: cmd.to_string(),
+                    description: desc.to_string(),
+                    source: "builtin".to_string(),
+                    confidence: 0.7,
+                };
+                best
+                    .entry(cmd.to_string())
+                    .and_modify(|existing| {
+                        if suggestion.confidence > existing.confidence {
+                            *existing = suggestion.clone();
+                        }
+                    })
+                    .or_insert(suggestion);
+            }
+        }
+    }
+
+    // 4 & 5. Sort by confidence descending and return top 10
+    let mut results: Vec<AutocompleteSuggestion> = best.into_values().collect();
+    results.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+    results.truncate(10);
+    results
+}
+
+#[tauri::command]
+pub fn ai_autocomplete(
+    request: AutocompleteRequest,
+    state: tauri::State<'_, AiState>,
+) -> Result<Vec<AutocompleteSuggestion>, String> {
+    use std::collections::HashMap;
+
+    let mut suggestions = local_autocomplete(&request);
+
+    // Augment with Ollama when fewer than 3 local suggestions and Ollama is available
+    if suggestions.len() < 3 {
+        let url = state
+            .ollama_url
+            .read()
+            .map(|u| u.clone())
+            .unwrap_or_else(|_| "http://localhost:11434".to_string());
+        let model = state
+            .model
+            .read()
+            .map(|m| m.clone())
+            .unwrap_or_else(|_| "llama3.2".to_string());
+
+        if check_ollama_available(&url) {
+            let prompt = format!(
+                "You are a shell autocomplete engine. \
+                 Given the partial command below, suggest up to 5 complete shell commands that start with it. \
+                 Reply with one command per line, no explanations, no numbering.\n\nPartial command: {}",
+                request.partial_command
+            );
+            if let Ok(response) = ollama_generate(&url, &model, &prompt) {
+                // Merge AI suggestions, deduplicating by completion
+                let mut best: HashMap<String, AutocompleteSuggestion> = suggestions
+                    .into_iter()
+                    .map(|s| (s.completion.clone(), s))
+                    .collect();
+
+                for line in response.lines() {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    let ai_suggestion = AutocompleteSuggestion {
+                        completion: trimmed.to_string(),
+                        description: "AI-generated suggestion".to_string(),
+                        source: "ai".to_string(),
+                        confidence: 0.5,
+                    };
+                    best
+                        .entry(trimmed.to_string())
+                        .and_modify(|existing| {
+                            if ai_suggestion.confidence > existing.confidence {
+                                *existing = ai_suggestion.clone();
+                            }
+                        })
+                        .or_insert(ai_suggestion);
+                }
+
+                suggestions = best.into_values().collect();
+                suggestions.sort_by(|a, b| {
+                    b.confidence
+                        .partial_cmp(&a.confidence)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                suggestions.truncate(10);
+            }
+        }
+    }
+
+    Ok(suggestions)
+}
+
+// ── Feature 2: Connection optimiser ─────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectionMetrics {
+    pub host: String,
+    pub avg_latency_ms: f64,
+    pub packet_loss_pct: f64,
+    pub connection_failures_last_hour: u32,
+    pub bytes_transferred_mb: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectionOptimisation {
+    pub setting: String,              // e.g. "ServerAliveInterval"
+    pub recommended_value: String,    // e.g. "30"
+    pub current_value: Option<String>,
+    pub reason: String,
+}
+
+/// Produce SSH / connection tuning recommendations based on observed metrics.
+pub fn suggest_optimisations(metrics: &ConnectionMetrics) -> Vec<ConnectionOptimisation> {
+    let mut opts: Vec<ConnectionOptimisation> = Vec::new();
+    let mut has_compression = false;
+
+    // Rule 1 & 2: ServerAliveInterval based on latency
+    if metrics.avg_latency_ms > 200.0 {
+        opts.push(ConnectionOptimisation {
+            setting: "ServerAliveInterval".to_string(),
+            recommended_value: "15".to_string(),
+            current_value: None,
+            reason: "High latency detected; shorter keepalive prevents silent disconnects"
+                .to_string(),
+        });
+    } else {
+        opts.push(ConnectionOptimisation {
+            setting: "ServerAliveInterval".to_string(),
+            recommended_value: "60".to_string(),
+            current_value: None,
+            reason: "Low latency link; conservative keepalive is sufficient".to_string(),
+        });
+    }
+
+    // Rule 3: Compression on packet loss
+    if metrics.packet_loss_pct > 5.0 {
+        opts.push(ConnectionOptimisation {
+            setting: "Compression".to_string(),
+            recommended_value: "yes".to_string(),
+            current_value: None,
+            reason: "Packet loss detected; compression reduces retransmission data volume"
+                .to_string(),
+        });
+        has_compression = true;
+    }
+
+    // Rule 4: Compression on high latency + large transfers (skip if already added)
+    if !has_compression && metrics.avg_latency_ms > 100.0 && metrics.bytes_transferred_mb > 10.0 {
+        opts.push(ConnectionOptimisation {
+            setting: "Compression".to_string(),
+            recommended_value: "yes".to_string(),
+            current_value: None,
+            reason: "High latency + large transfers benefit from compression".to_string(),
+        });
+    }
+
+    // Rule 5: ConnectTimeout on frequent failures
+    if metrics.connection_failures_last_hour > 3 {
+        opts.push(ConnectionOptimisation {
+            setting: "ConnectTimeout".to_string(),
+            recommended_value: "30".to_string(),
+            current_value: None,
+            reason: "Frequent failures; longer connect timeout prevents premature timeouts during congestion"
+                .to_string(),
+        });
+    }
+
+    // Rule 6: TCPKeepAlive on large transfers
+    if metrics.bytes_transferred_mb > 100.0 {
+        opts.push(ConnectionOptimisation {
+            setting: "TCPKeepAlive".to_string(),
+            recommended_value: "yes".to_string(),
+            current_value: None,
+            reason: "Large transfers benefit from TCP keepalive to detect dropped connections"
+                .to_string(),
+        });
+    }
+
+    opts
+}
+
+#[tauri::command]
+pub fn ai_optimise_connection(
+    metrics: ConnectionMetrics,
+    _state: tauri::State<'_, AiState>,
+) -> Result<Vec<ConnectionOptimisation>, String> {
+    Ok(suggest_optimisations(&metrics))
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -528,5 +815,158 @@ mod tests {
             parse_url_host_port("http://example.com"),
             Some(("example.com".to_string(), 80))
         );
+    }
+
+    // ── Autocomplete tests ───────────────────────────────────────────────
+
+    #[test]
+    fn test_autocomplete_history_prefix() {
+        let req = AutocompleteRequest {
+            partial_command: "git".to_string(),
+            session_history: vec![
+                "git status".to_string(),
+                "git push".to_string(),
+                "ls -la".to_string(),
+            ],
+            session_type: "generic".to_string(),
+            current_directory: None,
+        };
+        let results = local_autocomplete(&req);
+        let completions: Vec<&str> = results.iter().map(|s| s.completion.as_str()).collect();
+        assert!(completions.contains(&"git status"), "should contain 'git status'");
+        assert!(completions.contains(&"git push"), "should contain 'git push'");
+        assert!(!completions.contains(&"ls -la"), "should NOT contain 'ls -la'");
+        assert!(results.iter().all(|s| s.source == "history"), "all sources should be 'history'");
+    }
+
+    #[test]
+    fn test_autocomplete_kubernetes_builtins() {
+        let req = AutocompleteRequest {
+            partial_command: "kubectl g".to_string(),
+            session_history: vec![],
+            session_type: "kubernetes".to_string(),
+            current_directory: None,
+        };
+        let results = local_autocomplete(&req);
+        let completions: Vec<&str> = results.iter().map(|s| s.completion.as_str()).collect();
+        assert!(completions.contains(&"kubectl get pods"), "should contain 'kubectl get pods'");
+        assert!(
+            completions.contains(&"kubectl get services"),
+            "should contain 'kubectl get services'"
+        );
+        assert!(
+            completions.contains(&"kubectl get deployments"),
+            "should contain 'kubectl get deployments'"
+        );
+        assert!(
+            results.iter().all(|s| s.source == "builtin"),
+            "all sources should be 'builtin'"
+        );
+    }
+
+    #[test]
+    fn test_autocomplete_docker_builtins() {
+        let req = AutocompleteRequest {
+            partial_command: "docker p".to_string(),
+            session_history: vec![],
+            session_type: "docker".to_string(),
+            current_directory: None,
+        };
+        let results = local_autocomplete(&req);
+        let completions: Vec<&str> = results.iter().map(|s| s.completion.as_str()).collect();
+        assert!(completions.contains(&"docker ps"), "should contain 'docker ps'");
+        assert!(completions.contains(&"docker ps -a"), "should contain 'docker ps -a'");
+        assert!(completions.contains(&"docker pull"), "should contain 'docker pull'");
+    }
+
+    #[test]
+    fn test_autocomplete_deduplication() {
+        // History contains "kubectl get pods", builtin also would match it.
+        // History wins with confidence 0.9.
+        let req = AutocompleteRequest {
+            partial_command: "kubectl".to_string(),
+            session_history: vec!["kubectl get pods".to_string()],
+            session_type: "kubernetes".to_string(),
+            current_directory: None,
+        };
+        let results = local_autocomplete(&req);
+        let pods_entries: Vec<&AutocompleteSuggestion> = results
+            .iter()
+            .filter(|s| s.completion == "kubectl get pods")
+            .collect();
+        assert_eq!(pods_entries.len(), 1, "should deduplicate to a single entry");
+        assert!(
+            (pods_entries[0].confidence - 0.9).abs() < f32::EPSILON,
+            "history entry should win with confidence 0.9"
+        );
+        assert_eq!(pods_entries[0].source, "history", "winning source should be 'history'");
+    }
+
+    // ── Connection optimiser tests ───────────────────────────────────────
+
+    fn base_metrics() -> ConnectionMetrics {
+        ConnectionMetrics {
+            host: "example.com".to_string(),
+            avg_latency_ms: 50.0,
+            packet_loss_pct: 0.0,
+            connection_failures_last_hour: 0,
+            bytes_transferred_mb: 0.0,
+        }
+    }
+
+    #[test]
+    fn test_optimise_high_latency() {
+        let metrics = ConnectionMetrics {
+            avg_latency_ms: 300.0,
+            ..base_metrics()
+        };
+        let opts = suggest_optimisations(&metrics);
+        let keepalive = opts
+            .iter()
+            .find(|o| o.setting == "ServerAliveInterval")
+            .expect("ServerAliveInterval should be recommended");
+        assert_eq!(keepalive.recommended_value, "15");
+    }
+
+    #[test]
+    fn test_optimise_low_latency() {
+        let metrics = ConnectionMetrics {
+            avg_latency_ms: 50.0,
+            ..base_metrics()
+        };
+        let opts = suggest_optimisations(&metrics);
+        let keepalive = opts
+            .iter()
+            .find(|o| o.setting == "ServerAliveInterval")
+            .expect("ServerAliveInterval should be recommended");
+        assert_eq!(keepalive.recommended_value, "60");
+    }
+
+    #[test]
+    fn test_optimise_packet_loss() {
+        let metrics = ConnectionMetrics {
+            packet_loss_pct: 10.0,
+            ..base_metrics()
+        };
+        let opts = suggest_optimisations(&metrics);
+        let compression = opts
+            .iter()
+            .find(|o| o.setting == "Compression")
+            .expect("Compression should be recommended on packet loss");
+        assert_eq!(compression.recommended_value, "yes");
+    }
+
+    #[test]
+    fn test_optimise_frequent_failures() {
+        let metrics = ConnectionMetrics {
+            connection_failures_last_hour: 5,
+            ..base_metrics()
+        };
+        let opts = suggest_optimisations(&metrics);
+        let timeout = opts
+            .iter()
+            .find(|o| o.setting == "ConnectTimeout")
+            .expect("ConnectTimeout should be recommended on frequent failures");
+        assert_eq!(timeout.recommended_value, "30");
     }
 }

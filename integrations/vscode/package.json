@@ -1,0 +1,47 @@
+{
+  "name": "crossterm-vscode",
+  "displayName": "CrossTerm",
+  "description": "Open CrossTerm SSH sessions directly from VS Code Remote projects",
+  "version": "0.1.0",
+  "publisher": "crossterm",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "activationEvents": ["onCommand:crossterm.openSession", "onCommand:crossterm.openSFTP"],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "crossterm.openSession",
+        "title": "CrossTerm: Open SSH Session",
+        "category": "CrossTerm"
+      },
+      {
+        "command": "crossterm.openSFTP",
+        "title": "CrossTerm: Open SFTP Browser",
+        "category": "CrossTerm"
+      },
+      {
+        "command": "crossterm.listSessions",
+        "title": "CrossTerm: List Saved Sessions",
+        "category": "CrossTerm"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "crossterm.openSFTP",
+          "when": "crossterm.hasRemoteSession",
+          "group": "crossterm"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  }
+}
