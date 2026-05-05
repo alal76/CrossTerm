@@ -4,6 +4,8 @@
 //!   - `import_detect_sources`  – lists available import sources with session counts
 //!   - `import_parse_source`    – parses a named source and returns structured sessions
 
+pub mod bundle;
+
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 

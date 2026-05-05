@@ -430,18 +430,218 @@ pub fn rotate_dek(manifest: &mut VaultSharingManifest, _old_dek: &[u8]) -> Resul
     Ok(new_dek)
 }
 
-/// Tauri command stub for DEK rotation.
+/// Result returned by the `vault_rotate_dek` Tauri command.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DekRotationResult {
+    /// Updated manifest serialised as JSON.
+    pub new_manifest_json: String,
+    /// The freshly generated DEK, base64-encoded.
+    pub new_dek_b64: String,
+    /// Number of envelopes that were re-encrypted with the new DEK.
+    pub envelopes_updated: usize,
+}
+
+/// Rotate the vault DEK, optionally revoking one recipient first.
 ///
-/// Full rotation requires the vault to be unlocked (so the old DEK can be read
-/// and the vault data re-encrypted), which is outside the scope of this module.
-/// The command exists so that `lib.rs` can register it and the frontend can
-/// discover it; the actual work is coordinated by the vault unlock flow.
+/// The command:
+/// 1. Deserialises `manifest_json` into a [`VaultSharingManifest`].
+/// 2. If `revoked_public_key` is `Some`, removes that recipient's envelope via
+///    [`revoke_access`].
+/// 3. Calls [`rotate_dek`] to generate a fresh DEK and re-encrypt all remaining
+///    envelopes.
+/// 4. Returns the updated manifest JSON and new DEK (base64) in a
+///    [`DekRotationResult`].
 #[tauri::command]
 pub fn vault_rotate_dek(
-    _vault_id: String,
-    _state: tauri::State<'_, crate::vault::Vault>,
+    manifest_json: String,
+    old_dek_b64: String,
+    revoked_public_key: Option<String>,
+) -> Result<DekRotationResult, String> {
+    let mut manifest: VaultSharingManifest =
+        serde_json::from_str(&manifest_json).map_err(|e| e.to_string())?;
+
+    let old_dek = B64.decode(&old_dek_b64).map_err(|e| e.to_string())?;
+
+    if let Some(ref key) = revoked_public_key {
+        revoke_access(&mut manifest, key);
+    }
+
+    let new_dek = rotate_dek(&mut manifest, &old_dek)?;
+
+    let envelopes_updated = manifest.envelopes.len();
+
+    Ok(DekRotationResult {
+        new_manifest_json: serde_json::to_string(&manifest).map_err(|e| e.to_string())?,
+        new_dek_b64: B64.encode(&new_dek),
+        envelopes_updated,
+    })
+}
+
+// ── Recording encryption with reviewer key ────────────────────────────────
+
+/// A Curve25519 key pair for a reviewer.  The private key is encrypted under
+/// the reviewer's KEK and never returned in plaintext.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewerKeyPair {
+    /// Base64-encoded X25519 public key (32 bytes).
+    pub reviewer_public_key_b64: String,
+    /// Base64-encoded AES-256-GCM(KEK, private_key_bytes) — never leaves the
+    /// device in plaintext.
+    pub reviewer_private_key_encrypted_b64: String,
+}
+
+/// Generate a fresh X25519 key pair for a reviewer, encrypting the private key
+/// under `kek`.
+///
+/// Internally identical to [`generate_user_key_pair`] but returns a
+/// [`ReviewerKeyPair`] so the two roles stay type-distinct.
+pub fn generate_reviewer_key_pair(kek: &[u8]) -> Result<ReviewerKeyPair, String> {
+    if kek.len() != 32 {
+        return Err(format!("KEK must be 32 bytes, got {}", kek.len()));
+    }
+
+    let private_key = StaticSecret::random_from_rng(OsRng);
+    let public_key = PublicKey::from(&private_key);
+
+    let priv_bytes: [u8; 32] = private_key.to_bytes();
+    let (ciphertext, nonce_bytes) = aes_encrypt(&priv_bytes, kek)?;
+
+    let mut blob = Vec::with_capacity(NONCE_LEN + ciphertext.len());
+    blob.extend_from_slice(&nonce_bytes);
+    blob.extend_from_slice(&ciphertext);
+
+    Ok(ReviewerKeyPair {
+        reviewer_public_key_b64: B64.encode(public_key.as_bytes()),
+        reviewer_private_key_encrypted_b64: B64.encode(&blob),
+    })
+}
+
+/// Encrypt `recording_data` for a reviewer.
+///
+/// Layout of the returned byte vector:
+/// ```text
+/// [4 bytes: envelope_len as little-endian u32]
+/// [envelope_len bytes: SharedEnvelope JSON]
+/// [12 bytes: AES-GCM nonce]
+/// [remaining: AES-256-GCM ciphertext of recording_data]
+/// ```
+pub fn encrypt_recording_for_reviewer(
+    recording_data: &[u8],
+    reviewer_public_key_b64: &str,
+) -> Result<Vec<u8>, String> {
+    // 1. Generate an ephemeral DEK.
+    let mut ephemeral_dek = vec![0u8; 32];
+    OsRng.fill_bytes(&mut ephemeral_dek);
+
+    // 2. Encrypt recording_data with the ephemeral DEK.
+    let (ciphertext, nonce_bytes) = aes_encrypt(recording_data, &ephemeral_dek)?;
+
+    // 3. Wrap the DEK in a sharing envelope for the reviewer.
+    let envelope = create_sharing_envelope(&ephemeral_dek, reviewer_public_key_b64)?;
+    let envelope_json = serde_json::to_vec(&envelope)
+        .map_err(|e| format!("Failed to serialise envelope: {e}"))?;
+
+    // 4. Build combined payload.
+    let envelope_len = envelope_json.len() as u32;
+    let mut payload = Vec::with_capacity(4 + envelope_json.len() + NONCE_LEN + ciphertext.len());
+    payload.extend_from_slice(&envelope_len.to_le_bytes());
+    payload.extend_from_slice(&envelope_json);
+    payload.extend_from_slice(&nonce_bytes);
+    payload.extend_from_slice(&ciphertext);
+
+    Ok(payload)
+}
+
+/// Decrypt a recording payload produced by [`encrypt_recording_for_reviewer`].
+pub fn decrypt_recording_for_reviewer(
+    encrypted_payload: &[u8],
+    reviewer_private_key_encrypted_b64: &str,
+    kek: &[u8],
+) -> Result<Vec<u8>, String> {
+    if encrypted_payload.len() < 4 {
+        return Err("Encrypted payload too short (missing envelope length)".to_string());
+    }
+
+    // Read 4-byte envelope length.
+    let envelope_len = u32::from_le_bytes(
+        encrypted_payload[..4]
+            .try_into()
+            .map_err(|_| "Failed to read envelope length".to_string())?,
+    ) as usize;
+
+    let rest = &encrypted_payload[4..];
+    if rest.len() < envelope_len + NONCE_LEN {
+        return Err(format!(
+            "Payload too short: need {} + {} bytes after length prefix, got {}",
+            envelope_len,
+            NONCE_LEN,
+            rest.len()
+        ));
+    }
+
+    // Parse the envelope.
+    let envelope: SharedEnvelope = serde_json::from_slice(&rest[..envelope_len])
+        .map_err(|e| format!("Failed to parse envelope JSON: {e}"))?;
+
+    // Recover the ephemeral DEK.
+    let dek = open_sharing_envelope(&envelope, reviewer_private_key_encrypted_b64, kek)?;
+
+    // Decrypt the recording.
+    let nonce_bytes = &rest[envelope_len..envelope_len + NONCE_LEN];
+    let ciphertext = &rest[envelope_len + NONCE_LEN..];
+
+    aes_decrypt(ciphertext, nonce_bytes, &dek)
+}
+
+/// Generate a fresh reviewer key pair.
+///
+/// `kek_b64` is the base64-encoded 32-byte KEK used to encrypt the private key.
+#[tauri::command]
+pub fn vault_generate_reviewer_keypair(kek_b64: String) -> Result<ReviewerKeyPair, String> {
+    let kek = B64.decode(&kek_b64).map_err(|e| format!("Failed to decode KEK: {e}"))?;
+    generate_reviewer_key_pair(&kek)
+}
+
+/// Encrypt a recording for a reviewer.
+///
+/// `recording_data_b64` is the base64-encoded raw recording bytes.
+/// Returns base64-encoded encrypted payload.
+#[tauri::command]
+pub fn vault_encrypt_recording(
+    recording_data_b64: String,
+    reviewer_public_key_b64: String,
 ) -> Result<String, String> {
-    Ok("dek_rotation_requires_unlock".to_string())
+    let recording_data = B64
+        .decode(&recording_data_b64)
+        .map_err(|e| format!("Failed to decode recording data: {e}"))?;
+
+    let encrypted = encrypt_recording_for_reviewer(&recording_data, &reviewer_public_key_b64)?;
+    Ok(B64.encode(&encrypted))
+}
+
+/// Decrypt a recording that was encrypted for a reviewer.
+///
+/// `encrypted_payload_b64` is the base64-encoded payload from
+/// [`vault_encrypt_recording`].  Returns base64-encoded decrypted recording bytes.
+#[tauri::command]
+pub fn vault_decrypt_recording(
+    encrypted_payload_b64: String,
+    reviewer_private_key_encrypted_b64: String,
+    kek_b64: String,
+) -> Result<String, String> {
+    let encrypted_payload = B64
+        .decode(&encrypted_payload_b64)
+        .map_err(|e| format!("Failed to decode encrypted payload: {e}"))?;
+
+    let kek = B64.decode(&kek_b64).map_err(|e| format!("Failed to decode KEK: {e}"))?;
+
+    let decrypted = decrypt_recording_for_reviewer(
+        &encrypted_payload,
+        &reviewer_private_key_encrypted_b64,
+        &kek,
+    )?;
+
+    Ok(B64.encode(&decrypted))
 }
 
 // ── Unit tests ───────────────────────────────────────────────────────────
@@ -726,5 +926,169 @@ mod tests {
 
         assert_eq!(new_dek.len(), 32, "New DEK must be 32 bytes even for empty manifest");
         assert!(manifest.envelopes.is_empty(), "Empty manifest stays empty after rotation");
+    }
+
+    // ── test 9 ───────────────────────────────────────────────────────────
+
+    /// `vault_rotate_dek` with revocation: start with 2 envelopes, revoke one,
+    /// rotate; result has 1 envelope and a new DEK distinct from the old one.
+    #[test]
+    fn test_rotate_dek_full_with_revocation() {
+        let kek = fake_kek(0x30);
+        let old_dek = fake_dek(0x31);
+
+        let pair_a = generate_user_key_pair(&kek).expect("keypair A");
+        let pair_b = generate_user_key_pair(&kek).expect("keypair B");
+
+        let env_a = create_sharing_envelope(&old_dek, &pair_a.public_key).expect("envelope A");
+        let env_b = create_sharing_envelope(&old_dek, &pair_b.public_key).expect("envelope B");
+
+        let mut manifest = VaultSharingManifest::default();
+        add_envelope(&mut manifest, env_a);
+        add_envelope(&mut manifest, env_b);
+
+        let manifest_json = serde_json::to_string(&manifest).expect("serialise manifest");
+        let old_dek_b64 = B64.encode(&old_dek);
+
+        let result = vault_rotate_dek(
+            manifest_json,
+            old_dek_b64,
+            Some(pair_a.public_key.clone()),
+        )
+        .expect("vault_rotate_dek should succeed");
+
+        assert_eq!(result.envelopes_updated, 1, "One envelope should remain after revocation");
+
+        let new_dek = B64.decode(&result.new_dek_b64).expect("new_dek is valid base64");
+        assert_ne!(new_dek, old_dek, "New DEK must differ from old DEK");
+
+        let updated: VaultSharingManifest =
+            serde_json::from_str(&result.new_manifest_json).expect("manifest deserialises");
+        assert_eq!(updated.envelopes.len(), 1);
+        assert_eq!(updated.envelopes[0].recipient_public_key, pair_b.public_key);
+    }
+
+    // ── test 10 ──────────────────────────────────────────────────────────
+
+    /// `vault_rotate_dek` with no revocation: all envelopes are preserved.
+    #[test]
+    fn test_rotate_dek_full_preserves_all() {
+        let kek = fake_kek(0x40);
+        let old_dek = fake_dek(0x41);
+
+        let pair_a = generate_user_key_pair(&kek).expect("keypair A");
+        let pair_b = generate_user_key_pair(&kek).expect("keypair B");
+
+        let env_a = create_sharing_envelope(&old_dek, &pair_a.public_key).expect("envelope A");
+        let env_b = create_sharing_envelope(&old_dek, &pair_b.public_key).expect("envelope B");
+
+        let mut manifest = VaultSharingManifest::default();
+        add_envelope(&mut manifest, env_a);
+        add_envelope(&mut manifest, env_b);
+
+        let manifest_json = serde_json::to_string(&manifest).expect("serialise manifest");
+        let old_dek_b64 = B64.encode(&old_dek);
+
+        let result = vault_rotate_dek(manifest_json, old_dek_b64, None)
+            .expect("vault_rotate_dek should succeed");
+
+        assert_eq!(result.envelopes_updated, 2, "Both envelopes should be preserved");
+
+        let updated: VaultSharingManifest =
+            serde_json::from_str(&result.new_manifest_json).expect("manifest deserialises");
+        assert_eq!(updated.envelopes.len(), 2);
+    }
+
+    // ── test 11 ──────────────────────────────────────────────────────────
+
+    /// The `new_manifest_json` field returned by `vault_rotate_dek` must
+    /// deserialise cleanly into a [`VaultSharingManifest`].
+    #[test]
+    fn test_rotate_dek_result_is_valid_json() {
+        let kek = fake_kek(0x50);
+        let old_dek = fake_dek(0x51);
+
+        let pair = generate_user_key_pair(&kek).expect("keypair");
+        let env = create_sharing_envelope(&old_dek, &pair.public_key).expect("envelope");
+
+        let mut manifest = VaultSharingManifest::default();
+        add_envelope(&mut manifest, env);
+
+        let manifest_json = serde_json::to_string(&manifest).expect("serialise manifest");
+        let old_dek_b64 = B64.encode(&old_dek);
+
+        let result = vault_rotate_dek(manifest_json, old_dek_b64, None)
+            .expect("vault_rotate_dek should succeed");
+
+        // Must round-trip through serde_json without error.
+        let parsed: Result<VaultSharingManifest, _> =
+            serde_json::from_str(&result.new_manifest_json);
+        assert!(parsed.is_ok(), "new_manifest_json must be valid JSON: {:?}", parsed.err());
+        assert_eq!(parsed.unwrap().envelopes.len(), 1);
+    }
+
+    // ── test 12 ──────────────────────────────────────────────────────────
+
+    /// Full round-trip for recording encryption/decryption.
+    #[test]
+    fn test_recording_round_trip() {
+        let kek = fake_kek(0x60);
+        let reviewer = generate_reviewer_key_pair(&kek).expect("reviewer keypair");
+
+        let plaintext = b"hello recording";
+        let encrypted = encrypt_recording_for_reviewer(plaintext, &reviewer.reviewer_public_key_b64)
+            .expect("encrypt recording");
+
+        let decrypted = decrypt_recording_for_reviewer(
+            &encrypted,
+            &reviewer.reviewer_private_key_encrypted_b64,
+            &kek,
+        )
+        .expect("decrypt recording");
+
+        assert_eq!(decrypted, plaintext, "Decrypted recording must match original");
+    }
+
+    // ── test 13 ──────────────────────────────────────────────────────────
+
+    /// Flipping a byte in the encrypted payload must cause decryption to fail
+    /// (AES-GCM authentication).
+    #[test]
+    fn test_recording_tamper_detection() {
+        let kek = fake_kek(0x70);
+        let reviewer = generate_reviewer_key_pair(&kek).expect("reviewer keypair");
+
+        let plaintext = b"secret recording";
+        let mut encrypted = encrypt_recording_for_reviewer(plaintext, &reviewer.reviewer_public_key_b64)
+            .expect("encrypt recording");
+
+        // Flip a byte near the end (inside the GCM ciphertext).
+        let last = encrypted.len() - 1;
+        encrypted[last] ^= 0xFF;
+
+        let result = decrypt_recording_for_reviewer(
+            &encrypted,
+            &reviewer.reviewer_private_key_encrypted_b64,
+            &kek,
+        );
+
+        assert!(result.is_err(), "Tampered payload must not decrypt successfully");
+    }
+
+    // ── test 14 ──────────────────────────────────────────────────────────
+
+    /// The reviewer public key returned by `generate_reviewer_key_pair` must be
+    /// a non-empty base64 string decoding to 32 bytes.
+    #[test]
+    fn test_reviewer_keypair_public_key_nonempty() {
+        let kek = fake_kek(0x80);
+        let reviewer = generate_reviewer_key_pair(&kek).expect("reviewer keypair");
+
+        assert!(!reviewer.reviewer_public_key_b64.is_empty(), "Public key must not be empty");
+
+        let decoded = B64
+            .decode(&reviewer.reviewer_public_key_b64)
+            .expect("public key is valid base64");
+        assert_eq!(decoded.len(), 32, "X25519 public key must be 32 bytes");
     }
 }

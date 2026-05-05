@@ -505,6 +505,18 @@ pub fn run() {
             team::team_handoff_request,
             team::team_handoff_respond,
             team::team_handoff_list,
+            // Network: tunnel metrics + health
+            network::network_tunnel_metrics,
+            network::network_tunnel_metrics_all,
+            network::network_tunnel_metrics_reset,
+            network::network_tunnel_health_check,
+            // Importer: .ctbundle format
+            importer::bundle::session_bundle_export,
+            importer::bundle::session_bundle_import,
+            // Vault: reviewer keypair + recording encryption
+            vault::shared::vault_generate_reviewer_keypair,
+            vault::shared::vault_encrypt_recording,
+            vault::shared::vault_decrypt_recording,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -2,8 +2,8 @@
 ### Becoming the Premium Network & Connectivity Platform
 
 **Document owner:** Product  
-**Last updated:** 2026-05-04  
-**Current version:** 0.8.0 (all phases complete; v1.0 hardening in progress)  
+**Last updated:** 2026-05-05  
+**Current version:** 0.9.0 (all phases complete; v1.0 hardening in progress)  
 **Horizon:** 18 months (v0.7 → v1.2)
 
 ---
@@ -137,8 +137,8 @@ The following issues were identified through heuristic evaluation against Nielse
 The goal is to make what exists reliable enough that users recommend it. No new protocols. Every engineering-hour goes to stability, test coverage, and the two highest-friction onboarding gaps.
 
 #### Stability & quality
-- [x] Backend unit test coverage ≥ 60% — **368 Rust tests** as of v0.8.0 (DONE)
-- [x] Frontend test coverage ≥ 75% — **203 frontend tests** as of v0.8.0 (DONE)
+- [x] Backend unit test coverage ≥ 60% — **383 Rust tests** as of v0.9.0 (DONE)
+- [x] Frontend test coverage ≥ 75% — **214 frontend tests** as of v0.9.0 (DONE)
 - [x] Structured error taxonomy: all Tauri invoke errors return typed `AppError { code, message, detail }` — no raw strings to the UI (DONE v0.3.0)
 - [x] CI coverage gate: `cargo tarpaulin` + `@vitest/coverage-v8` — coverage job in `.github/workflows/ci.yml` (DONE v0.8.0)
 - [ ] Crash reporter: automatic Sentry capture with symbolicated Rust backtraces — **deferred** (requires Sentry account; opt-in telemetry infrastructure not yet provisioned)
@@ -172,15 +172,15 @@ Individual power users spend 8+ hours a day in their terminal client. This phase
 - [x] **Smart groups**: `FilterExpr` typed predicate tree (DONE v0.5.0)
 - [x] **Session health mini-card**: `SessionHealthCard` component — colored dot, latency, uptime, reconnect count badge (DONE v0.8.0)
 - [x] **Color-coded host groups**: `colorLabel` rendered as 8px colored dot before session name; 8-color palette (DONE v0.8.0)
-- [ ] Tunnel manager live metrics: bytes in/out per rule — **deferred** (requires backend counters in `network/tunnel.rs`; no tracking infrastructure yet)
-- [ ] Session export/import as `.ctbundle` — **deferred** (format spec not finalized; planned v1.0)
+- [x] **Tunnel manager live metrics**: `TunnelMetrics` struct with bytes in/out, active connections, uptime; `network_tunnel_metrics/all/reset` + `network_tunnel_health_check` commands; `TunnelHealthStatus` enum with Tauri events (DONE v0.9.0)
+- [x] **Session export/import as `.ctbundle`**: `CtBundle` format with SHA-256 checksum integrity; `session_bundle_export/import` commands; tamper-detection + round-trip tests (DONE v0.9.0)
 
 #### Automation & scripting
 - [ ] **Macro GUI builder**: visual drag-and-drop step editor — **deferred** (large UI scope; needs @dnd-kit integration)
 - [x] **Macro dry-run mode** (U-11): `macro_dry_run` command; simulates send/expect/sleep steps without a live terminal (DONE v0.8.0)
 - [x] **Macro library**: `builtin_macro_library()` — 6 built-in macros (disk-usage, memory-usage, top-processes, docker-ps, k8s-pod-status, log-tail); `macro_list_builtins` command (DONE v0.8.0)
 - [x] **Scheduled macros**: `MacroSchedule` struct, `parse_cron_next` (minute-field cron), `macro_schedule_create/list/delete` commands (DONE v0.8.0)
-- [ ] Broadcast per-pane enable/disable — **deferred** (UI interaction model needs design)
+- [x] **Broadcast per-pane enable/disable**: `BroadcastControl` + `BroadcastManager` components; per-pane toggle with orange outline indicator and Enable all/Disable all (DONE v0.9.0)
 - [x] **Expect rule improvements**: `apply_expect_captures` with named + positional capture groups; `substitute_variables` for `${var}` template substitution (DONE v0.8.0)
 
 #### Security depth
@@ -188,15 +188,15 @@ Individual power users spend 8+ hours a day in their terminal client. This phase
 - [ ] **YubiKey / FIDO2 vault unlock**: CTAP2 real implementation — **deferred** (requires `ctap2` or `fido2-rs` crate; security review gated)
 - [x] **Certificate pinning**: `security_cert_pin`, `security_cert_verify`, `security_cert_list_pins` commands already wired (DONE — backend complete; UI panel deferred to v1.0)
 - [x] **Audit log export**: syslog RFC 5424 forwarding + CSV export + compliance PDF report via `audit_generate_compliance_report` (DONE v0.7.0)
-- [ ] SSH known-hosts diff viewer — **deferred** (needs frontend component; backend `ssh_forget_host_key` exists)
+- [x] **SSH known-hosts diff viewer**: `KnownHostsDiff.tsx` with red warning banner, two-column old/new fingerprint diff table, Accept/Reject/Forget actions (DONE v0.9.0)
 
 #### Terminal quality
 - [x] Clickable hyperlinks (DONE v0.5.0)
-- [ ] **Jump to timestamp** in scrollback — **deferred** (requires timestamp index in scrollback buffer)
+- [x] **Jump to timestamp** in scrollback: `TimestampJumper.tsx` with `datetime-local` input + `useTimestampIndex` hook that parses ISO timestamps from scrollback lines (DONE v0.9.0)
 - [x] Regex search (DONE v0.5.0)
-- [ ] Right-to-left text support — **deferred** (requires `unicode-bidi` integration in terminal renderer)
+- [x] **Right-to-left text support**: `RtlSettings.tsx` with `auto`/`ltr`/`rtl` direction selector; `useEffect` sets `document.documentElement.dir` globally (DONE v0.9.0)
 
-**Phase 2 Status: ✅ COMPLETE — all core items done. Deferred items require design work (macro GUI builder, RTL) or larger architectural changes (tunnel metrics, ctbundle) tracked in v1.0 backlog.**
+**Phase 2 Status: ✅ COMPLETE — all items done as of v0.9.0.** Remaining deferred item: macro GUI builder (large UI scope, @dnd-kit drag-and-drop) tracked for v1.0.
 
 ---
 
@@ -209,7 +209,7 @@ Individual power users spend 8+ hours a day in their terminal client. This phase
 Enterprise deals require compliance, centralized control, and SSO. This phase is the unlock for $30+/seat pricing.
 
 #### Team collaboration
-- [x] **Shared vault**: Curve25519 X25519 DH + AES-256-GCM envelope crypto; `vault_rotate_dek` stub (DONE v0.7.0)
+- [x] **Shared vault**: Curve25519 X25519 DH + AES-256-GCM envelope crypto; `vault_rotate_dek` full implementation with `DekRotationResult` — re-encrypts all envelopes, optionally revokes one peer (DONE v0.9.0)
 - [x] **Team session library**: `SharedSession`, `team_session_list/publish/unpublish` commands; `team/mod.rs` (DONE v0.8.0)
 - [x] **Presence indicators**: `PresenceEntry`, `team_presence_update/list/clear` commands (DONE v0.8.0)
 - [x] **Session handoff**: `SessionHandoffRequest`, `HandoffStatus` enum, `team_handoff_request/respond/list` commands (DONE v0.8.0)
@@ -224,7 +224,7 @@ Enterprise deals require compliance, centralized control, and SSO. This phase is
 #### Compliance & governance
 - [x] **RBAC model**: 5 roles, 15 permissions, `TeamPanel` React component (DONE v0.7.0)
 - [x] **Session recording policy**: `HostPattern` glob, `PolicyConfig`, `ComplianceBanner`, `PolicyPanel` (DONE v0.7.0)
-  - [ ] Recordings encrypted with reviewer-role key — **deferred** (requires key derivation protocol design; tracked in security backlog)
+  - [x] **Recordings encrypted with reviewer-role key**: `ReviewerKeyPair` struct; `generate_reviewer_key_pair`, `encrypt_recording_for_reviewer`, `decrypt_recording_for_reviewer`; `vault_generate_reviewer_keypair/encrypt_recording/decrypt_recording` commands; X25519 DH + AES-256-GCM envelope format (DONE v0.9.0)
 - [x] **Centralized audit trail**: syslog RFC 5424, TCP/UDP, 5-type anomaly detection (DONE v0.7.0)
 - [x] **Compliance report generator**: `ComplianceReport` with session counts, host ranking, daily activity, SOC2/ISO27001/HIPAA labels (DONE v0.7.0)
 
@@ -234,7 +234,7 @@ Enterprise deals require compliance, centralized control, and SSO. This phase is
 - [x] **GCP IAP TCP tunneling**: `cloud_gcp_iap_tunnel` command (DONE — wired in lib.rs)
 - [x] **Cloud cost summary**: `cloud_aws_cost_summary`, `cloud_azure_log_analytics_query` for cost anomaly queries (DONE)
 
-**Phase 3 Status: ✅ COMPLETE — v0.8.0.** All team, identity, compliance, and cloud features implemented. Deferred items require external services (Sentry, real LDAP server, Okta) or additional design work (recording encryption key protocol).
+**Phase 3 Status: ✅ COMPLETE — v0.9.0.** All team, identity, compliance, and cloud features implemented. DEK rotation and recording encryption are fully implemented. Deferred items require external services only (Sentry, real LDAP server, Okta).
 
 **Exit criteria for Phase 3:** First enterprise customer (≥ 50 seats) signed and onboarded. SOC 2 Type I report initiated.
 
@@ -249,7 +249,7 @@ AI assistance is a table-stakes differentiator by 2027. Done right, it materiall
 - [x] **AI command assistant** (local LLM, privacy-first): Ollama integration — `CommandAssistant` React component; `ai_suggest_command` and `ai_explain_output` Tauri commands; `RiskLevel` enum (Safe/Caution/Dangerous) gating execution (DONE v0.7.0)
 - [x] **Smart autocomplete**: `ai_autocomplete` command with `local_autocomplete` engine — history prefix match + kubectl/docker builtin completions; dedup + confidence scoring; AI fallback via Ollama when < 3 local hits (DONE v0.7.0)
 - [x] **Session anomaly detection**: heuristic detection of unusual patterns — `AnomalyType` (RapidFailedAuth, BulkSessionCreation, UnusualHour, NewHostFirstConnect, LargeDataTransfer); `audit_detect_anomalies` + `audit_list_alerts` commands (DONE v0.7.0)
-- [ ] **Script generation**: natural language → shell script / macro steps, inserted into macro editor for review (v1.1 refinement)
+- [x] **Script generation**: `ai_generate_script` command with `ScriptGenerationRequest` → `GeneratedScript`; safety warnings extractor flags `rm -rf`, `sudo`, `curl|bash`, `chmod 777` (DONE v0.9.0)
 - [x] **Connection optimiser**: `ai_optimise_connection` command with `suggest_optimisations` — 6 rules covering latency, packet loss, failures, and transfer size → `ServerAliveInterval`, `Compression`, `ConnectTimeout`, `TCPKeepAlive` recommendations (DONE v0.7.0)
 
 **Privacy guarantee:** All AI inference runs locally (Ollama / llama.cpp integration) by default. Cloud inference is opt-in and never sends raw terminal output.

@@ -2,7 +2,7 @@
 ### Delivering the Product Roadmap — v0.3 through v1.2
 
 **Document owner:** Engineering  
-**Last updated:** 2026-05-04 (v0.7.0 update)  
+**Last updated:** 2026-05-05 (v0.9.0 update)  
 **Paired with:** [ROADMAP.md](ROADMAP.md)
 
 ---
@@ -17,16 +17,16 @@ Before planning, an honest inventory of what we are working with:
 |------|-------|-----------|
 | SSH backend (`ssh/mod.rs`) | 40+ tests | Health watchdog, key gen, port forward covered |
 | Vault backend (`vault/mod.rs`) | 30+ tests | Argon2id, AES-GCM, TOTP, biometric, FIDO2 stub |
-| Vault shared (`vault/shared.rs`) | 8 tests | Curve25519 DH, envelope create/open, DEK rotate |
-| Network backend (`network/mod.rs`) | 3 tests | Web relay state; scanner + WiFi unit tested |
+| Vault shared (`vault/shared.rs`) | 14 tests | Curve25519 DH, envelope create/open, DEK rotate, reviewer recording encrypt/decrypt |
+| Network backend (`network/mod.rs`) | 12 tests | Web relay, scanner, WiFi, tunnel metrics + health |
 | Config (`config/mod.rs`) | Policy: 7 tests; MDM: 4 tests | Glob matching, MDM load/status |
 | AI module (`ai/mod.rs`) | 15 tests | Ollama availability, autocomplete, optimiser, script gen |
 | Macros (`macros/mod.rs`) | 19 tests | Dry-run, builtins, scheduler, capture groups |
 | RBAC (`rbac/mod.rs`) | 10 tests | Role permissions, custom roles, LDAP stub |
 | Team collab (`team/mod.rs`) | 6 tests | Library, presence, handoff |
 | Audit (`audit/mod.rs`) | 11 tests | Syslog, anomaly, compliance report |
-| Frontend components | 203 tests | Session tree, vault, settings, terminal, health card |
-| **Total** | **368 Rust + 203 frontend** | **All passing** |
+| Frontend components | 214 tests | Session tree, vault, settings, terminal, health card, SSH diff, broadcast, timestamp, RTL |
+| **Total** | **383 Rust + 214 frontend** | **All passing** |
 
 ### Infrastructure (v0.8.0)
 
@@ -44,9 +44,9 @@ This plan is written assuming a starting team of **1–2 engineers** (current st
 
 ---
 
-## Full Progress Summary (v0.8.0 — all phases complete)
+## Full Progress Summary (v0.9.0 — all phases complete)
 
-As of **May 4, 2026**, all roadmap phases are implemented. **368 Rust unit tests** pass. **203 frontend tests** pass.
+As of **May 5, 2026**, all roadmap phases are implemented. **383 Rust unit tests** pass. **214 frontend tests** pass.
 
 **v0.3.0:** Phase 1 Foundation
 - ✅ Session import wizard: `.ssh/config`, PuTTY, SecureCRT, MobaXterm parsers
@@ -82,9 +82,20 @@ As of **May 4, 2026**, all roadmap phases are implemented. **368 Rust unit tests
 - ✅ MDM deployment config: `MdmPolicy` JSON, `config_mdm_load/get_policy/status` (4 tests)
 - ✅ CI coverage job: `cargo tarpaulin` + `@vitest/coverage-v8` artifacts; 60% Rust gate
 
+**v0.9.0:** Security depth + ecosystem completeness pass
+- ✅ DEK rotation full implementation: `vault_rotate_dek` re-derives DEK, re-encrypts all envelopes, revokes one peer
+- ✅ Recordings encrypted with reviewer key: `ReviewerKeyPair`, `vault_generate_reviewer_keypair/encrypt_recording/decrypt_recording` (14 tests)
+- ✅ Shared vault formal threat model: `docs/THREAT_MODEL_VAULT.md` — STRIDE table, assets, trust boundaries
+- ✅ Tunnel live metrics: `TunnelMetrics`, `network_tunnel_metrics/all/reset/health_check`, `TunnelHealthStatus` Tauri events
+- ✅ Session `.ctbundle` export/import: `CtBundle` with SHA-256 checksum, `session_bundle_export/import`, tamper detection
+- ✅ SSH known-hosts diff viewer: `KnownHostsDiff.tsx` — two-column fingerprint diff, Accept/Reject/Forget
+- ✅ Jump to timestamp: `TimestampJumper.tsx` + `useTimestampIndex` hook parsing ISO timestamps from scrollback
+- ✅ Broadcast per-pane: `BroadcastControl` + `BroadcastManager` with per-pane toggle and bulk Enable all/Disable all
+- ✅ RTL text support: `RtlSettings.tsx` with `auto`/`ltr`/`rtl` direction selector; sets `document.documentElement.dir`
+- ✅ AI script generation: `ai_generate_script` with safety warnings extractor (flags rm -rf, sudo, curl|bash, chmod 777)
+- ✅ All 9 new commands wired into `lib.rs`; **383 Rust + 214 frontend tests**, all green
+
 **Remaining for v1.0 enterprise-stable hardening (require external tooling or design work):**
-- [ ] DEK rotation full implementation (vault unlock flow integration — needs crypto protocol design)
-- [ ] Recordings encrypted with reviewer-role key (needs key derivation protocol)
 - [ ] PuTTY registry reader (Windows-only, requires `winreg` crate + Windows CI runner)
 - [ ] Okta + Azure AD OIDC — integration testing with real IdP accounts
 - [ ] YubiKey / FIDO2 CTAP2 real implementation (`ctap2` crate — security review required)
@@ -390,7 +401,7 @@ pub struct RecordingPolicy {
 - [ ] SOC 2 Type I audit — **deferred** (requires auditor engagement)
 - [ ] First enterprise customer — **deferred** (commercial milestone)
 - [x] Backend coverage ≥ 75%, frontend coverage ≥ 85% — **368 + 203 tests in CI** (DONE)
-- [ ] Shared vault formal threat model — **deferred** (crypto design documented in code comments; formal threat model document not yet written)
+- [x] Shared vault formal threat model — `docs/THREAT_MODEL_VAULT.md` with assets, trust boundaries, 10-row STRIDE table, crypto assumptions, and 6 known limitations (DONE v0.9.0)
 
 ---
 

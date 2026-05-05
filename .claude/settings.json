@@ -87,7 +87,13 @@
       "Bash(git -C /Users/alal/Code/CrossTerm log --oneline -10)",
       "Bash(git -C /Users/alal/Code/CrossTerm log --oneline -8)",
       "Bash(cargo clean *)",
-      "Bash(sudo rm *)"
+      "Bash(sudo rm *)",
+      "Bash(sed -n '1048,1055p' /Users/alal/Code/CrossTerm/src-tauri/src/macros/mod.rs)",
+      "Bash(sed -n '1142,1148p' /Users/alal/Code/CrossTerm/src-tauri/src/macros/mod.rs)",
+      "Bash(sed -n '1311,1342p' /Users/alal/Code/CrossTerm/src-tauri/src/macros/mod.rs)",
+      "Bash(sed -i '' 's/\"version\": \"0.7.0\"/\"version\": \"0.8.0\"/g' /Users/alal/Code/CrossTerm/package.json)",
+      "Bash(sed -i '' 's/^version = \"0.7.0\"/version = \"0.8.0\"/' /Users/alal/Code/CrossTerm/src-tauri/Cargo.toml)",
+      "Bash(sed -i '' 's/\"version\": \"0.7.0\"/\"version\": \"0.8.0\"/' /Users/alal/Code/CrossTerm/src-tauri/tauri.conf.json)"
     ],
     "additionalDirectories": [
       "/Users/alal/.cache/gh"
