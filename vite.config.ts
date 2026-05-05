@@ -2,10 +2,11 @@
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
+import type { UserConfig } from "vite";
 
 const host = process.env.TAURI_DEV_HOST;
 
-export default defineConfig(async () => ({
+export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
@@ -19,7 +20,7 @@ export default defineConfig(async () => ({
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
     css: false,
     coverage: {
-      provider: "v8",
+      provider: "v8" as const,
       reporter: ["text", "lcov", "html"],
       include: ["src/stores/**", "src/components/**", "src/utils/**"],
       exclude: ["src/**/__tests__/**", "src/test/**", "src/vite-env.d.ts"],
@@ -46,4 +47,4 @@ export default defineConfig(async () => ({
       ignored: ["**/src-tauri/**"],
     },
   },
-}));
+} as UserConfig);
