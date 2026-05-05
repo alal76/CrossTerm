@@ -1,5 +1,6 @@
 mod ai;
 mod android;
+mod startup;
 mod audit;
 mod auth;
 mod cloud;
@@ -36,6 +37,7 @@ mod window;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    startup::mark_startup_begin();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -513,6 +515,8 @@ pub fn run() {
             // Importer: .ctbundle format
             importer::bundle::session_bundle_export,
             importer::bundle::session_bundle_import,
+            // Startup timing
+            startup::startup_get_timing,
             // Vault: reviewer keypair + recording encryption
             vault::shared::vault_generate_reviewer_keypair,
             vault::shared::vault_encrypt_recording,

@@ -371,8 +371,61 @@ pub fn import_parse_source(source_type: String) -> Result<Vec<ImportedSession>, 
                 Err("Cannot determine home directory".into())
             }
         }
+        "putty_registry" => Ok(parse_putty_registry()),
         _ => Err(format!("Unknown source type: {source_type}")),
     }
+}
+
+// ── PuTTY Registry Parser ─────────────────────────────────────────────────────
+
+#[cfg(target_os = "windows")]
+fn parse_putty_registry() -> Vec<ImportedSession> {
+    use winreg::enums::*;
+    use winreg::RegKey;
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let Ok(putty) = hkcu.open_subkey("Software\\SimonTatham\\PuTTY\\Sessions") else {
+        return Vec::new();
+    };
+    putty
+        .enum_keys()
+        .filter_map(|k| k.ok())
+        .filter_map(|name| {
+            let decoded = name.replace("%20", " ");
+            let session = putty.open_subkey(&name).ok()?;
+            let hostname: String = session.get_value("HostName").unwrap_or_default();
+            let port: u32 = session.get_value("PortNumber").unwrap_or(22);
+            let username: String = session.get_value("UserName").unwrap_or_default();
+            let protocol: String = session
+                .get_value("Protocol")
+                .unwrap_or_else(|_| "ssh".to_string());
+            if hostname.is_empty() {
+                return None;
+            }
+            Some(ImportedSession {
+                name: decoded,
+                host: hostname,
+                port: port as u16,
+                username: if username.is_empty() {
+                    None
+                } else {
+                    Some(username)
+                },
+                session_type: if protocol.eq_ignore_ascii_case("ssh") {
+                    "ssh".into()
+                } else {
+                    protocol
+                },
+                identity_file: None,
+                jump_host: None,
+                tags: Vec::new(),
+            })
+        })
+        .collect()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn parse_putty_registry() -> Vec<ImportedSession> {
+    Vec::new()
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

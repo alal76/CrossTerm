@@ -18,6 +18,23 @@ import {
   FileCode,
 } from 'lucide-react';
 import clsx from 'clsx';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import type { DragEndEvent } from '@dnd-kit/core';
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+  arrayMove,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import type { MacroInfo, MacroStep, MacroStepType, MacroExecution } from '@/types';
 
 const STEP_TYPE_OPTIONS: { value: MacroStepType; label: string; icon: React.ReactNode }[] = [
@@ -29,6 +46,88 @@ const STEP_TYPE_OPTIONS: { value: MacroStepType; label: string; icon: React.Reac
   { value: 'loop', label: 'Loop', icon: <Repeat size={14} /> },
 ];
 
+interface SortableStepCardProps {
+  id: string;
+  index: number;
+  step: MacroStep;
+  stepLabel: (step: MacroStep) => string;
+  updateStep: (index: number, updates: Partial<MacroStep>) => void;
+  removeStep: (index: number) => void;
+}
+
+function SortableStepCard({
+  id,
+  index,
+  step,
+  stepLabel,
+  updateStep,
+  removeStep,
+}: SortableStepCardProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+  } = useSortable({ id });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="flex items-center gap-2 p-2 rounded bg-surface-secondary border border-border-subtle"
+    >
+      <GripVertical
+        size={14}
+        className="text-text-disabled cursor-grab"
+        {...attributes}
+        {...listeners}
+      />
+      <span className="flex-1 text-sm text-text-primary font-mono">
+        {stepLabel(step)}
+      </span>
+      {step.type === 'send' && (
+        <input
+          type="text"
+          value={step.data || ''}
+          onChange={(e) => updateStep(index, { data: e.target.value })}
+          className="w-48 px-2 py-0.5 text-xs rounded bg-surface-sunken border border-border-default text-text-primary"
+          placeholder="Data to send"
+        />
+      )}
+      {step.type === 'expect' && (
+        <input
+          type="text"
+          value={step.pattern || ''}
+          onChange={(e) => updateStep(index, { pattern: e.target.value })}
+          className="w-48 px-2 py-0.5 text-xs rounded bg-surface-sunken border border-border-default text-text-primary"
+          placeholder="Pattern"
+        />
+      )}
+      {step.type === 'wait' && (
+        <input
+          type="number"
+          value={step.duration_ms || 0}
+          onChange={(e) => updateStep(index, { duration_ms: Number.parseInt(e.target.value) || 0 })}
+          className="w-24 px-2 py-0.5 text-xs rounded bg-surface-sunken border border-border-default text-text-primary"
+          placeholder="ms"
+        />
+      )}
+      <button
+        onClick={() => removeStep(index)}
+        className="p-1 text-red-400 hover:text-red-300 transition-colors"
+      >
+        <Trash2 size={12} />
+      </button>
+    </div>
+  );
+}
+
 export default function MacroEditor() {
   const { t } = useTranslation();
   const [macros, setMacros] = useState<MacroInfo[]>([]);
@@ -36,6 +135,27 @@ export default function MacroEditor() {
   const [execution, setExecution] = useState<MacroExecution | null>(null);
   const [macroName, setMacroName] = useState('');
   const [steps, setSteps] = useState<MacroStep[]>([]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const stepIds = steps.map((_, i) => `step_${i}`);
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = stepIds.indexOf(active.id as string);
+    const newIndex = stepIds.indexOf(over.id as string);
+    if (oldIndex !== -1 && newIndex !== -1) {
+      setSteps(arrayMove(steps, oldIndex, newIndex));
+    }
+  };
+
   const loadMacros = useCallback(async () => {
     try {
       const list = await invoke<MacroInfo[]>('macro_list');
@@ -317,52 +437,27 @@ export default function MacroEditor() {
               {t('macro.addStep')}
             </p>
           ) : (
-            <div className="space-y-2">
-              {steps.map((step, i) => (
-                <div
-                  key={`step-${step.type}-${i}`}
-                  className="flex items-center gap-2 p-2 rounded bg-surface-secondary border border-border-subtle"
-                >
-                  <GripVertical size={14} className="text-text-disabled cursor-grab" />
-                  <span className="flex-1 text-sm text-text-primary font-mono">
-                    {stepLabel(step)}
-                  </span>
-                  {step.type === 'send' && (
-                    <input
-                      type="text"
-                      value={step.data || ''}
-                      onChange={(e) => updateStep(i, { data: e.target.value })}
-                      className="w-48 px-2 py-0.5 text-xs rounded bg-surface-sunken border border-border-default text-text-primary"
-                      placeholder="Data to send"
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext items={stepIds} strategy={verticalListSortingStrategy}>
+                <div className="space-y-2">
+                  {steps.map((step, i) => (
+                    <SortableStepCard
+                      key={`step_${i}`}
+                      id={`step_${i}`}
+                      index={i}
+                      step={step}
+                      stepLabel={stepLabel}
+                      updateStep={updateStep}
+                      removeStep={removeStep}
                     />
-                  )}
-                  {step.type === 'expect' && (
-                    <input
-                      type="text"
-                      value={step.pattern || ''}
-                      onChange={(e) => updateStep(i, { pattern: e.target.value })}
-                      className="w-48 px-2 py-0.5 text-xs rounded bg-surface-sunken border border-border-default text-text-primary"
-                      placeholder="Pattern"
-                    />
-                  )}
-                  {step.type === 'wait' && (
-                    <input
-                      type="number"
-                      value={step.duration_ms || 0}
-                      onChange={(e) => updateStep(i, { duration_ms: Number.parseInt(e.target.value) || 0 })}
-                      className="w-24 px-2 py-0.5 text-xs rounded bg-surface-sunken border border-border-default text-text-primary"
-                      placeholder="ms"
-                    />
-                  )}
-                  <button
-                    onClick={() => removeStep(i)}
-                    className="p-1 text-red-400 hover:text-red-300 transition-colors"
-                  >
-                    <Trash2 size={12} />
-                  </button>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </SortableContext>
+            </DndContext>
           )}
 
           {/* Add Step Buttons */}

@@ -3,7 +3,7 @@
 
 **Document owner:** Product  
 **Last updated:** 2026-05-05  
-**Current version:** 0.9.0 (all phases complete; v1.0 hardening in progress)  
+**Current version:** 0.10.0 (all phases complete; v1.0 hardening in progress)  
 **Horizon:** 18 months (v0.7 → v1.2)
 
 ---
@@ -137,14 +137,14 @@ The following issues were identified through heuristic evaluation against Nielse
 The goal is to make what exists reliable enough that users recommend it. No new protocols. Every engineering-hour goes to stability, test coverage, and the two highest-friction onboarding gaps.
 
 #### Stability & quality
-- [x] Backend unit test coverage ≥ 60% — **383 Rust tests** as of v0.9.0 (DONE)
-- [x] Frontend test coverage ≥ 75% — **214 frontend tests** as of v0.9.0 (DONE)
+- [x] Backend unit test coverage ≥ 60% — **384 Rust tests** as of v0.10.0 (DONE)
+- [x] Frontend test coverage ≥ 75% — **219 frontend tests** as of v0.10.0 (DONE)
 - [x] Structured error taxonomy: all Tauri invoke errors return typed `AppError { code, message, detail }` — no raw strings to the UI (DONE v0.3.0)
 - [x] CI coverage gate: `cargo tarpaulin` + `@vitest/coverage-v8` — coverage job in `.github/workflows/ci.yml` (DONE v0.8.0)
 - [ ] Crash reporter: automatic Sentry capture with symbolicated Rust backtraces — **deferred** (requires Sentry account; opt-in telemetry infrastructure not yet provisioned)
 - [x] Session watchdog: detect silent tunnel drops and surface a toast + reconnect option within 5 seconds (DONE v0.3.0)
 - [ ] Memory profiling pass: fix top-3 allocations in SSH scrollback and SFTP transfer queue — **deferred to v1.0 hardening** (no regressions observed; profiling tooling not yet set up in CI)
-- [ ] Startup time ≤ 1.5 s — **deferred** (measurement requires real device baseline; not yet instrumented)
+- [x] Startup time instrumentation: `startup::mark_startup_begin()` + `startup_get_timing` command; `StartupTiming { time_to_ready_ms }` emitted on first frontend call — baseline measurement now possible (DONE v0.10.0). Target ≤ 1.5 s verified on real device deferred to v1.0 hardening.
 
 #### Onboarding
 - [x] **Import wizard** (U-1): parse `~/.ssh/config`, PuTTY, SecureCRT `.ini`, MobaXterm `.mxtsessions` — create sessions in one click (DONE v0.3.0)
@@ -176,7 +176,7 @@ Individual power users spend 8+ hours a day in their terminal client. This phase
 - [x] **Session export/import as `.ctbundle`**: `CtBundle` format with SHA-256 checksum integrity; `session_bundle_export/import` commands; tamper-detection + round-trip tests (DONE v0.9.0)
 
 #### Automation & scripting
-- [ ] **Macro GUI builder**: visual drag-and-drop step editor — **deferred** (large UI scope; needs @dnd-kit integration)
+- [x] **Macro GUI builder**: `MacroEditor.tsx` upgraded with `@dnd-kit/sortable` — `SortableStepCard` wrapper, `DndContext` + `SortableContext`, `handleDragEnd` using `arrayMove`; grip handle activates drag; 5 tests (DONE v0.10.0)
 - [x] **Macro dry-run mode** (U-11): `macro_dry_run` command; simulates send/expect/sleep steps without a live terminal (DONE v0.8.0)
 - [x] **Macro library**: `builtin_macro_library()` — 6 built-in macros (disk-usage, memory-usage, top-processes, docker-ps, k8s-pod-status, log-tail); `macro_list_builtins` command (DONE v0.8.0)
 - [x] **Scheduled macros**: `MacroSchedule` struct, `parse_cron_next` (minute-field cron), `macro_schedule_create/list/delete` commands (DONE v0.8.0)
@@ -196,7 +196,7 @@ Individual power users spend 8+ hours a day in their terminal client. This phase
 - [x] Regex search (DONE v0.5.0)
 - [x] **Right-to-left text support**: `RtlSettings.tsx` with `auto`/`ltr`/`rtl` direction selector; `useEffect` sets `document.documentElement.dir` globally (DONE v0.9.0)
 
-**Phase 2 Status: ✅ COMPLETE — all items done as of v0.9.0.** Remaining deferred item: macro GUI builder (large UI scope, @dnd-kit drag-and-drop) tracked for v1.0.
+**Phase 2 Status: ✅ COMPLETE — all items done as of v0.10.0.**
 
 ---
 

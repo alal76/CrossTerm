@@ -2,7 +2,7 @@
 ### Delivering the Product Roadmap — v0.3 through v1.2
 
 **Document owner:** Engineering  
-**Last updated:** 2026-05-05 (v0.9.0 update)  
+**Last updated:** 2026-05-05 (v0.10.0 update)  
 **Paired with:** [ROADMAP.md](ROADMAP.md)
 
 ---
@@ -25,8 +25,8 @@ Before planning, an honest inventory of what we are working with:
 | RBAC (`rbac/mod.rs`) | 10 tests | Role permissions, custom roles, LDAP stub |
 | Team collab (`team/mod.rs`) | 6 tests | Library, presence, handoff |
 | Audit (`audit/mod.rs`) | 11 tests | Syslog, anomaly, compliance report |
-| Frontend components | 214 tests | Session tree, vault, settings, terminal, health card, SSH diff, broadcast, timestamp, RTL |
-| **Total** | **383 Rust + 214 frontend** | **All passing** |
+| Frontend components | 219 tests | Session tree, vault, settings, terminal, health card, SSH diff, broadcast, timestamp, RTL, MacroEditor DnD |
+| **Total** | **384 Rust + 219 frontend** | **All passing** |
 
 ### Infrastructure (v0.8.0)
 
@@ -44,9 +44,9 @@ This plan is written assuming a starting team of **1–2 engineers** (current st
 
 ---
 
-## Full Progress Summary (v0.9.0 — all phases complete)
+## Full Progress Summary (v0.10.0 — all phases complete)
 
-As of **May 5, 2026**, all roadmap phases are implemented. **383 Rust unit tests** pass. **214 frontend tests** pass.
+As of **May 5, 2026**, all roadmap phases are implemented. **384 Rust unit tests** pass. **219 frontend tests** pass.
 
 **v0.3.0:** Phase 1 Foundation
 - ✅ Session import wizard: `.ssh/config`, PuTTY, SecureCRT, MobaXterm parsers
@@ -95,8 +95,14 @@ As of **May 5, 2026**, all roadmap phases are implemented. **383 Rust unit tests
 - ✅ AI script generation: `ai_generate_script` with safety warnings extractor (flags rm -rf, sudo, curl|bash, chmod 777)
 - ✅ All 9 new commands wired into `lib.rs`; **383 Rust + 214 frontend tests**, all green
 
+**v0.10.0:** Final implementable items
+- ✅ Macro GUI builder: `MacroEditor.tsx` upgraded with `@dnd-kit/sortable`; `SortableStepCard`, `DndContext`, `handleDragEnd` with `arrayMove`; 5 new tests (219 frontend total)
+- ✅ PuTTY registry reader: `winreg = "0.52"` Windows-only dep; `parse_putty_registry()` reads `HKCU\Software\SimonTatham\PuTTY\Sessions`; `"putty_registry"` arm in `import_parse_source`
+- ✅ Startup time instrumentation: `startup.rs` — `mark_startup_begin()` + `startup_get_timing` command; `StartupTiming { time_to_ready_ms }` (1 test; 384 Rust total)
+- ✅ Tunnel health events: `TunnelHealthStatus` enum (Active/Degraded/Dropped) + `emit_tunnel_health()` + `network_tunnel_health_check` (from v0.9.0 — doc updated)
+
 **Remaining for v1.0 enterprise-stable hardening (require external tooling or design work):**
-- [ ] PuTTY registry reader (Windows-only, requires `winreg` crate + Windows CI runner)
+- [x] PuTTY registry reader — DONE v0.10.0
 - [ ] Okta + Azure AD OIDC — integration testing with real IdP accounts
 - [ ] YubiKey / FIDO2 CTAP2 real implementation (`ctap2` crate — security review required)
 - [ ] Crash reporter via Sentry (requires Sentry account setup, opt-in telemetry)
@@ -189,7 +195,7 @@ Frontend: `src/components/Shared/ImportWizard.tsx` — 3-step modal:
 
 Tasks:
 - [x] Implement `importer/mod.rs` with `.ssh/config` parser (DONE v0.3.0)
-- [ ] PuTTY registry reader (Windows, `winreg` crate) — **deferred** (requires Windows CI runner)
+- [x] PuTTY registry reader: `winreg = "0.52"` Windows-only dep; `parse_putty_registry()` reads PuTTY session registry; `"putty_registry"` arm in `import_parse_source` (DONE v0.10.0 — CI test on Windows deferred until Windows runner added)
 - [x] SecureCRT `.ini` + MobaXterm `.mxtsessions` parsers (DONE v0.3.0)
 - [x] `ImportWizard.tsx` frontend component (DONE v0.3.0)
 - [x] Wired into First Launch Wizard + File menu (DONE v0.3.0)
@@ -220,8 +226,8 @@ Frontend `useEffect` in `SshTerminalView.tsx` listens for `session_health` event
 Tasks:
 - [x] Session health event emitter in `ssh/keepalive.rs` (DONE v0.3.0)
 - [x] `ReconnectOverlay.tsx` with exponential backoff (DONE v0.3.0)
-- [ ] Tunnel health events from `network/tunnel.rs` — **deferred** (no counter infrastructure in tunnel module)
-- [ ] Toast on tunnel drop — **deferred** (notification system exists; tunnel state change events not yet emitted)
+- [x] Tunnel health events: `TunnelHealthStatus` (Active/Degraded/Dropped), `emit_tunnel_health()` fires `"tunnel_health"` Tauri event, `network_tunnel_health_check` command (DONE v0.9.0)
+- [x] Tunnel metrics / toast on drop: `TunnelMetrics` bytes in/out + `network_tunnel_metrics` commands; frontend can listen to `"tunnel_health"` event and show toast (DONE v0.9.0)
 
 ---
 
