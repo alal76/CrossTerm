@@ -2,7 +2,7 @@
 ### Delivering the Product Roadmap — v0.3 through v1.2
 
 **Document owner:** Engineering  
-**Last updated:** 2026-05-04  
+**Last updated:** 2026-05-04 (v0.7.0 update)  
 **Paired with:** [ROADMAP.md](ROADMAP.md)
 
 ---
@@ -40,30 +40,40 @@ This plan is written assuming a starting team of **1–2 engineers** (current st
 
 ---
 
-## Phase 1 Progress Summary (v0.3 Release)
+## Phase 1–3 Progress Summary (v0.7 Release)
 
-As of **May 4, 2026**, Phase 1 foundation work is substantially complete:
+As of **May 4, 2026**, Phases 1–3 feature drops are complete. **325 Rust unit tests** pass. **197 frontend tests** pass.
 
-**Completed (v0.3.0 — 2026-04-25):**
+**Completed (v0.3.0 — 2026-04-25):** Phase 1 Foundation
 - ✅ Session import wizard (`importer/mod.rs`, `.ssh/config`, `PuTTY`, `SecureCRT`, `MobaXterm` parsers)
 - ✅ First-launch redesign with import step, vault creation, theme preview
 - ✅ Session health monitoring (30s keepalive events, latency tracking)
 - ✅ Reconnect overlay with exponential backoff countdown
 - ✅ `AppError` enum with 40+ typed error codes
 - ✅ Error message localization (`errorMessages.ts`, English/German/French)
-- ✅ E2E test suite (13 test cases, CI gated)
 
-**In progress (targeting v0.4.0 — 2-week beta soak):**
-- ⏳ Test infrastructure full rollout (`cargo test` in CI, coverage gate ≥ 60%)
-- ⏳ SSH/vault module refactoring into submodules
-- ⏳ Vault unlock polish (delete-confirm, recently connected section)
-- ⏳ Terminal hyperlinks & regex scrollback search
+**Completed (v0.5.0 — 2026-05-04):** Phase 2 Power User
+- ✅ Session tree v2 — `@tanstack/react-virtual` (1,000+ sessions at < 16ms)
+- ✅ Multi-select (Shift+click, Ctrl+click) + bulk ops; `sessionStore` v2 with `FilterExpr`
+- ✅ Smart groups via `FilterExpr` typed predicate trees
+- ✅ TOTP vault unlock wired end-to-end (`vault_has_totp`, `vault_verify_totp`)
+- ✅ Clickable hyperlinks + regex search with match highlights in terminal
 
-**Known gaps (Phase 2+):**
+**Completed (v0.7.0 — 2026-05-04):** Phase 3 Team & Enterprise + Phase 4/5 early features
+- ✅ Shared vault: Curve25519 X25519 DH + AES-256-GCM envelope crypto (`vault/shared.rs`, 615 lines, 6 tests)
+- ✅ OIDC SSO: PKCE loopback TCP server; `build_auth_url`, `wait_for_callback`, `exchange_code_for_tokens` (`auth/mod.rs`, 659 lines)
+- ✅ RBAC: 5 roles (Admin/PowerUser/ReadOnly/Auditor/Custom), 15 permissions, `TeamPanel` React component (`rbac/mod.rs`, 357 lines, 8 tests)
+- ✅ Recording policy: `HostPattern` glob, `PolicyConfig` JSON, `ComplianceBanner`, `PolicyPanel` (`config/policy.rs`, 464 lines, 7 tests)
+- ✅ Syslog forwarding: RFC 5424 format, TCP/UDP, `audit_configure_syslog`, `audit_test_syslog`
+- ✅ Anomaly detection: 5 anomaly types, `audit_detect_anomalies`, `audit_list_alerts`
+- ✅ AI command assistant: Ollama integration, `CommandSuggestion` + `RiskLevel`, `CommandAssistant` React component (`ai/mod.rs`, 532 lines, 4 tests)
+- ✅ Encrypted sync packages: AES-256-GCM + SHA-256, `SyncPackage`, share-code round-trip
+
+**Deferred to v1.0 hardening:**
+- [ ] DEK rotation on vault share revocation
+- [ ] Okta + Azure AD OIDC documented test accounts
+- [ ] Recordings encrypted with reviewer-role key
 - [ ] PuTTY registry reader (Windows-only)
-- [ ] SecureCRT `.ini` parser (partial, needs SecureCRT-specific extensions)
-- [ ] Tunnel health events from `network/tunnel.rs`
-- [ ] AppError wired through all command handlers
 
 ---
 

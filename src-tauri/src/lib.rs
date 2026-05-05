@@ -1,5 +1,7 @@
+mod ai;
 mod android;
 mod audit;
+mod auth;
 mod cloud;
 mod config;
 mod editor;
@@ -13,6 +15,7 @@ mod macros;
 mod network;
 mod notifications;
 mod plugin_rt;
+mod rbac;
 mod rdp;
 mod recording;
 mod security;
@@ -48,6 +51,10 @@ pub fn run() {
         })
         .manage(vault::Vault::new())
         .manage(config::ConfigState::new())
+        .manage(config::policy::PolicyState::new())
+        .manage(auth::AuthState::new())
+        .manage(rbac::RbacState::new())
+        .manage(ai::AiState::new())
         .manage(terminal::TerminalManager::new())
         .manage(ssh::SshState::new())
         .manage(sftp::SftpState::new())
@@ -417,6 +424,46 @@ pub fn run() {
             // Importer
             importer::import_detect_sources,
             importer::import_parse_source,
+            // Shared vault (Curve25519 envelope crypto)
+            vault::shared::vault_generate_keypair,
+            vault::shared::vault_share_with,
+            vault::shared::vault_revoke_share,
+            vault::shared::vault_open_envelope,
+            // RBAC / Team management
+            rbac::rbac_list_members,
+            rbac::rbac_add_member,
+            rbac::rbac_update_member_role,
+            rbac::rbac_remove_member,
+            rbac::rbac_get_team_config,
+            rbac::rbac_update_team_config,
+            rbac::rbac_check_permission,
+            // OIDC SSO
+            auth::auth_oidc_begin,
+            auth::auth_save_oidc_config,
+            auth::auth_list_oidc_configs,
+            auth::auth_delete_oidc_config,
+            // Recording policy
+            config::policy::policy_get,
+            config::policy::policy_update,
+            config::policy::policy_check_recording_required,
+            config::policy::policy_check_connection_allowed,
+            config::policy::policy_reset_to_defaults,
+            // AI command assistant
+            ai::ai_check_available,
+            ai::ai_suggest_command,
+            ai::ai_explain_output,
+            ai::ai_set_model,
+            ai::ai_get_config,
+            // Sync (encrypted packages)
+            sync::sync_create_package,
+            sync::sync_import_package,
+            sync::sync_generate_share_code,
+            sync::sync_parse_share_code,
+            // Audit: syslog + anomaly detection
+            audit::audit_configure_syslog,
+            audit::audit_test_syslog,
+            audit::audit_detect_anomalies,
+            audit::audit_list_alerts,
             // Android
             android::android_start_foreground_service,
             android::android_stop_foreground_service,

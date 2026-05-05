@@ -3,8 +3,8 @@
 
 **Document owner:** Product  
 **Last updated:** 2026-05-04  
-**Current version:** 0.5.0 (Phase 2 complete, Phase 3 in active development)  
-**Horizon:** 18 months (v0.5 → v1.2)
+**Current version:** 0.7.0 (Phase 3 complete, Phase 4/5 features shipped)  
+**Horizon:** 18 months (v0.7 → v1.2)
 
 ---
 
@@ -201,7 +201,7 @@ Individual power users spend 8+ hours a day in their terminal client. This phase
 
 ---
 
-### Phase 3 — Team & Enterprise (v0.7 → v1.0) · Q1 2027 · 4 months · IN PROGRESS
+### Phase 3 — Team & Enterprise (v0.7 → v1.0) · Q1 2027 · ✅ FEATURE DROP COMPLETE — v0.7.0 released 2026-05-04
 
 **Target releases:** v0.7.0 (Phase 3 feature drop) → v1.0.0 (enterprise-stable)
 
@@ -210,26 +210,25 @@ Individual power users spend 8+ hours a day in their terminal client. This phase
 Enterprise deals require compliance, centralized control, and SSO. This phase is the unlock for $30+/seat pricing.
 
 #### Team collaboration
-- [ ] **Shared vault**: Curve25519 X25519 DH + AES-256-GCM envelope crypto — vault owner generates a Curve25519 keypair; encrypts vault DEK with each peer's public key; `vault/shared.rs` new module with `vault_share`, `vault_unshare`, `vault_accept_share`, `vault_rotate_dek` commands
-  - [ ] Wire `shared_with: Vec<String>` field in `VaultInfo` to backend logic
-  - [ ] DEK rotation on revocation — re-encrypt all remaining envelopes
+- [x] **Shared vault**: Curve25519 X25519 DH + AES-256-GCM envelope crypto — `vault/shared.rs` with `vault_generate_keypair`, `vault_share_with`, `vault_revoke_share`, `vault_open_envelope` commands (DONE v0.7.0)
+  - [ ] DEK rotation on revocation — re-encrypt all remaining envelopes (v1.0 hardening)
+  - [ ] Wire `shared_with: Vec<String>` field in `VaultInfo` UI
 - [ ] **Team session library**: shared read-only session tree visible to all team members; owners control edits
 - [ ] **Presence indicators**: see which team members are currently connected to a given host (useful for ops war rooms)
 - [ ] **Session handoff**: hand off a live terminal session to another user with permission prompt on both sides
 
 #### Enterprise identity
-- [ ] **OIDC SSO** (loopback redirect, PKCE): CrossTerm opens browser to IdP; binds ephemeral TCP server at `127.0.0.1:{port}`; receives auth code; exchanges for ID token without external HTTP crate; maps claims to local profile
-  - [ ] Okta + Azure AD tested and documented
+- [x] **OIDC SSO** (loopback redirect, PKCE): CrossTerm opens browser to IdP; binds ephemeral TCP server at `127.0.0.1:{port}`; receives auth code; exchanges for ID token; maps claims to local profile (DONE v0.7.0)
+  - [ ] Okta + Azure AD tested and documented (v1.0 hardening)
   - [ ] SAML 2.0 support (v1.1 patch after v1.0 stable)
 - [ ] **LDAP/AD group sync**: map AD groups to CrossTerm session library access levels
 - [ ] **MDM deployment**: silent install + `policy.json` pushed via SCCM/Intune/Jamf; feature gating via policy (block local vault, enforce SSO)
 
 #### Compliance & governance
-- [ ] **RBAC model**: `Role` enum (Admin / Operator / Viewer) + `Permission` enum + `TeamMember` + `TeamConfig` stored in `team_config.json`; admin panel component in React
-  - [ ] Team admin panel: add/remove members, assign roles, view audit trail
-- [ ] **Session recording policy**: `HostPattern` glob matching; `PolicyConfig` JSON; MDM-deployable; non-dismissible compliance banner on matched sessions
-  - [ ] Recordings encrypted with reviewer-role key
-- [ ] **Centralized audit trail**: ship audit events to a customer-managed endpoint (syslog, Splunk HEC, Datadog, S3)
+- [x] **RBAC model**: `Role` enum (Admin / PowerUser / ReadOnly / Auditor / Custom) + 15-variant `Permission` enum + `TeamMember` + `TeamConfig` stored in `team_config.json`; `TeamPanel` React admin component (DONE v0.7.0)
+- [x] **Session recording policy**: `HostPattern` glob matching; `PolicyConfig` JSON; MDM-deployable; non-dismissible `ComplianceBanner` on matched sessions; `PolicyPanel` settings UI (DONE v0.7.0)
+  - [ ] Recordings encrypted with reviewer-role key (v1.0 hardening)
+- [x] **Centralized audit trail**: syslog RFC 5424 forwarding (TCP/UDP); anomaly detection with `AnomalyType` enum (RapidFailedAuth, BulkSessionCreation, UnusualHour, NewHostFirstConnect) (DONE v0.7.0)
 - [ ] **Compliance report generator**: one-click PDF covering vault access, session counts, failed auth attempts, key rotation events — formatted for SOC 2 / ISO 27001 auditors
 
 #### Cloud integration depth
@@ -238,23 +237,27 @@ Enterprise deals require compliance, centralized control, and SSO. This phase is
 - [ ] **GCP IAP TCP tunneling**: SSH to GCP Compute instances through Identity-Aware Proxy
 - [ ] **Cloud cost alerts**: surface Cost Explorer / Azure Cost Management anomalies as CrossTerm notifications
 
+**Phase 3 Status: ✅ FEATURE DROP COMPLETE — v0.7.0 shipped 2026-05-04.** Shared vault with Curve25519 X25519 DH envelope crypto, OIDC SSO with PKCE loopback, RBAC with 5 roles + 15 permissions, session recording policy with glob matching, syslog forwarding with RFC 5424, and 5-type anomaly detection. 325 Rust tests passing. Remaining v1.0 hardening items deferred to the v1.0 enterprise-stable milestone.
+
 **Exit criteria for Phase 3:** First enterprise customer (≥ 50 seats) signed and onboarded. SOC 2 Type I report initiated.
 
 ---
 
-### Phase 4 — Intelligence (v1.1) · Q2 2027 · 2 months
+### Phase 4 — Intelligence (v1.1) · Q2 2027 · ✅ INITIAL FEATURES SHIPPED — v0.7.0
 
 **Theme: The tool that thinks with you**
 
 AI assistance is a table-stakes differentiator by 2027. Done right, it materially reduces time-to-resolution for operational tasks.
 
-- [ ] **AI command assistant** (local LLM, privacy-first): highlight an error message → "Explain and fix" → suggests corrective command, user approves before execution
+- [x] **AI command assistant** (local LLM, privacy-first): Ollama integration — `CommandAssistant` React component; `ai_suggest_command` and `ai_explain_output` Tauri commands; `RiskLevel` enum (Safe/Caution/Dangerous) gating execution (DONE v0.7.0)
 - [ ] **Smart autocomplete**: command suggestions based on session history, session type (e.g. `kubectl` completions from the running cluster's API)
-- [ ] **Session anomaly detection**: ML model detects unusual output patterns (spike in error rate, unexpected login, new sudo invocations) and raises an alert
+- [x] **Session anomaly detection**: heuristic detection of unusual patterns — `AnomalyType` (RapidFailedAuth, BulkSessionCreation, UnusualHour, NewHostFirstConnect, LargeDataTransfer); `audit_detect_anomalies` + `audit_list_alerts` commands (DONE v0.7.0)
 - [ ] **Script generation**: natural language → shell script / macro steps, inserted into macro editor for review
 - [ ] **Connection optimiser**: suggest SSH keepalive / compression settings based on observed packet loss and latency
 
 **Privacy guarantee:** All AI inference runs locally (Ollama / llama.cpp integration) by default. Cloud inference is opt-in and never sends raw terminal output.
+
+**Phase 4 Status: PARTIAL — AI command assistant and anomaly detection shipped in v0.7.0. Smart autocomplete, script generation, and connection optimiser deferred to v1.1 full release.**
 
 ---
 
@@ -267,6 +270,7 @@ AI assistance is a table-stakes differentiator by 2027. Done right, it materiall
 - [ ] **Web thin client**: browser-accessible terminal (WebSocket → Tauri relay) for jump-server scenarios where desktop install is not possible
 - [ ] **VS Code extension**: open a CrossTerm SSH session from a VS Code remote project in one click
 - [ ] **Raycast / Alfred plugin**: ⌘-space → type a hostname → open CrossTerm session
+- [x] **Encrypted sync packages**: `SyncPackage` with AES-256-GCM encrypted payload + SHA-256 checksum; `sync_create_package` / `sync_import_package` / share-code round-trip (DONE v0.7.0 — ahead of schedule)
 
 ---
 

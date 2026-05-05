@@ -206,9 +206,12 @@ fn format_syslog_message(entry: &AuditEvent, config: &SyslogConfig) -> String {
     let severity: u8 = 6;
     let pri = (config.facility as u16) * 8 + (severity as u16);
 
-    let hostname = hostname::get()
+    let hostname: String = std::process::Command::new("hostname")
+        .output()
         .ok()
-        .and_then(|h| h.into_string().ok())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "-".to_string());
 
     // Structured data: encode event_type and details as SD params.

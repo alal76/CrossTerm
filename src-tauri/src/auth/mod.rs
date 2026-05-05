@@ -420,8 +420,9 @@ pub async fn auth_oidc_begin(
     let state = generate_state();
     let url = build_auth_url(&config, &redirect_uri, &challenge, &state);
 
-    // Step 3 — open browser
-    tauri_plugin_shell::open(&app.shell(), &url, None)
+    // Step 3 — open browser using the ShellExt trait
+    app.shell()
+        .open(&url, None)
         .map_err(|e| format!("Failed to open browser: {e}"))?;
 
     // Step 4 — wait for redirect (120 s timeout)
