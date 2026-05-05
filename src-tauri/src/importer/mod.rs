@@ -23,7 +23,9 @@ pub struct ImportSource {
 pub enum ImportSourceType {
     SshConfig,
     PuttyRegistry, // Windows only
+    #[allow(dead_code)]
     SecureCrt,
+    #[allow(dead_code)]
     MobaXterm,
 }
 
@@ -40,6 +42,7 @@ pub struct ImportedSession {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[allow(dead_code)]
 pub struct ImportResult {
     pub imported: usize,
     pub skipped: usize,

@@ -2776,11 +2776,13 @@ pub struct WebRelayStatus {
     pub started_at: Option<String>,
 }
 
+#[allow(dead_code)]
 pub struct WebRelayState {
     config: Arc<Mutex<Option<WebRelayConfig>>>,
     status: Arc<Mutex<WebRelayStatus>>,
 }
 
+#[allow(dead_code)]
 impl WebRelayState {
     pub fn new() -> Self {
         Self {

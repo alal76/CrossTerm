@@ -226,6 +226,7 @@ fn format_syslog_message(entry: &AuditEvent, config: &SyslogConfig) -> String {
         .replace('"', "\\\"")
         .replace(']', "\\]");
 
+    let msg = format!("{}: {}", event_type_str, entry.details);
     format!(
         "<{pri}>1 {ts} {host} {app} - - [crossterm@57137 event_type=\"{et}\" details=\"{det}\"] {msg}",
         pri = pri,
@@ -234,7 +235,6 @@ fn format_syslog_message(entry: &AuditEvent, config: &SyslogConfig) -> String {
         app = config.app_name,
         et = event_type_str,
         det = escaped_details,
-        msg = format!("{}: {}", event_type_str, entry.details),
     )
 }
 
@@ -366,7 +366,7 @@ fn is_after_hours(ts: &DateTime<Utc>) -> bool {
     use chrono::Timelike;
     let local = ts.with_timezone(&chrono::Local);
     let hour = local.hour();
-    hour < 8 || hour >= 18
+    !(8..18).contains(&hour)
 }
 
 /// Classify whether an event is considered a "failed authentication".

@@ -6,6 +6,7 @@ use thiserror::Error;
 /// so the frontend can branch on `error.code` instead of parsing strings.
 #[derive(Debug, Error, Serialize)]
 #[serde(rename_all = "snake_case", tag = "code")]
+#[allow(dead_code)]
 pub enum AppError {
     #[error("Authentication failed")]
     AuthFailed { message: String },
@@ -39,6 +40,7 @@ pub enum AppError {
     Internal { message: String },
 }
 
+#[allow(dead_code)]
 impl AppError {
     pub fn internal(msg: impl Into<String>) -> Self {
         AppError::Internal { message: msg.into() }

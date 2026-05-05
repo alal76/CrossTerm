@@ -5,7 +5,7 @@ use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use tauri_plugin_shell::ShellExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 use tokio::time::{timeout, Duration};
 
@@ -359,7 +359,7 @@ fn generate_state() -> String {
 /// Extract a named query parameter from a raw HTTP request path such as
 /// `/callback?code=abc&state=xyz`.
 fn extract_query_param(path: &str, key: &str) -> Option<String> {
-    let query = path.splitn(2, '?').nth(1)?;
+    let query = path.split_once('?')?.1;
     for pair in query.split('&') {
         let mut kv = pair.splitn(2, '=');
         if let (Some(k), Some(v)) = (kv.next(), kv.next()) {
@@ -421,6 +421,7 @@ pub async fn auth_oidc_begin(
     let url = build_auth_url(&config, &redirect_uri, &challenge, &state);
 
     // Step 3 — open browser using the ShellExt trait
+    #[allow(deprecated)]
     app.shell()
         .open(&url, None)
         .map_err(|e| format!("Failed to open browser: {e}"))?;

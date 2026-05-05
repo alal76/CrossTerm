@@ -52,6 +52,7 @@ pub struct UserKeyPair {
     /// The field is excluded from JSON serialisation to prevent the frontend
     /// from ever seeing encrypted key material.
     #[serde(skip_serializing)]
+    #[allow(dead_code)]
     pub private_key_encrypted: String,
 }
 
@@ -80,6 +81,7 @@ pub struct SharedEnvelope {
 /// `SharedEnvelope` per authorised user (including, optionally, the owner's
 /// own envelope for re-unlocking via DH rather than password).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[allow(dead_code)]
 pub struct VaultSharingManifest {
     /// The owner's long-term X25519 public key, if one has been generated.
     pub owner_public_key: Option<String>,
@@ -143,7 +145,7 @@ pub fn generate_user_key_pair(kek: &[u8]) -> Result<UserKeyPair, String> {
     }
 
     // Generate a fresh static X25519 secret (stored long-term, hence StaticSecret).
-    let private_key = StaticSecret::random_from_rng(&mut OsRng);
+    let private_key = StaticSecret::random_from_rng(OsRng);
     let public_key = PublicKey::from(&private_key);
 
     // Encrypt the raw private key bytes under the caller's KEK.
@@ -187,7 +189,7 @@ pub fn create_sharing_envelope(
     let recipient_pub = PublicKey::from(recipient_pub_array);
 
     // Generate an ephemeral X25519 key pair.
-    let ephemeral_secret = EphemeralSecret::random_from_rng(&mut OsRng);
+    let ephemeral_secret = EphemeralSecret::random_from_rng(OsRng);
     let ephemeral_public = PublicKey::from(&ephemeral_secret);
 
     // Perform X25519 DH to get the shared secret.
@@ -289,6 +291,7 @@ pub fn open_sharing_envelope(
 ///
 /// This is the revocation operation: after this call the corresponding user can
 /// no longer open the vault (assuming the DEK or the manifest is rotated).
+#[allow(dead_code)]
 pub fn revoke_access(manifest: &mut VaultSharingManifest, recipient_public_key: &str) {
     manifest
         .envelopes
@@ -299,6 +302,7 @@ pub fn revoke_access(manifest: &mut VaultSharingManifest, recipient_public_key: 
 ///
 /// If an envelope already exists for the same `recipient_public_key` it is
 /// replaced with the new one.  Otherwise the new envelope is appended.
+#[allow(dead_code)]
 pub fn add_envelope(manifest: &mut VaultSharingManifest, envelope: SharedEnvelope) {
     // Remove any existing envelope for the same recipient.
     manifest
@@ -400,6 +404,7 @@ pub fn vault_open_envelope(
 /// # Returns
 /// The newly generated 32-byte DEK wrapped in `Ok`.  Every existing envelope
 /// is replaced with a fresh envelope encrypted under the new DEK.
+#[allow(dead_code)]
 pub fn rotate_dek(manifest: &mut VaultSharingManifest, _old_dek: &[u8]) -> Result<Vec<u8>, String> {
     // 1. Generate a fresh random 32-byte DEK.
     let mut new_dek = vec![0u8; 32];

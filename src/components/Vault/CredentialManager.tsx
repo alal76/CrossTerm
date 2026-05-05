@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import clsx from "clsx";
 import {
@@ -388,6 +388,29 @@ export default function CredentialManager({ onClose }: { readonly onClose: () =>
     username: string | null;
   } | null>(null);
 
+  // ── Delete confirm guard ──
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleDeleteGuard = useCallback((credId: string) => {
+    if (pendingDeleteId === credId) {
+      clearTimeout(deleteTimerRef.current!);
+      setPendingDeleteId(null);
+      deleteCredential(credId);
+    } else {
+      if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+      setPendingDeleteId(credId);
+      deleteTimerRef.current = setTimeout(() => setPendingDeleteId(null), 2000);
+    }
+  }, [pendingDeleteId, deleteCredential]);
+
+  // Clean up timer on unmount
+  useEffect(() => {
+    return () => {
+      if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+    };
+  }, []);
+
   useEffect(() => {
     fetchCredentials();
   }, [fetchCredentials]);
@@ -502,11 +525,16 @@ export default function CredentialManager({ onClose }: { readonly onClose: () =>
                         <Pencil size={13} />
                       </button>
                       <button
-                        onClick={() => deleteCredential(cred.id)}
-                        className="p-1 rounded hover:bg-status-disconnected/10 text-text-secondary hover:text-status-disconnected transition-colors duration-[var(--duration-micro)]"
-                        title={t("sessions.delete")}
+                        onClick={() => handleDeleteGuard(cred.id)}
+                        className={clsx(
+                          "p-1 rounded transition-colors duration-[var(--duration-micro)]",
+                          pendingDeleteId === cred.id
+                            ? "border border-status-disconnected text-status-disconnected bg-status-disconnected/10 px-2 text-[10px] font-medium rounded-md"
+                            : "hover:bg-status-disconnected/10 text-text-secondary hover:text-status-disconnected"
+                        )}
+                        title={pendingDeleteId === cred.id ? "Click again to confirm delete" : t("sessions.delete")}
                       >
-                        <Trash2 size={13} />
+                        {pendingDeleteId === cred.id ? "Confirm?" : <Trash2 size={13} />}
                       </button>
                     </div>
                   </div>

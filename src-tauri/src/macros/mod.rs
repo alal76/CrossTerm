@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -847,4 +847,575 @@ mod tests {
         assert_ne!(reimported.id, m.id);
         assert_eq!(macros.len(), 2);
     }
+
+    // ── Feature 1 tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_dry_run_send_step() {
+        let steps = vec![serde_json::json!({ "type": "send", "input": "ls -la\n" })];
+        let results = dry_run_macro(&steps);
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].simulated_output.starts_with("→ SEND:"),
+            "Expected output to start with '→ SEND:', got: {}",
+            results[0].simulated_output
+        );
+        assert!(results[0].would_match);
+        assert_eq!(results[0].duration_ms, 10);
+    }
+
+    #[test]
+    fn test_dry_run_expect_step() {
+        let steps = vec![serde_json::json!({ "type": "expect", "pattern": "\\$" })];
+        let results = dry_run_macro(&steps);
+        assert_eq!(results.len(), 1);
+        assert!(results[0].would_match);
+        assert_eq!(results[0].duration_ms, 100);
+    }
+
+    #[test]
+    fn test_dry_run_mixed_steps() {
+        let steps = vec![
+            serde_json::json!({ "type": "send", "input": "echo hi" }),
+            serde_json::json!({ "type": "expect", "pattern": "hi" }),
+            serde_json::json!({ "type": "sleep", "duration": 250 }),
+        ];
+        let results = dry_run_macro(&steps);
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].step_type, "send");
+        assert_eq!(results[1].step_type, "expect");
+        assert_eq!(results[2].step_type, "sleep");
+        assert_eq!(results[2].duration_ms, 250);
+    }
+
+    // ── Feature 2 tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_builtin_library_not_empty() {
+        let macros = builtin_macro_library();
+        assert!(macros.len() >= 6, "Expected at least 6 built-in macros, got {}", macros.len());
+    }
+
+    #[test]
+    fn test_builtin_categories_valid() {
+        let macros = builtin_macro_library();
+        for m in &macros {
+            assert!(!m.name.is_empty(), "Macro name must not be empty");
+            assert!(!m.category.is_empty(), "Macro category must not be empty");
+        }
+    }
+
+    // ── Feature 3 tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_cron_parse_every_5_minutes() {
+        let result = parse_cron_next("*/5 * * * *", "2026-01-01T10:00:00Z");
+        assert_eq!(result, Some("2026-01-01T10:05:00Z".to_string()));
+    }
+
+    #[test]
+    fn test_cron_parse_top_of_hour() {
+        let result = parse_cron_next("0 * * * *", "2026-01-01T10:15:00Z");
+        assert_eq!(result, Some("2026-01-01T11:00:00Z".to_string()));
+    }
+
+    #[test]
+    fn test_cron_parse_unsupported() {
+        let result = parse_cron_next("1,5,10 * * * *", "2026-01-01T10:00:00Z");
+        assert_eq!(result, None);
+    }
+
+    // ── Feature 4 tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_capture_named_groups() {
+        let caps = apply_expect_captures(r"(?P<host>[^:]+):(?P<port>\d+)", "server.example.com:22");
+        assert_eq!(caps.get("host").map(|s| s.as_str()), Some("server.example.com"));
+        assert_eq!(caps.get("port").map(|s| s.as_str()), Some("22"));
+    }
+
+    #[test]
+    fn test_capture_positional_groups() {
+        let caps = apply_expect_captures(r"(\w+)\s+(\w+)", "hello world");
+        assert_eq!(caps.get("1").map(|s| s.as_str()), Some("hello"));
+        assert_eq!(caps.get("2").map(|s| s.as_str()), Some("world"));
+    }
+
+    #[test]
+    fn test_capture_no_match() {
+        let caps = apply_expect_captures(r"\d{4}", "no digits here");
+        assert!(caps.is_empty());
+    }
+
+    #[test]
+    fn test_substitute_variables() {
+        let mut vars = HashMap::new();
+        vars.insert("host".to_string(), "srv".to_string());
+        vars.insert("port".to_string(), "22".to_string());
+        let result = substitute_variables("Connect to ${host} on ${port}", &vars);
+        assert_eq!(result, "Connect to srv on 22");
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Feature 1: Macro dry-run mode
+// ════════════════════════════════════════════════════════════════════════════
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct DryRunResult {
+    pub step_index: usize,
+    pub step_type: String,
+    pub input: Option<String>,
+    pub expected_pattern: Option<String>,
+    pub simulated_output: String,
+    pub would_match: bool,
+    pub duration_ms: u64,
+}
+
+#[allow(dead_code)]
+pub fn dry_run_macro(steps: &[serde_json::Value]) -> Vec<DryRunResult> {
+    steps
+        .iter()
+        .enumerate()
+        .map(|(idx, step)| {
+            let step_type = step
+                .get("type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string();
+
+            match step_type.as_str() {
+                "send" => {
+                    let input = step
+                        .get("input")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    DryRunResult {
+                        step_index: idx,
+                        step_type: "send".to_string(),
+                        input: Some(input.clone()),
+                        expected_pattern: None,
+                        simulated_output: format!("→ SEND: {}", input),
+                        would_match: true,
+                        duration_ms: 10,
+                    }
+                }
+                "expect" => {
+                    let pattern = step
+                        .get("pattern")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    DryRunResult {
+                        step_index: idx,
+                        step_type: "expect".to_string(),
+                        input: None,
+                        expected_pattern: Some(pattern.clone()),
+                        simulated_output: format!("← EXPECT: {} [SIMULATED MATCH]", pattern),
+                        would_match: true,
+                        duration_ms: 100,
+                    }
+                }
+                "sleep" => {
+                    let duration = step
+                        .get("duration")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    DryRunResult {
+                        step_index: idx,
+                        step_type: "sleep".to_string(),
+                        input: None,
+                        expected_pattern: None,
+                        simulated_output: format!("⏱ SLEEP {}ms", duration),
+                        would_match: true,
+                        duration_ms: duration,
+                    }
+                }
+                _ => DryRunResult {
+                    step_index: idx,
+                    step_type,
+                    input: None,
+                    expected_pattern: None,
+                    simulated_output: format!("? UNKNOWN STEP: {:?}", step),
+                    would_match: false,
+                    duration_ms: 0,
+                },
+            }
+        })
+        .collect()
+}
+
+#[tauri::command]
+#[allow(dead_code)]
+pub fn macro_dry_run(
+    steps: Vec<serde_json::Value>,
+    _state: tauri::State<'_, MacroState>,
+) -> Result<Vec<DryRunResult>, String> {
+    Ok(dry_run_macro(&steps))
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Feature 2: Built-in macro library
+// ════════════════════════════════════════════════════════════════════════════
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct BuiltinMacro {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub category: String,
+    pub tags: Vec<String>,
+    pub steps: Vec<serde_json::Value>,
+}
+
+#[allow(dead_code)]
+pub fn builtin_macro_library() -> Vec<BuiltinMacro> {
+    vec![
+        BuiltinMacro {
+            id: "disk-usage".to_string(),
+            name: "Disk Usage".to_string(),
+            description: "Show disk usage for all mounted filesystems".to_string(),
+            category: "monitoring".to_string(),
+            tags: vec!["disk".to_string(), "storage".to_string()],
+            steps: vec![
+                serde_json::json!({ "type": "send", "input": "df -h\n" }),
+                serde_json::json!({ "type": "expect", "pattern": "%" }),
+            ],
+        },
+        BuiltinMacro {
+            id: "memory-usage".to_string(),
+            name: "Memory Usage".to_string(),
+            description: "Show current memory usage statistics".to_string(),
+            category: "monitoring".to_string(),
+            tags: vec!["memory".to_string(), "ram".to_string()],
+            steps: vec![
+                serde_json::json!({ "type": "send", "input": "free -h\n" }),
+                serde_json::json!({ "type": "expect", "pattern": "Mem:" }),
+            ],
+        },
+        BuiltinMacro {
+            id: "top-processes".to_string(),
+            name: "Top Processes by CPU".to_string(),
+            description: "List the top 10 processes sorted by CPU usage".to_string(),
+            category: "monitoring".to_string(),
+            tags: vec!["cpu".to_string(), "processes".to_string()],
+            steps: vec![
+                serde_json::json!({ "type": "send", "input": "ps aux --sort=-%cpu | head -10\n" }),
+            ],
+        },
+        BuiltinMacro {
+            id: "docker-ps".to_string(),
+            name: "Docker Container Status".to_string(),
+            description: "List running Docker containers with name, status and ports".to_string(),
+            category: "docker".to_string(),
+            tags: vec!["docker".to_string(), "containers".to_string()],
+            steps: vec![
+                serde_json::json!({ "type": "send", "input": "docker ps --format \"table {{.Names}}\\t{{.Status}}\\t{{.Ports}}\"\n" }),
+                serde_json::json!({ "type": "expect", "pattern": "NAMES" }),
+            ],
+        },
+        BuiltinMacro {
+            id: "k8s-pod-status".to_string(),
+            name: "Kubernetes Pod Status".to_string(),
+            description: "List all pods across all namespaces".to_string(),
+            category: "kubernetes".to_string(),
+            tags: vec!["k8s".to_string(), "pods".to_string(), "kubernetes".to_string()],
+            steps: vec![
+                serde_json::json!({ "type": "send", "input": "kubectl get pods -A\n" }),
+                serde_json::json!({ "type": "expect", "pattern": "NAME" }),
+            ],
+        },
+        BuiltinMacro {
+            id: "log-tail".to_string(),
+            name: "Tail System Log".to_string(),
+            description: "Show the last 100 lines of the system log".to_string(),
+            category: "monitoring".to_string(),
+            tags: vec!["logs".to_string(), "syslog".to_string()],
+            steps: vec![
+                serde_json::json!({ "type": "send", "input": "tail -100 /var/log/syslog || tail -100 /var/log/messages\n" }),
+            ],
+        },
+    ]
+}
+
+#[tauri::command]
+#[allow(dead_code)]
+pub fn macro_list_builtins(
+    _state: tauri::State<'_, MacroState>,
+) -> Result<Vec<BuiltinMacro>, String> {
+    Ok(builtin_macro_library())
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Feature 3: Scheduled macros
+// ════════════════════════════════════════════════════════════════════════════
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct MacroSchedule {
+    pub id: String,
+    pub macro_id: String,
+    pub session_id: String,
+    pub cron_expression: String,
+    pub enabled: bool,
+    pub last_run: Option<String>,
+    pub next_run: Option<String>,
+    pub run_count: u32,
+}
+
+/// Parse a simplified cron expression and return the next run time after `from_iso`.
+///
+/// Supported minute fields:
+/// - `*/N` — next multiple of N minutes after from_iso (advancing at least 1 minute)
+/// - `M`   — a specific minute number; advance to next occurrence (possibly next hour)
+///
+/// Everything else (lists, ranges, etc.) returns None.
+#[allow(dead_code)]
+pub fn parse_cron_next(cron_expr: &str, from_iso: &str) -> Option<String> {
+    // Split cron: minute hour dom month dow
+    let parts: Vec<&str> = cron_expr.split_whitespace().collect();
+    if parts.len() != 5 {
+        return None;
+    }
+
+    let minute_field = parts[0];
+
+    // Parse date+time from ISO 8601: "YYYY-MM-DDTHH:MM:SS..."
+    let (date_part, time_part) = {
+        let t_pos = from_iso.find('T')?;
+        (&from_iso[..t_pos], &from_iso[t_pos + 1..])
+    };
+
+    // Parse HH:MM from time_part (ignore seconds and timezone for calculation)
+    let time_components: Vec<&str> = time_part.splitn(3, ':').collect();
+    if time_components.len() < 2 {
+        return None;
+    }
+    let from_hour: u32 = time_components[0].parse().ok()?;
+    let from_minute: u32 = time_components[1]
+        .trim_end_matches(|c: char| !c.is_ascii_digit())
+        .parse()
+        .ok()?;
+
+    // Total minutes since midnight for the "from" time
+    let from_total_minutes = from_hour * 60 + from_minute;
+
+    if let Some(interval_str) = minute_field.strip_prefix("*/") {
+        // Interval mode: */N
+        let interval: u32 = interval_str.parse().ok()?;
+        if interval == 0 {
+            return None;
+        }
+
+        // Next multiple of interval strictly after from_total_minutes
+        let next_total = (from_total_minutes / interval + 1) * interval;
+        let next_hour = next_total / 60;
+        let next_minute = next_total % 60;
+
+        if next_hour < 24 {
+            // Same day
+            Some(format!(
+                "{}T{:02}:{:02}:00Z",
+                date_part, next_hour, next_minute
+            ))
+        } else {
+            // Would overflow into the next day — advance date by 1
+            let next_date = advance_date_by_one(date_part)?;
+            let wrapped_hour = next_hour % 24;
+            Some(format!(
+                "{}T{:02}:{:02}:00Z",
+                next_date, wrapped_hour, next_minute
+            ))
+        }
+    } else if !minute_field.contains(',')
+        && !minute_field.contains('-')
+        && !minute_field.contains('/')
+        && minute_field != "*"
+    {
+        // Specific minute: M
+        let target_minute: u32 = minute_field.parse().ok()?;
+        if target_minute > 59 {
+            return None;
+        }
+
+        // If from_minute < target_minute, fire this hour; otherwise fire next hour
+        if from_minute < target_minute {
+            Some(format!(
+                "{}T{:02}:{:02}:00Z",
+                date_part, from_hour, target_minute
+            ))
+        } else {
+            let next_hour = from_hour + 1;
+            if next_hour < 24 {
+                Some(format!(
+                    "{}T{:02}:{:02}:00Z",
+                    date_part, next_hour, target_minute
+                ))
+            } else {
+                let next_date = advance_date_by_one(date_part)?;
+                Some(format!("{}T00:{:02}:00Z", next_date, target_minute))
+            }
+        }
+    } else {
+        // Unsupported expression
+        None
+    }
+}
+
+/// Advance an ISO date string ("YYYY-MM-DD") by one calendar day.
+#[allow(dead_code)]
+fn advance_date_by_one(date: &str) -> Option<String> {
+    let parts: Vec<&str> = date.split('-').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let year: u32 = parts[0].parse().ok()?;
+    let month: u32 = parts[1].parse().ok()?;
+    let day: u32 = parts[2].parse().ok()?;
+
+    let days_in_month = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            if (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0) {
+                29
+            } else {
+                28
+            }
+        }
+        _ => return None,
+    };
+
+    if day < days_in_month {
+        Some(format!("{:04}-{:02}-{:02}", year, month, day + 1))
+    } else if month < 12 {
+        Some(format!("{:04}-{:02}-01", year, month + 1))
+    } else {
+        Some(format!("{:04}-01-01", year + 1))
+    }
+}
+
+// Module-level storage for schedules (avoids modifying MacroState).
+#[allow(dead_code)]
+static MACRO_SCHEDULES: std::sync::OnceLock<Arc<Mutex<Vec<MacroSchedule>>>> =
+    std::sync::OnceLock::new();
+
+#[allow(dead_code)]
+fn get_schedules() -> Arc<Mutex<Vec<MacroSchedule>>> {
+    MACRO_SCHEDULES
+        .get_or_init(|| Arc::new(Mutex::new(Vec::new())))
+        .clone()
+}
+
+#[tauri::command]
+#[allow(dead_code)]
+pub fn macro_schedule_create(
+    schedule: MacroSchedule,
+    _state: tauri::State<'_, MacroState>,
+) -> Result<(), String> {
+    let schedules = get_schedules();
+    let mut list = schedules.lock().map_err(|e| e.to_string())?;
+    list.push(schedule);
+    Ok(())
+}
+
+#[tauri::command]
+#[allow(dead_code)]
+pub fn macro_schedule_list(
+    _state: tauri::State<'_, MacroState>,
+) -> Result<Vec<MacroSchedule>, String> {
+    let schedules = get_schedules();
+    let list = schedules.lock().map_err(|e| e.to_string())?;
+    Ok(list.clone())
+}
+
+#[tauri::command]
+#[allow(dead_code)]
+pub fn macro_schedule_delete(
+    id: String,
+    _state: tauri::State<'_, MacroState>,
+) -> Result<(), String> {
+    let schedules = get_schedules();
+    let mut list = schedules.lock().map_err(|e| e.to_string())?;
+    let before = list.len();
+    list.retain(|s| s.id != id);
+    if list.len() == before {
+        Err(format!("Schedule not found: {}", id))
+    } else {
+        Ok(())
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Feature 4: Expect rule improvements — regex capture groups
+// ════════════════════════════════════════════════════════════════════════════
+
+/// Apply a regex pattern to `text` and return a map of capture group name/index → captured text.
+/// Named groups use their name as key; positional groups use "1", "2", etc.
+/// Returns an empty map if the pattern fails to compile or finds no match.
+#[allow(dead_code)]
+pub fn apply_expect_captures(pattern: &str, text: &str) -> HashMap<String, String> {
+    let re = match regex::Regex::new(pattern) {
+        Ok(r) => r,
+        Err(_) => return HashMap::new(),
+    };
+
+    let caps = match re.captures(text) {
+        Some(c) => c,
+        None => return HashMap::new(),
+    };
+
+    let mut result = HashMap::new();
+
+    // Positional groups (skip index 0 which is the full match)
+    for i in 1..caps.len() {
+        if let Some(m) = caps.get(i) {
+            result.insert(i.to_string(), m.as_str().to_string());
+        }
+    }
+
+    // Named groups override positional entries for the same capture
+    for name in re.capture_names().flatten() {
+        if let Some(m) = caps.name(name) {
+            result.insert(name.to_string(), m.as_str().to_string());
+        }
+    }
+
+    result
+}
+
+/// Replace `${varname}` placeholders in `template` with values from `vars`.
+/// Unknown variable references are left unchanged.
+#[allow(dead_code)]
+pub fn substitute_variables(template: &str, vars: &HashMap<String, String>) -> String {
+    // Walk through the template and replace ${...} occurrences.
+    let mut result = String::with_capacity(template.len());
+    let mut remaining = template;
+
+    while let Some(start) = remaining.find("${") {
+        result.push_str(&remaining[..start]);
+        let after_open = &remaining[start + 2..];
+        if let Some(end) = after_open.find('}') {
+            let var_name = &after_open[..end];
+            if let Some(value) = vars.get(var_name) {
+                result.push_str(value);
+            } else {
+                // Leave the placeholder intact
+                result.push_str("${");
+                result.push_str(var_name);
+                result.push('}');
+            }
+            remaining = &after_open[end + 1..];
+        } else {
+            // No closing brace — emit the rest as-is
+            result.push_str("${");
+            remaining = after_open;
+        }
+    }
+
+    result.push_str(remaining);
+    result
 }

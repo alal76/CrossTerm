@@ -923,13 +923,34 @@ export default function SessionTree({
     [sessions, favorites]
   );
 
-  // Recents
+  // Recents (legacy recentSessions store field)
   const recentItems = useMemo(() => {
     return recentSessions
       .slice(0, 5)
       .map((r) => sessions.find((s) => s.id === r.sessionId))
       .filter(Boolean) as Session[];
   }, [recentSessions, sessions]);
+
+  // Recently Connected: sessions with lastConnectedAt, sorted desc, top 5
+  const recentlyConnected = useMemo(() => {
+    return [...sessions]
+      .filter((s) => !!s.lastConnectedAt)
+      .sort((a, b) => new Date(b.lastConnectedAt!).getTime() - new Date(a.lastConnectedAt!).getTime())
+      .slice(0, 5);
+  }, [sessions]);
+
+  // Collapse state persisted to localStorage
+  const [recentlyCollapsed, setRecentlyCollapsed] = useState(
+    () => localStorage.getItem("ct_recent_collapsed") === "true"
+  );
+
+  const handleToggleRecentlyCollapsed = useCallback(() => {
+    setRecentlyCollapsed((prev) => {
+      const next = !prev;
+      localStorage.setItem("ct_recent_collapsed", String(next));
+      return next;
+    });
+  }, []);
 
   // Whether we're in "flat virtual list" mode (search active or smart group active)
   // vs. the normal hierarchical tree mode.
@@ -1082,6 +1103,44 @@ export default function SessionTree({
             onClearGroup={handleClearSmartGroup}
             onAddGroup={handleAddSmartGroup}
           />
+        )}
+
+        {/* Recently Connected */}
+        {recentlyConnected.length > 0 && !searchQuery && !activeSmartGroup && (
+          <div className="mb-3">
+            <div className="recently-connected-header flex items-center gap-1 px-2 py-1">
+              <button
+                className="flex items-center gap-1 flex-1 text-left"
+                onClick={handleToggleRecentlyCollapsed}
+              >
+                {recentlyCollapsed ? (
+                  <ChevronRight size={11} className="text-text-disabled shrink-0" />
+                ) : (
+                  <ChevronDown size={11} className="text-text-disabled shrink-0" />
+                )}
+                <span className="text-[10px] uppercase tracking-wider text-text-disabled flex items-center gap-1">
+                  <Clock size={10} />
+                  Recently Connected
+                </span>
+              </button>
+            </div>
+            {!recentlyCollapsed && (
+              <div>
+                {recentlyConnected.map((s) => (
+                  <SessionItem
+                    key={s.id}
+                    session={s}
+                    status={ConnectionStatus.Idle}
+                    isFavorite={favorites.includes(s.id)}
+                    isSelected={isSelected(s.id)}
+                    onContextMenu={handleSessionContextMenu}
+                    onClick={handleSessionClick}
+                    onToggleFavorite={toggleFavorite}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         )}
 
         {/* Favorites */}
