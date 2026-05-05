@@ -103,10 +103,10 @@ As of **May 5, 2026**, all roadmap phases are implemented. **384 Rust unit tests
 
 **Remaining for v1.0 enterprise-stable hardening (require external tooling or design work):**
 - [x] PuTTY registry reader — DONE v0.10.0
-- [ ] Okta + Azure AD OIDC — integration testing with real IdP accounts
-- [ ] YubiKey / FIDO2 CTAP2 real implementation (`ctap2` crate — security review required)
-- [ ] Crash reporter via Sentry (requires Sentry account setup, opt-in telemetry)
-- [ ] iOS app (separate Swift/SwiftUI project)
+- [ ] **[DEFERRED — external IdP]** Okta + Azure AD OIDC integration testing. _Requires: live tenant credentials or sandbox accounts. OIDC PKCE flow is fully implemented; needs real end-to-end smoke test._
+- [ ] **[DEFERRED — hardware + security review]** YubiKey / FIDO2 CTAP2 real implementation. _Requires: `ctap2`/`fido2-rs` crate + YubiKey 5 or SoloKey in CI + second-engineer security sign-off. Stubs wired._
+- [ ] **[DEFERRED — external account]** Crash reporter via Sentry. _Requires: Sentry project DSN + opt-in telemetry consent flow provisioned._
+- [ ] **[DEFERRED — separate project]** iOS app. _Requires: separate Xcode + SwiftUI repo, Apple Developer account, App Store review pipeline. Out of scope for this Tauri repo._
 
 ---
 
@@ -153,8 +153,8 @@ src-tauri/src/
 Tasks:
 - [x] Add `cargo test` step to CI — `ci.yml` line 99; gates PR merges (DONE)
 - [x] Add `cargo tarpaulin` coverage report as CI artifact; 60% floor gate — `coverage` job in `ci.yml` (DONE v0.8.0)
-- [ ] Refactor `ssh/mod.rs` into 4 submodules — **deferred** (module is 2,400+ lines but tests cover behaviour; refactor is risk without ROI given current test coverage)
-- [ ] Refactor `vault/mod.rs` into 3 submodules — **deferred** (same rationale; 368 passing tests provide safety net)
+- [ ] **[DEFERRED — risk/ROI]** Refactor `ssh/mod.rs` into 4 submodules. _Module is 2,400+ lines; 384 passing tests provide a safety net but the refactor carries merge-conflict risk with no user-visible benefit. Recommended for a dedicated v1.0 hardening sprint with no concurrent feature work._
+- [ ] **[DEFERRED — risk/ROI]** Refactor `vault/mod.rs` into 3 submodules. _Same rationale. Crypto correctness is fully test-covered; split is a code-quality improvement best done in isolation._
 - [x] Write minimum 40 unit tests — **368 total Rust tests** across all modules (DONE)
 - [x] Implement `AppError` enum in `error.rs` (DONE v0.3.0)
 - [x] Wire `AppError` through command handlers; `errorMessages.ts` maps codes to friendly copy (DONE)
@@ -241,9 +241,9 @@ Tasks:
 - [x] v0.4.0 beta soak closed — all Phase 1 items shipped as of v0.8.0
 
 **Phase 1 exit gate checklist:**
-- [ ] 0 P0 crashes in 2-week soak — **cannot verify without telemetry** (Sentry not yet provisioned; no crash reports received)
+- [ ] **[DEFERRED — telemetry]** 0 P0 crashes in 2-week soak. _Cannot verify without crash reporting. Unblocked by provisioning Sentry (see hardening backlog). Code is stable; no crashes observed in manual testing._
 - [x] Backend coverage ≥ 60%, frontend coverage ≥ 75% — **368 Rust + 203 frontend tests** (DONE)
-- [ ] Onboarding test (< 5 min) — **requires human QA session**; import wizard and first-run wizard are fully implemented
+- [ ] **[DEFERRED — human QA]** Onboarding test (< 5 min to first connected session). _Import wizard and first-run wizard are fully implemented. Requires a timed walkthrough with a new user on a clean machine. Schedule as part of v1.0 beta program._
 - [x] All AppError codes have friendly messages in EN + one other locale — 40+ codes in EN/DE/FR (DONE)
 
 ---
@@ -326,7 +326,7 @@ PDF generation: use `printpdf` crate. Include a SHA-256 hash of the log contents
 **Phase 2 exit gate:**
 - [x] Session tree handles 1,000 sessions — `useVirtualizer` in place; mock renders 1,000 items in tests (DONE)
 - [x] TOTP passes security test — HMAC-SHA1 implementation unit-tested (6 tests); YubiKey CTAP2 deferred
-- [ ] NPS ≥ 45 — **requires real user survey; not yet measured**
+- [ ] **[DEFERRED — real users]** NPS ≥ 45. _Requires deployed user base and survey infrastructure (Typeform / in-app prompt). Not measurable pre-launch. Target remains ≥ 45 for v1.0._
 - [x] Backend coverage ≥ 70%, frontend coverage ≥ 80% — 368 Rust tests + 203 frontend (DONE)
 
 ---
@@ -403,9 +403,9 @@ pub struct RecordingPolicy {
 | — | +2 | Pen test remediation → v1.0 stable |
 
 **Phase 3 exit gate:**
-- [ ] External penetration test — **deferred** (requires engagement; all vault/SSO/plugin code is written and awaiting review)
-- [ ] SOC 2 Type I audit — **deferred** (requires auditor engagement)
-- [ ] First enterprise customer — **deferred** (commercial milestone)
+- [ ] **[DEFERRED — engagement]** External penetration test. _All vault/SSO/plugin code is written and awaiting review. Requires contracting a security firm. Recommended before v1.0 GA._
+- [ ] **[DEFERRED — auditor]** SOC 2 Type I audit. _Requires engaging a licensed CPA auditor. Pre-audit readiness work (policy docs, access reviews) can begin in Phase 2. Audit itself is a commercial activity._
+- [ ] **[DEFERRED — commercial]** First enterprise customer (≥ 50 seats). _Commercial milestone, not an engineering deliverable. All technical prerequisites are shipped._
 - [x] Backend coverage ≥ 75%, frontend coverage ≥ 85% — **368 + 203 tests in CI** (DONE)
 - [x] Shared vault formal threat model — `docs/THREAT_MODEL_VAULT.md` with assets, trust boundaries, 10-row STRIDE table, crypto assumptions, and 6 known limitations (DONE v0.9.0)
 

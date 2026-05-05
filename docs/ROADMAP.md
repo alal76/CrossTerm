@@ -141,9 +141,9 @@ The goal is to make what exists reliable enough that users recommend it. No new 
 - [x] Frontend test coverage ≥ 75% — **219 frontend tests** as of v0.10.0 (DONE)
 - [x] Structured error taxonomy: all Tauri invoke errors return typed `AppError { code, message, detail }` — no raw strings to the UI (DONE v0.3.0)
 - [x] CI coverage gate: `cargo tarpaulin` + `@vitest/coverage-v8` — coverage job in `.github/workflows/ci.yml` (DONE v0.8.0)
-- [ ] Crash reporter: automatic Sentry capture with symbolicated Rust backtraces — **deferred** (requires Sentry account; opt-in telemetry infrastructure not yet provisioned)
+- [ ] **[DEFERRED — external]** Crash reporter: automatic Sentry capture with symbolicated Rust backtraces. _Requires: Sentry project + DSN, opt-in telemetry consent flow. Unblocked the moment an account is provisioned._
 - [x] Session watchdog: detect silent tunnel drops and surface a toast + reconnect option within 5 seconds (DONE v0.3.0)
-- [ ] Memory profiling pass: fix top-3 allocations in SSH scrollback and SFTP transfer queue — **deferred to v1.0 hardening** (no regressions observed; profiling tooling not yet set up in CI)
+- [ ] **[DEFERRED — baseline needed]** Memory profiling pass: fix top-3 allocations in SSH scrollback and SFTP transfer queue. _Requires: heaptrack/Instruments baseline on a reference device. No regressions observed; startup instrumentation is now in place (`startup_get_timing`). Revisit in v1.0 hardening sprint._
 - [x] Startup time instrumentation: `startup::mark_startup_begin()` + `startup_get_timing` command; `StartupTiming { time_to_ready_ms }` emitted on first frontend call — baseline measurement now possible (DONE v0.10.0). Target ≤ 1.5 s verified on real device deferred to v1.0 hardening.
 
 #### Onboarding
@@ -157,7 +157,7 @@ The goal is to make what exists reliable enough that users recommend it. No new 
 - [x] Ctrl+Shift+F search bar (U-6) (DONE v0.3.0)
 - [x] Right-click terminal tab → "Open SFTP here" (U-15) (DONE v0.3.0)
 
-**Phase 1 Status: ✅ COMPLETE — all items resolved. Deferred items (Sentry, memory profiling, startup timing) require external tooling and are tracked in v1.0 hardening backlog.**
+**Phase 1 Status: ✅ COMPLETE.** All code-implementable items shipped. Two items remain explicitly deferred: Sentry crash reporter (requires account) and memory profiling pass (requires device baseline). Both are labeled **[DEFERRED]** above.
 
 ---
 
@@ -185,7 +185,7 @@ Individual power users spend 8+ hours a day in their terminal client. This phase
 
 #### Security depth
 - [x] **TOTP / MFA vault unlock** (DONE v0.5.0)
-- [ ] **YubiKey / FIDO2 vault unlock**: CTAP2 real implementation — **deferred** (requires `ctap2` or `fido2-rs` crate; security review gated)
+- [ ] **[DEFERRED — hardware + security review]** YubiKey / FIDO2 vault unlock: CTAP2 `authenticatorMakeCredential` + `authenticatorGetAssertion` flow. _Requires: `ctap2` or `fido2-rs` crate evaluation, YubiKey 5 / SoloKey hardware in CI, and a second-engineer security sign-off. Stubs (`vault_fido2_auth_begin/complete`) are already wired and returning capability flags._
 - [x] **Certificate pinning**: `security_cert_pin`, `security_cert_verify`, `security_cert_list_pins` commands already wired (DONE — backend complete; UI panel deferred to v1.0)
 - [x] **Audit log export**: syslog RFC 5424 forwarding + CSV export + compliance PDF report via `audit_generate_compliance_report` (DONE v0.7.0)
 - [x] **SSH known-hosts diff viewer**: `KnownHostsDiff.tsx` with red warning banner, two-column old/new fingerprint diff table, Accept/Reject/Forget actions (DONE v0.9.0)
@@ -262,7 +262,7 @@ AI assistance is a table-stakes differentiator by 2027. Done right, it materiall
 
 **Theme: Everywhere**
 
-- [ ] **iOS app**: native SwiftUI shell app with a Rust SSH/SFTP core via `ssh2-rs`; syncs vault and sessions from macOS via iCloud Keychain (no server required)
+- [ ] **[DEFERRED — separate project]** iOS app: native SwiftUI shell app with a Rust SSH/SFTP core via `ssh2-rs`; syncs vault and sessions via iCloud Keychain. _Out of scope for this Tauri repo. Requires a separate Xcode project, Apple Developer account, and App Store review process. Planned as a standalone repo post-v1.0._
 - [x] **Android polish**: `AndroidTerminal` component with `visualViewport` resize listener for soft-keyboard overlap fix (U-10); tablet split-pane via CSS grid with `isTablet` prop (DONE v0.7.0)
 - [x] **Web thin client**: `WebRelayConfig`/`WebRelayStatus` backend structs + `network_web_relay_start/stop/status` Tauri commands; relay architecture scaffolded for WebSocket implementation (DONE v0.7.0 — scaffold)
 - [x] **VS Code extension**: `integrations/vscode/` — `package.json` manifest + `src/extension.ts` with `openSession`, `openSFTP`, `listSessions` commands; context menu contribution for Explorer (DONE v0.7.0 — scaffold)
