@@ -371,6 +371,7 @@ pub struct LdapConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct LdapGroupMapping {
     pub ldap_group_dn: String,
     pub crossterm_role: String,

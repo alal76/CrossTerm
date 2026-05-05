@@ -32,6 +32,7 @@ fn get_policy_store() -> Arc<Mutex<Option<MdmPolicy>>> {
         .clone()
 }
 
+#[allow(dead_code)]
 pub fn load_mdm_policy_from_file(path: &std::path::Path) -> Result<MdmPolicy, String> {
     let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
     serde_json::from_str(&content).map_err(|e| e.to_string())

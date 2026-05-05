@@ -62,7 +62,8 @@ describe('MacroEditor', () => {
 
   it('arrayMove is called with correct indices on drag end', () => {
     const arr = ['a', 'b', 'c'];
-    const result = (arrayMove as ReturnType<typeof vi.fn>)(arr, 0, 2);
+    const mockArrayMove = vi.mocked(arrayMove);
+    const result = mockArrayMove(arr, 0, 2);
     expect(arrayMove).toHaveBeenCalledWith(arr, 0, 2);
     expect(result).toEqual(['b', 'c', 'a']);
   });

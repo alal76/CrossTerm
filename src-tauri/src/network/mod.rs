@@ -2947,6 +2947,7 @@ fn get_tunnel_metrics() -> Arc<Mutex<HashMap<String, TunnelMetrics>>> {
         .clone()
 }
 
+#[allow(dead_code)]
 pub fn record_tunnel_bytes(tunnel_id: &str, bytes_in: u64, bytes_out: u64) {
     if let Ok(mut map) = get_tunnel_metrics().lock() {
         let entry = map
@@ -3011,6 +3012,7 @@ pub struct TunnelHealthEvent {
     pub timestamp: String,
 }
 
+#[allow(dead_code)]
 pub fn emit_tunnel_health(
     app: &tauri::AppHandle,
     tunnel_id: &str,
