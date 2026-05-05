@@ -239,6 +239,22 @@ function SessionItem({
       <span className="shrink-0 text-text-secondary">
         {SESSION_TYPE_ICON[session.type] ?? <Terminal size={14} />}
       </span>
+      {session.colorLabel && (
+        <span
+          aria-label={`color: ${session.colorLabel}`}
+          style={{
+            width: 8,
+            height: 8,
+            borderRadius: '50%',
+            flexShrink: 0,
+            background: ({
+              red: '#ef4444', orange: '#f97316', yellow: '#eab308',
+              green: '#22c55e', blue: '#3b82f6', purple: '#a855f7',
+              pink: '#ec4899', gray: '#6b7280',
+            } as Record<string, string>)[session.colorLabel] ?? session.colorLabel,
+          }}
+        />
+      )}
       <span className="flex-1 truncate text-xs text-text-primary">{session.name}</span>
       <StatusDot status={status} />
       <button

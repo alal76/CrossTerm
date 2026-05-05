@@ -1,3 +1,4 @@
+pub mod mdm;
 pub mod policy;
 
 use chrono::{DateTime, Utc};

@@ -6,6 +6,7 @@ mod cloud;
 mod config;
 mod editor;
 mod error;
+mod team;
 mod ftp;
 mod importer;
 mod keygen;
@@ -457,6 +458,7 @@ pub fn run() {
             ai::ai_get_config,
             ai::ai_autocomplete,
             ai::ai_optimise_connection,
+            ai::ai_generate_script,
             // Sync (encrypted packages)
             sync::sync_create_package,
             sync::sync_import_package,
@@ -479,6 +481,30 @@ pub fn run() {
             android::android_stop_foreground_service,
             android::android_create_notification_channel,
             android::android_is_foreground_active,
+            // Macros: dry-run, builtins, scheduler
+            macros::macro_dry_run,
+            macros::macro_list_builtins,
+            macros::macro_schedule_create,
+            macros::macro_schedule_list,
+            macros::macro_schedule_delete,
+            // RBAC: LDAP/AD sync
+            rbac::rbac_ldap_configure,
+            rbac::rbac_ldap_test_connection,
+            rbac::rbac_ldap_sync,
+            // MDM deployment config
+            config::mdm::config_mdm_load,
+            config::mdm::config_mdm_get_policy,
+            config::mdm::config_mdm_status,
+            // Team collaboration
+            team::team_session_list,
+            team::team_session_publish,
+            team::team_session_unpublish,
+            team::team_presence_update,
+            team::team_presence_list,
+            team::team_presence_clear,
+            team::team_handoff_request,
+            team::team_handoff_respond,
+            team::team_handoff_list,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

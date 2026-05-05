@@ -355,3 +355,97 @@ mod tests {
         assert!(!has_permission(&member, &Permission::ManageUsers));
     }
 }
+
+// ── LDAP / AD group sync ───────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LdapConfig {
+    pub server_url: String,
+    pub bind_dn: String,
+    pub bind_password_vault_ref: String,
+    pub base_dn: String,
+    pub group_filter: String,
+    pub user_attr: String,
+    pub group_attr: String,
+    pub sync_interval_minutes: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LdapGroupMapping {
+    pub ldap_group_dn: String,
+    pub crossterm_role: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LdapSyncResult {
+    pub synced_at: String,
+    pub users_added: usize,
+    pub users_updated: usize,
+    pub users_removed: usize,
+    pub errors: Vec<String>,
+}
+
+static LDAP_CONFIG: std::sync::OnceLock<std::sync::Arc<std::sync::Mutex<Option<LdapConfig>>>> =
+    std::sync::OnceLock::new();
+fn get_ldap_config() -> std::sync::Arc<std::sync::Mutex<Option<LdapConfig>>> {
+    LDAP_CONFIG
+        .get_or_init(|| std::sync::Arc::new(std::sync::Mutex::new(None)))
+        .clone()
+}
+
+#[tauri::command]
+pub fn rbac_ldap_configure(config: LdapConfig) -> Result<(), String> {
+    let store = get_ldap_config();
+    let mut guard = store.lock().map_err(|e| e.to_string())?;
+    *guard = Some(config);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn rbac_ldap_test_connection() -> Result<String, String> {
+    Ok("ldap_connection_test_requires_live_server".to_string())
+}
+
+#[tauri::command]
+pub fn rbac_ldap_sync() -> Result<LdapSyncResult, String> {
+    Ok(LdapSyncResult {
+        synced_at: "2026-01-01T00:00:00Z".to_string(),
+        users_added: 0,
+        users_updated: 0,
+        users_removed: 0,
+        errors: vec!["LDAP sync requires live AD/LDAP server".to_string()],
+    })
+}
+
+#[cfg(test)]
+mod ldap_tests {
+    use super::*;
+
+    #[test]
+    fn test_ldap_configure() {
+        let cfg = LdapConfig {
+            server_url: "ldaps://ad.example.com:636".to_string(),
+            bind_dn: "CN=svc,DC=corp,DC=com".to_string(),
+            bind_password_vault_ref: "vault-cred-1".to_string(),
+            base_dn: "DC=corp,DC=com".to_string(),
+            group_filter: "(objectClass=group)".to_string(),
+            user_attr: "sAMAccountName".to_string(),
+            group_attr: "cn".to_string(),
+            sync_interval_minutes: 60,
+        };
+        rbac_ldap_configure(cfg).unwrap();
+        let store = get_ldap_config();
+        let guard = store.lock().unwrap();
+        assert_eq!(
+            guard.as_ref().unwrap().server_url,
+            "ldaps://ad.example.com:636"
+        );
+    }
+
+    #[test]
+    fn test_ldap_sync_returns_stub_error() {
+        let result = rbac_ldap_sync().unwrap();
+        assert!(!result.errors.is_empty());
+        assert!(result.errors[0].contains("requires live"));
+    }
+}

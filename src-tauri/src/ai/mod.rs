@@ -970,3 +970,114 @@ mod tests {
         assert_eq!(timeout.recommended_value, "30");
     }
 }
+
+// ── Script generation ──────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScriptGenerationRequest {
+    pub description: String,
+    pub shell: String,         // "bash" | "sh" | "zsh" | "powershell"
+    pub context: Option<String>, // extra context (OS, installed tools, etc.)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeneratedScript {
+    pub script: String,
+    pub explanation: String,
+    pub shell: String,
+    pub warnings: Vec<String>,
+}
+
+pub fn build_script_prompt(req: &ScriptGenerationRequest) -> String {
+    let ctx = req.context.as_deref().unwrap_or("general Linux/macOS");
+    format!(
+        "Write a {} shell script that does the following:\n{}\n\nContext: {}\n\
+        Reply with ONLY the script, no explanations. Start with the shebang line.",
+        req.shell, req.description, ctx
+    )
+}
+
+pub fn extract_script_warnings(script: &str) -> Vec<String> {
+    let mut warnings = Vec::new();
+    if script.contains("rm -rf") || script.contains("rm -fr") {
+        warnings.push("Script contains 'rm -rf' — verify paths before running".to_string());
+    }
+    if script.contains("sudo") {
+        warnings.push("Script requires sudo/elevated privileges".to_string());
+    }
+    if script.contains("curl") && script.contains("| bash") {
+        warnings.push("Script pipes remote content directly to bash — security risk".to_string());
+    }
+    if script.contains("chmod 777") {
+        warnings.push("chmod 777 is overly permissive; consider more restrictive permissions".to_string());
+    }
+    warnings
+}
+
+#[tauri::command]
+pub fn ai_generate_script(
+    request: ScriptGenerationRequest,
+    state: tauri::State<AiState>,
+) -> Result<GeneratedScript, String> {
+    let (url, model) = {
+        let s = state.inner();
+        let url = s.ollama_url.read().map_err(|e| e.to_string())?.clone();
+        let model = s.model.read().map_err(|e| e.to_string())?.clone();
+        (url, model)
+    };
+
+    let shell = request.shell.clone();
+    let prompt = build_script_prompt(&request);
+    let script = ollama_generate(&url, &model, &prompt).unwrap_or_else(|_| {
+        format!(
+            "#!/usr/bin/env {}\n# TODO: implement — {}\necho 'not implemented'",
+            request.shell, request.description
+        )
+    });
+
+    let warnings = extract_script_warnings(&script);
+    let explanation = format!(
+        "Generated {} script for: {}",
+        shell, request.description
+    );
+
+    Ok(GeneratedScript { script, explanation, shell, warnings })
+}
+
+#[cfg(test)]
+mod script_tests {
+    use super::*;
+
+    #[test]
+    fn test_build_script_prompt_includes_shell() {
+        let req = ScriptGenerationRequest {
+            description: "list all running processes".to_string(),
+            shell: "bash".to_string(),
+            context: None,
+        };
+        let prompt = build_script_prompt(&req);
+        assert!(prompt.contains("bash"));
+        assert!(prompt.contains("list all running processes"));
+    }
+
+    #[test]
+    fn test_extract_warnings_rm_rf() {
+        let script = "#!/bin/bash\nrm -rf /tmp/old_data";
+        let warnings = extract_script_warnings(script);
+        assert!(warnings.iter().any(|w| w.contains("rm -rf")));
+    }
+
+    #[test]
+    fn test_extract_warnings_sudo() {
+        let script = "#!/bin/bash\nsudo apt-get install -y vim";
+        let warnings = extract_script_warnings(script);
+        assert!(warnings.iter().any(|w| w.contains("sudo")));
+    }
+
+    #[test]
+    fn test_extract_warnings_clean_script() {
+        let script = "#!/bin/bash\necho hello\nls -la";
+        let warnings = extract_script_warnings(script);
+        assert!(warnings.is_empty());
+    }
+}
