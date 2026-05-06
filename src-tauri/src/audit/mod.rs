@@ -389,8 +389,8 @@ pub fn detect_anomalies(entries: &[AuditEvent]) -> Vec<AnomalyAlert> {
     // --- UnusualHour: auth-related events between 00:00 and 05:00 local time ---
     for (idx, entry) in entries.iter().enumerate() {
         match &entry.event_type {
-            AuditEventType::VaultUnlock | AuditEventType::SessionConnect => {
-                if is_unusual_hour(&entry.timestamp) {
+            AuditEventType::VaultUnlock | AuditEventType::SessionConnect
+                if is_unusual_hour(&entry.timestamp) => {
                     alerts.push(AnomalyAlert {
                         alert_type: AnomalyType::UnusualHour,
                         severity: AnomalySeverity::Warning,
@@ -405,7 +405,6 @@ pub fn detect_anomalies(entries: &[AuditEvent]) -> Vec<AnomalyAlert> {
                         detected_at: now.clone(),
                     });
                 }
-            }
             _ => {}
         }
     }
