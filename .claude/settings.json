@@ -93,7 +93,18 @@
       "Bash(sed -n '1311,1342p' /Users/alal/Code/CrossTerm/src-tauri/src/macros/mod.rs)",
       "Bash(sed -i '' 's/\"version\": \"0.7.0\"/\"version\": \"0.8.0\"/g' /Users/alal/Code/CrossTerm/package.json)",
       "Bash(sed -i '' 's/^version = \"0.7.0\"/version = \"0.8.0\"/' /Users/alal/Code/CrossTerm/src-tauri/Cargo.toml)",
-      "Bash(sed -i '' 's/\"version\": \"0.7.0\"/\"version\": \"0.8.0\"/' /Users/alal/Code/CrossTerm/src-tauri/tauri.conf.json)"
+      "Bash(sed -i '' 's/\"version\": \"0.7.0\"/\"version\": \"0.8.0\"/' /Users/alal/Code/CrossTerm/src-tauri/tauri.conf.json)",
+      "Bash(git -C /Users/alal/Code/CrossTerm log --oneline -5)",
+      "Bash(git -C /Users/alal/Code/CrossTerm show --stat HEAD)",
+      "Bash(git -C /Users/alal/Code/CrossTerm show --stat HEAD~1)",
+      "Bash(git -C /Users/alal/Code/CrossTerm diff HEAD -- docs/ROADMAP.md docs/ENGINEERING_PLAN.md)",
+      "Bash(git -C /Users/alal/Code/CrossTerm diff HEAD~1 HEAD -- docs/ROADMAP.md)",
+      "Bash(git -C /Users/alal/Code/CrossTerm add docs/ENGINEERING_PLAN.md docs/ROADMAP.md package.json src-tauri/Cargo.lock src-tauri/Cargo.toml src-tauri/src/importer/mod.rs src-tauri/src/lib.rs src-tauri/src/startup.rs src-tauri/tauri.conf.json src/components/Macros/MacroEditor.tsx src/components/Macros/MacroEditor.test.tsx)",
+      "Bash(git -C /Users/alal/Code/CrossTerm add docs/ROADMAP.md docs/ENGINEERING_PLAN.md)",
+      "Bash(git -C /Users/alal/Code/CrossTerm add package.json package-lock.json)",
+      "Bash(cargo build *)",
+      "Bash(grep -E \"FAILED$\")",
+      "Bash(awk -F: '$2 >= 1400 && $2 <= 1600 {print}')"
     ],
     "additionalDirectories": [
       "/Users/alal/.cache/gh"

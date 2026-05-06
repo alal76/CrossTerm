@@ -448,7 +448,7 @@ mod tests {
         let json = serde_json::to_string_pretty(&config).expect("serialise");
         let back: PolicyConfig = serde_json::from_str(&json).expect("deserialise");
 
-        assert_eq!(back.recording.enabled, true);
+        assert!(back.recording.enabled);
         assert_eq!(back.recording.require_recording_for.len(), 2);
         assert_eq!(
             back.recording.require_recording_for[0].0,

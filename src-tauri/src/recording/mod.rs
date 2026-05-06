@@ -605,12 +605,11 @@ pub async fn recording_export(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
 
     #[test]
     fn test_asciicast_record() {
         let dir = tempfile::tempdir().unwrap();
-        let state = RecordingState {
+        let _state = RecordingState {
             active_recordings: Mutex::new(HashMap::new()),
             playback_states: Mutex::new(HashMap::new()),
             recordings_dir: dir.path().to_path_buf(),

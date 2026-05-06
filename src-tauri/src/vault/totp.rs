@@ -1,7 +1,7 @@
 use super::*;
 
 /// Inner (non-Tauri) implementation of `vault_has_totp`, callable from tests.
-pub(super) fn vault_has_totp_inner(vault: &Vault, vault_id: &str) -> Result<bool, String> {
+pub(crate) fn vault_has_totp_inner(vault: &Vault, vault_id: &str) -> Result<bool, String> {
     let summaries = vault
         .credential_list(vault_id)
         .map_err(|e| e.to_string())?;
@@ -45,7 +45,7 @@ fn hotp_sha1(key: &[u8], counter: u64) -> u32 {
 /// The `totp-rs` crate is listed in Cargo.toml at version "6" which does not
 /// yet exist on crates.io; this manual implementation uses the `hmac`, `sha2`,
 /// and `data-encoding` crates that are already present in the dependency tree.
-pub(super) fn vault_verify_totp_inner(
+pub(crate) fn vault_verify_totp_inner(
     vault: &Vault,
     vault_id: &str,
     totp_code: &str,

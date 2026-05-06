@@ -1,10 +1,12 @@
 pub mod shared;
 
-use aes_gcm::{
-    aead::{Aead, KeyInit, OsRng},
-    Aes256Gcm, Nonce,
-};
-use argon2::{Algorithm, Argon2, Params, Version};
+pub mod biometric;
+pub(crate) mod crypto;
+pub mod fido2;
+pub mod os_store;
+pub mod totp;
+
+use aes_gcm::aead::OsRng;
 use chrono::{DateTime, Utc};
 use rand::RngCore;
 use rusqlite::{params, Connection};
@@ -193,6 +195,7 @@ impl VaultRegistry {
     }
 
     #[cfg(test)]
+    #[allow(dead_code)]
     fn registry_path_for_test(base: &std::path::Path) -> PathBuf {
         base.join("vault_registry.json")
     }
@@ -246,44 +249,9 @@ impl VaultRegistry {
     }
 }
 
-// ── Crypto helpers ──────────────────────────────────────────────────────
-
-const SALT_LEN: usize = 32;
-const KEY_LEN: usize = 32; // AES-256
-const NONCE_LEN: usize = 12; // AES-GCM standard
-
-/// Derive a 256-bit key from a master password and salt using Argon2id.
-fn derive_key(password: &[u8], salt: &[u8]) -> Result<Zeroizing<Vec<u8>>, VaultError> {
-    let params = Params::new(65536, 3, 4, Some(KEY_LEN))
-        .map_err(|e| VaultError::Encryption(e.to_string()))?;
-    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
-    let mut key = Zeroizing::new(vec![0u8; KEY_LEN]);
-    argon2
-        .hash_password_into(password, salt, &mut key)
-        .map_err(|e| VaultError::Encryption(e.to_string()))?;
-    Ok(key)
-}
-
-fn encrypt(plaintext: &[u8], key: &[u8]) -> Result<(Vec<u8>, Vec<u8>), VaultError> {
-    let cipher =
-        Aes256Gcm::new_from_slice(key).map_err(|e| VaultError::Encryption(e.to_string()))?;
-    let mut nonce_bytes = [0u8; NONCE_LEN];
-    OsRng.fill_bytes(&mut nonce_bytes);
-    let nonce = Nonce::from_slice(&nonce_bytes);
-    let ciphertext = cipher
-        .encrypt(nonce, plaintext)
-        .map_err(|e| VaultError::Encryption(e.to_string()))?;
-    Ok((ciphertext, nonce_bytes.to_vec()))
-}
-
-fn decrypt(ciphertext: &[u8], nonce_bytes: &[u8], key: &[u8]) -> Result<Vec<u8>, VaultError> {
-    let cipher =
-        Aes256Gcm::new_from_slice(key).map_err(|e| VaultError::Decryption(e.to_string()))?;
-    let nonce = Nonce::from_slice(nonce_bytes);
-    cipher
-        .decrypt(nonce, ciphertext)
-        .map_err(|e| VaultError::Decryption(e.to_string()))
-}
+pub(crate) use crypto::{decrypt, derive_key, encrypt, SALT_LEN};
+#[cfg(test)]
+pub(crate) use crypto::{KEY_LEN, NONCE_LEN};
 
 // ── Vault ───────────────────────────────────────────────────────────────
 
@@ -1420,354 +1388,6 @@ pub async fn vault_clipboard_copy(
     Ok(())
 }
 
-// ── BE-VAULT-07: Biometric Unlock ───────────────────────────────────────
-
-#[tauri::command]
-pub fn vault_biometric_available() -> Result<bool, VaultError> {
-    #[cfg(target_os = "macos")]
-    return Ok(true); // Touch ID may be available
-
-    #[cfg(target_os = "windows")]
-    return Ok(true); // Windows Hello may be available
-
-    #[cfg(target_os = "linux")]
-    return Ok(false); // Generally not available on desktop Linux
-
-    #[allow(unreachable_code)]
-    Ok(false)
-}
-
-#[tauri::command]
-pub fn vault_unlock_biometric(state: tauri::State<'_, Vault>) -> Result<bool, VaultError> {
-    let _guard = state.open_vaults.lock().unwrap();
-
-    // Platform-specific biometric integration stubs:
-    // - macOS: LocalAuthentication.framework via objc2 or swift bridge
-    // - Windows: Windows Hello via webauthn-authenticator-rs
-    // - Linux: polkit or libfido2
-
-    #[cfg(target_os = "macos")]
-    {
-        // TODO: Integrate with LocalAuthentication.framework
-        return Err(VaultError::BiometricUnavailable);
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        // TODO: Integrate with Windows Hello
-        return Err(VaultError::BiometricUnavailable);
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        return Err(VaultError::BiometricUnavailable);
-    }
-
-    #[allow(unreachable_code)]
-    Err(VaultError::BiometricUnavailable)
-}
-
-#[tauri::command]
-pub fn vault_biometric_enroll(
-    master_password: String,
-    vault_id: String,
-    state: tauri::State<'_, Vault>,
-) -> Result<(), VaultError> {
-    let guard = state.open_vaults.lock().unwrap();
-    let inner_ref = guard.get(&vault_id).ok_or(VaultError::Locked)?;
-    if inner_ref.encryption_key.is_none() {
-        return Err(VaultError::Locked);
-    }
-    // In a real implementation, this would:
-    // 1. Derive the vault key from master_password
-    // 2. Store it in Keychain (macOS) / Credential Manager (Windows) with biometric protection
-    // 3. Mark the vault as biometric-enabled
-    let _ = master_password; // Silence unused warning
-    Ok(())
-}
-
-// ── BE-VAULT-08: OS Credential Store Delegation ─────────────────────────
-
-#[tauri::command]
-pub fn vault_os_store_available() -> bool {
-    cfg!(any(target_os = "macos", target_os = "windows", target_os = "linux"))
-}
-
-#[tauri::command]
-pub fn vault_os_store_save(
-    master_password: String,
-    vault_id: String,
-    state: tauri::State<'_, Vault>,
-) -> Result<(), VaultError> {
-    let guard = state.open_vaults.lock().unwrap();
-    let inner_ref = guard.get(&vault_id).ok_or(VaultError::Locked)?;
-    if inner_ref.encryption_key.is_none() {
-        return Err(VaultError::Locked);
-    }
-
-    let service = format!("crossterm.vault.{}", vault_id);
-    let entry = keyring::Entry::new(&service, "master_password")
-        .map_err(|e| VaultError::OsStoreError(e.to_string()))?;
-    entry
-        .set_password(&master_password)
-        .map_err(|e| VaultError::OsStoreError(e.to_string()))?;
-
-    Ok(())
-}
-
-#[tauri::command]
-pub fn vault_os_store_retrieve(
-    vault_id: String,
-    app_handle: AppHandle,
-    state: tauri::State<'_, Vault>,
-    config_state: tauri::State<'_, crate::config::ConfigState>,
-) -> Result<(), VaultError> {
-    let service = format!("crossterm.vault.{}", vault_id);
-    let entry = keyring::Entry::new(&service, "master_password")
-        .map_err(|e| VaultError::OsStoreError(e.to_string()))?;
-    let password = entry
-        .get_password()
-        .map_err(|e| VaultError::OsStoreError(e.to_string()))?;
-
-    // Re-use the existing unlock logic
-    let result = state.unlock(&vault_id, &password);
-    if result.is_ok() {
-        let pid = config_state
-            .active_profile_id
-            .read()
-            .unwrap()
-            .clone()
-            .unwrap_or_default();
-        crate::audit::append_event(
-            &pid,
-            crate::audit::AuditEventType::VaultUnlock,
-            "Vault unlocked via OS credential store",
-        );
-        state.start_auto_lock_timer(&vault_id, app_handle);
-    }
-    result
-}
-
-#[tauri::command]
-pub fn vault_os_store_delete(vault_id: String) -> Result<(), VaultError> {
-    let service = format!("crossterm.vault.{}", vault_id);
-    let entry = keyring::Entry::new(&service, "master_password")
-        .map_err(|e| VaultError::OsStoreError(e.to_string()))?;
-    entry
-        .delete_credential()
-        .map_err(|e| VaultError::OsStoreError(e.to_string()))?;
-    Ok(())
-}
-
-// ── BE-VAULT-09: FIDO2/WebAuthn Hardware Key ────────────────────────────
-
-#[tauri::command]
-pub fn vault_fido2_available() -> bool {
-    cfg!(any(target_os = "macos", target_os = "windows"))
-}
-
-#[tauri::command]
-pub fn vault_fido2_register_begin(
-    vault_id: String,
-    _state: tauri::State<'_, Vault>,
-) -> Result<WebAuthnChallenge, VaultError> {
-    let challenge = WebAuthnChallenge {
-        challenge: Uuid::new_v4().to_string(),
-        rp_id: "crossterm.app".to_string(),
-        rp_name: "CrossTerm".to_string(),
-        user_id: vault_id,
-        user_name: "CrossTerm User".to_string(),
-    };
-    Ok(challenge)
-}
-
-#[tauri::command]
-pub fn vault_fido2_register_complete(
-    _credential_response: String,
-    _state: tauri::State<'_, Vault>,
-) -> Result<(), VaultError> {
-    // In production: webauthn-rs verifies attestation, stores credential
-    Err(VaultError::Fido2NotConfigured)
-}
-
-#[tauri::command]
-pub fn vault_fido2_auth_begin(
-    _vault_id: String,
-    _state: tauri::State<'_, Vault>,
-) -> Result<WebAuthnChallenge, VaultError> {
-    Err(VaultError::Fido2NotConfigured)
-}
-
-#[tauri::command]
-pub fn vault_fido2_auth_complete(
-    _credential_response: String,
-    _state: tauri::State<'_, Vault>,
-) -> Result<(), VaultError> {
-    Err(VaultError::Fido2NotConfigured)
-}
-
-// ── BE-VAULT-10: TOTP second-factor verification ────────────────────────
-
-/// Inner (non-Tauri) implementation of `vault_has_totp`, callable from tests.
-fn vault_has_totp_inner(vault: &Vault, vault_id: &str) -> Result<bool, String> {
-    let summaries = vault
-        .credential_list(vault_id)
-        .map_err(|e| e.to_string())?;
-
-    Ok(summaries
-        .iter()
-        .any(|c| c.credential_type == CredentialType::TotpSeed))
-}
-
-/// Compute a single RFC 4226 HOTP value for the given key and counter.
-///
-/// Uses HMAC-SHA1 as mandated by RFC 4226 §5.  The truncation step extracts
-/// a 6-digit decimal code from the 20-byte HMAC output.
-fn hotp_sha1(key: &[u8], counter: u64) -> u32 {
-    use hmac::{Hmac, Mac};
-    use sha1::Sha1;
-
-    // RFC 4226 §5.2: counter is big-endian 8-byte unsigned integer.
-    let counter_bytes = counter.to_be_bytes();
-
-    let mut mac = <Hmac<Sha1> as Mac>::new_from_slice(key)
-        .expect("HMAC-SHA1 accepts any key length");
-    mac.update(&counter_bytes);
-    let result = mac.finalize().into_bytes();
-
-    // Dynamic truncation (RFC 4226 §5.4)
-    let offset = (result[19] & 0x0F) as usize;
-    let code = u32::from_be_bytes([
-        result[offset] & 0x7F,
-        result[offset + 1],
-        result[offset + 2],
-        result[offset + 3],
-    ]);
-    code % 1_000_000
-}
-
-/// Inner (non-Tauri) implementation of `vault_verify_totp`, callable from tests.
-///
-/// Implements RFC 6238 TOTP over HMAC-SHA1 with a 30-second step and ±1 step
-/// skew (allows one step before/after the current window to tolerate clock drift).
-/// The `totp-rs` crate is listed in Cargo.toml at version "6" which does not
-/// yet exist on crates.io; this manual implementation uses the `hmac`, `sha2`,
-/// and `data-encoding` crates that are already present in the dependency tree.
-fn vault_verify_totp_inner(vault: &Vault, vault_id: &str, totp_code: &str) -> Result<bool, String> {
-    // Step 1: Collect all credential summaries — vault must be unlocked.
-    let summaries = vault
-        .credential_list(vault_id)
-        .map_err(|e| e.to_string())?;
-
-    // Step 2: Find the first TotpSeed credential.
-    let totp_id = match summaries.iter().find(|c| c.credential_type == CredentialType::TotpSeed) {
-        // Step 3: No TOTP credential → second factor not configured → allow.
-        None => return Ok(true),
-        Some(s) => s.id.clone(),
-    };
-
-    // Step 4: Decrypt and retrieve the seed.
-    let detail = vault
-        .credential_get(vault_id, &totp_id)
-        .map_err(|e| e.to_string())?;
-
-    // The TOTP seed is stored in the encrypted JSON as `{"secret": "<base32>", ...}`.
-    let seed_str = detail
-        .data
-        .get("secret")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| "TOTP credential is missing the 'secret' field".to_string())?
-        .to_string();
-
-    // Step 5: Decode the base32 seed.
-    // data-encoding::BASE32 follows RFC 4648 (no padding required for totp-rs
-    // compatible seeds).  Strip whitespace/padding that some apps include.
-    let seed_upper = seed_str.trim().to_uppercase();
-    let seed_padded = {
-        // Pad to a multiple of 8 characters as required by the standard decoder.
-        let rem = seed_upper.len() % 8;
-        if rem == 0 {
-            seed_upper.clone()
-        } else {
-            format!("{}{}", seed_upper, "=".repeat(8 - rem))
-        }
-    };
-    let key_bytes = data_encoding::BASE32
-        .decode(seed_padded.as_bytes())
-        .map_err(|e| format!("Invalid TOTP secret encoding: {e}"))?;
-
-    // Step 6: Parse the submitted code (must be exactly 6 decimal digits).
-    // totp_code validation: the frontend enforces inputMode="numeric" and
-    // maxLength=6; the backend independently validates so the check is
-    // reliable even if the frontend constraint is bypassed.
-    let code_value: u32 = totp_code
-        .parse()
-        .map_err(|_| "TOTP code must be a 6-digit number".to_string())?;
-    if totp_code.len() != 6 {
-        return Err("TOTP code must be exactly 6 digits".to_string());
-    }
-
-    // Step 7: RFC 6238 — T = floor(Unix time / step).  Allow ±1 step skew.
-    let now_secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|e| format!("System clock error: {e}"))?
-        .as_secs();
-
-    let step: u64 = 30;
-    let t = now_secs / step;
-
-    // Check current window and ±1 adjacent windows for clock-drift tolerance.
-    for delta in [0i64, -1, 1] {
-        let counter = (t as i64 + delta) as u64;
-        if hotp_sha1(&key_bytes, counter) == code_value {
-            return Ok(true);
-        }
-    }
-
-    Ok(false)
-}
-
-/// Returns whether the vault has a TOTP seed credential configured.
-/// The frontend uses this to decide whether to show the authenticator-code
-/// input after a successful password unlock.  The vault must be unlocked
-/// before calling this command; callers that receive `Err` (vault locked)
-/// should treat that as "TOTP state unknown" and proceed without TOTP.
-#[tauri::command]
-pub fn vault_has_totp(
-    vault_id: String,
-    state: tauri::State<'_, Vault>,
-) -> Result<bool, String> {
-    vault_has_totp_inner(&state, &vault_id)
-}
-
-/// Validates a TOTP code against the vault's linked TOTP seed credential.
-///
-/// Security invariant: this command is a **second factor**.  The vault must
-/// already be unlocked (password verified) before calling it.  TOTP never
-/// replaces the password; it is always additive.
-///
-/// When no `TotpSeed` credential exists for the vault this returns `Ok(true)`
-/// — TOTP is not configured, so no second factor is required.
-///
-/// The caller (frontend) is responsible for blocking access when the returned
-/// value is `false`.  The backend does not re-lock the vault on a bad TOTP
-/// code intentionally: the password was already correct and the TOTP window
-/// is inherently short-lived (30 s), so aggressive locking would create more
-/// UX friction than security value.
-///
-/// # Code format
-/// `totp_code` must be exactly 6 ASCII decimal digits ("000000"–"999999").
-/// The totp-rs crate rejects any other format internally, but callers should
-/// also validate on the frontend (see VaultUnlock.tsx) to give early feedback.
-#[tauri::command]
-pub fn vault_verify_totp(
-    vault_id: String,
-    totp_code: String,
-    state: tauri::State<'_, Vault>,
-) -> Result<bool, String> {
-    vault_verify_totp_inner(&state, &vault_id, &totp_code)
-}
-
 // ── Tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -2462,7 +2082,7 @@ mod tests {
 
     #[test]
     fn test_biometric_available_returns_bool() {
-        let result = super::vault_biometric_available();
+        let result = super::biometric::vault_biometric_available();
         assert!(result.is_ok());
         let available = result.unwrap();
         if cfg!(target_os = "macos") || cfg!(target_os = "windows") {
@@ -2476,7 +2096,7 @@ mod tests {
 
     #[test]
     fn test_os_store_available() {
-        let available = super::vault_os_store_available();
+        let available = super::os_store::vault_os_store_available();
         if cfg!(any(
             target_os = "macos",
             target_os = "windows",
@@ -2490,12 +2110,101 @@ mod tests {
 
     #[test]
     fn test_fido2_available() {
-        let available = super::vault_fido2_available();
-        if cfg!(any(target_os = "macos", target_os = "windows")) {
-            assert!(available);
-        } else {
-            assert!(!available);
-        }
+        assert!(super::fido2::vault_fido2_available(), "software FIDO2 available on all platforms");
+    }
+
+    // ── UT-V-30: FIDO2 register + auth round-trip (software P-256) ────
+
+    #[test]
+    fn test_fido2_register_and_auth_roundtrip() {
+        use p256::ecdsa::{SigningKey, signature::Signer};
+        use base64::Engine as _;
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64URL;
+
+        let vid = format!("fido2-rt-{}", uuid::Uuid::new_v4());
+
+        let signing_key = SigningKey::random(&mut rand::rngs::OsRng);
+        let verifying_key = signing_key.verifying_key();
+        let pk_b64 = B64URL.encode(verifying_key.to_encoded_point(false).as_bytes());
+
+        // Register begin
+        let ch = super::fido2::fido2_register_begin_inner(&vid).unwrap();
+        assert!(!ch.challenge.is_empty());
+
+        // Register complete
+        let attestation = serde_json::json!({
+            "credential_id": "soft-cred-01",
+            "public_key": pk_b64,
+            "user_handle": B64URL.encode(b"testuser"),
+        }).to_string();
+        super::fido2::fido2_register_complete_inner(&vid, &attestation).unwrap();
+
+        // Auth begin
+        let auth_ch = super::fido2::fido2_auth_begin_inner(&vid).unwrap();
+        let challenge_raw = B64URL.decode(&auth_ch.challenge).unwrap();
+
+        // Craft assertion: sign auth_data || challenge_raw
+        let auth_data = b"fake_auth_data";
+        let mut msg = auth_data.to_vec();
+        msg.extend_from_slice(&challenge_raw);
+        let sig: p256::ecdsa::Signature = signing_key.sign(&msg);
+        let assertion = serde_json::json!({
+            "credential_id": "soft-cred-01",
+            "authenticator_data": B64URL.encode(auth_data),
+            "signature": B64URL.encode(sig.to_der().as_bytes()),
+        }).to_string();
+
+        let ok = super::fido2::fido2_auth_complete_inner(&vid, &assertion).unwrap();
+        assert!(ok, "correct signature must verify");
+
+        // sign_count incremented
+        let count = super::fido2::fido2_creds().lock().unwrap()
+            .get(&vid).map(|c| c.sign_count).unwrap_or(0);
+        assert_eq!(count, 1);
+    }
+
+    // ── UT-V-31: FIDO2 auth rejects wrong key ─────────────────────────
+
+    #[test]
+    fn test_fido2_auth_rejects_bad_signature() {
+        use p256::ecdsa::{SigningKey, signature::Signer};
+        use base64::Engine as _;
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64URL;
+
+        let vid = format!("fido2-bad-{}", uuid::Uuid::new_v4());
+
+        let good_key = SigningKey::random(&mut rand::rngs::OsRng);
+        let bad_key  = SigningKey::random(&mut rand::rngs::OsRng);
+        let pk_b64 = B64URL.encode(good_key.verifying_key().to_encoded_point(false).as_bytes());
+
+        let _ = super::fido2::fido2_register_begin_inner(&vid).unwrap();
+        super::fido2::fido2_register_complete_inner(&vid, &serde_json::json!({
+            "credential_id": "cred", "public_key": pk_b64, "user_handle": "",
+        }).to_string()).unwrap();
+
+        let auth_ch = super::fido2::fido2_auth_begin_inner(&vid).unwrap();
+        let challenge_raw = B64URL.decode(&auth_ch.challenge).unwrap();
+        let auth_data = b"auth_data";
+        let mut msg = auth_data.to_vec();
+        msg.extend_from_slice(&challenge_raw);
+        let sig: p256::ecdsa::Signature = bad_key.sign(&msg); // wrong key
+        let assertion = serde_json::json!({
+            "credential_id": "cred",
+            "authenticator_data": B64URL.encode(auth_data),
+            "signature": B64URL.encode(sig.to_der().as_bytes()),
+        }).to_string();
+
+        let result = super::fido2::fido2_auth_complete_inner(&vid, &assertion).unwrap();
+        assert!(!result, "wrong key signature must fail");
+    }
+
+    // ── UT-V-32: FIDO2 auth begin without registration ────────────────
+
+    #[test]
+    fn test_fido2_auth_begin_without_registration() {
+        let vid = format!("fido2-noreg-{}", uuid::Uuid::new_v4());
+        let err = super::fido2::fido2_auth_begin_inner(&vid).unwrap_err();
+        assert!(matches!(err, VaultError::Fido2NotConfigured));
     }
 
     // ── UT-V-23: WebAuthnChallenge serialization ────────────────────
@@ -2858,7 +2567,7 @@ mod tests {
             .credential_create(tp.vid(), make_password_request("Regular Password"))
             .unwrap();
 
-        let has = super::vault_has_totp_inner(&vault, tp.vid()).unwrap();
+        let has = super::totp::vault_has_totp_inner(&vault, tp.vid()).unwrap();
         assert!(!has, "vault_has_totp must return false when no TotpSeed credential exists");
     }
 
@@ -2876,7 +2585,7 @@ mod tests {
         let vault = setup_vault(&tp);
 
         // No TOTP credential at all — any code string should return Ok(true).
-        let result = super::vault_verify_totp_inner(&vault, tp.vid(), "000000").unwrap();
+        let result = super::totp::vault_verify_totp_inner(&vault, tp.vid(), "000000").unwrap();
         assert!(
             result,
             "vault_verify_totp must return true when no TotpSeed credential is configured"
@@ -2901,7 +2610,7 @@ mod tests {
         // Lock the vault — all operations should return Err (Locked).
         vault.lock(tp.vid()).unwrap();
 
-        let result = super::vault_verify_totp_inner(&vault, tp.vid(), "123456");
+        let result = super::totp::vault_verify_totp_inner(&vault, tp.vid(), "123456");
         assert!(
             result.is_err(),
             "vault_verify_totp must return Err when the vault is locked"

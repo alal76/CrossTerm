@@ -1432,6 +1432,27 @@ mod tests {
         let env = TestEnv::new();
 
         do_session_create(env.id(), make_session_request("Alpha Web", "10.0.0.1")).unwrap();
+        do_session_create(env.id(), make_session_request("Beta Web", "10.0.0.2")).unwrap();
+        do_session_create(env.id(), make_session_request("Gamma DB", "10.0.0.3")).unwrap();
+
+        // Search by partial name
+        let results = do_session_search(env.id(), "web").unwrap();
+        assert_eq!(results.len(), 2);
+
+        // Case insensitive
+        let results = do_session_search(env.id(), "GAMMA").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "Gamma DB");
+
+        // Search by host
+        let results = do_session_search(env.id(), "10.0.0.2").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "Beta Web");
+
+        // No matches
+        let results = do_session_search(env.id(), "nonexistent").unwrap();
+        assert!(results.is_empty());
+    }
 
     // ── UT-C-07: Bulk connect ───────────────────────────────────────
 
@@ -1570,27 +1591,6 @@ mod tests {
     fn test_effective_data_dir_non_portable() {
         let dir = effective_data_dir();
         assert!(dir.to_string_lossy().contains("CrossTerm"));
-    }
-        do_session_create(env.id(), make_session_request("Beta Web", "10.0.0.2")).unwrap();
-        do_session_create(env.id(), make_session_request("Gamma DB", "10.0.0.3")).unwrap();
-
-        // Search by partial name
-        let results = do_session_search(env.id(), "web").unwrap();
-        assert_eq!(results.len(), 2);
-
-        // Case insensitive
-        let results = do_session_search(env.id(), "GAMMA").unwrap();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].name, "Gamma DB");
-
-        // Search by host
-        let results = do_session_search(env.id(), "10.0.0.2").unwrap();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].name, "Beta Web");
-
-        // No matches
-        let results = do_session_search(env.id(), "nonexistent").unwrap();
-        assert!(results.is_empty());
     }
 
     // ── UT-C-04: Settings persistence ───────────────────────────────
@@ -1956,7 +1956,7 @@ Host *
         assert!(session.last_connected_at.is_none(), "New session should have no last_connected_at");
 
         let now = Utc::now();
-        let updated = do_session_update(
+        let _updated = do_session_update(
             env.id(),
             &session.id,
             SessionUpdateRequest {

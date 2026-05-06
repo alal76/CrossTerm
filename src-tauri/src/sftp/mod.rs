@@ -1384,7 +1384,7 @@ mod tests {
         // Create a known file so we can verify listing
         sftp_write_file(&sftp, "/tmp/sftp_list_test.txt", b"list test").await;
 
-        let entries: Vec<_> = sftp.read_dir("/tmp").await.expect("should list /tmp").into_iter().collect();
+        let entries: Vec<_> = sftp.read_dir("/tmp").await.expect("should list /tmp").collect();
         let found = entries.iter().any(|e| e.file_name() == "sftp_list_test.txt");
         assert!(found, "/tmp listing should contain our test file");
 

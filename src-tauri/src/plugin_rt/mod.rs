@@ -799,7 +799,7 @@ mod tests {
         // Register hooks
         {
             let mut hooks = state.hooks.lock().unwrap();
-            let plugin_hooks = hooks.entry(plugin_id.clone()).or_insert_with(Vec::new);
+            let plugin_hooks = hooks.entry(plugin_id.clone()).or_default();
             plugin_hooks.push(PluginHook::OnConnect);
             plugin_hooks.push(PluginHook::OnDisconnect);
             plugin_hooks.push(PluginHook::OnOutputLine);
@@ -830,7 +830,7 @@ mod tests {
         // Set values for plugin A
         {
             let mut kv = state.kv_store.lock().unwrap();
-            let store = kv.entry(plugin_a.clone()).or_insert_with(HashMap::new);
+            let store = kv.entry(plugin_a.clone()).or_default();
             store.insert("key1".to_string(), serde_json::json!("value1"));
             store.insert("key2".to_string(), serde_json::json!(42));
         }
@@ -838,7 +838,7 @@ mod tests {
         // Set values for plugin B
         {
             let mut kv = state.kv_store.lock().unwrap();
-            let store = kv.entry(plugin_b.clone()).or_insert_with(HashMap::new);
+            let store = kv.entry(plugin_b.clone()).or_default();
             store.insert("key1".to_string(), serde_json::json!("b-value1"));
         }
 

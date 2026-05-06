@@ -574,6 +574,8 @@ mod tests {
 
     // ── Test helper: create PTY session without AppHandle ──────────
 
+    type OutputBuf = Arc<Mutex<Vec<u8>>>;
+
     /// Creates a PTY session directly in the TerminalManager, bypassing
     /// `create()` which requires an AppHandle for event emission.
     /// Returns the TerminalInfo and a shared buffer that captures all
@@ -585,7 +587,7 @@ mod tests {
         rows: Option<u16>,
         cwd: Option<String>,
         env: Option<HashMap<String, String>>,
-    ) -> Result<(TerminalInfo, Arc<Mutex<Vec<u8>>>), TerminalError> {
+    ) -> Result<(TerminalInfo, OutputBuf), TerminalError> {
         let cols = cols.unwrap_or(80);
         let rows = rows.unwrap_or(24);
         let pty_system = native_pty_system();

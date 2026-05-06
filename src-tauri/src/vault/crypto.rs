@@ -7,12 +7,12 @@ use argon2::{Algorithm, Argon2, Params, Version};
 use rand::RngCore;
 use zeroize::Zeroizing;
 
-pub(super) const SALT_LEN: usize = 32;
-pub(super) const KEY_LEN: usize = 32; // AES-256
-pub(super) const NONCE_LEN: usize = 12; // AES-GCM standard
+pub(crate) const SALT_LEN: usize = 32;
+pub(crate) const KEY_LEN: usize = 32; // AES-256
+pub(crate) const NONCE_LEN: usize = 12; // AES-GCM standard
 
 /// Derive a 256-bit key from a master password and salt using Argon2id.
-pub(super) fn derive_key(password: &[u8], salt: &[u8]) -> Result<Zeroizing<Vec<u8>>, VaultError> {
+pub(crate) fn derive_key(password: &[u8], salt: &[u8]) -> Result<Zeroizing<Vec<u8>>, VaultError> {
     let params = Params::new(65536, 3, 4, Some(KEY_LEN))
         .map_err(|e| VaultError::Encryption(e.to_string()))?;
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
@@ -23,7 +23,7 @@ pub(super) fn derive_key(password: &[u8], salt: &[u8]) -> Result<Zeroizing<Vec<u
     Ok(key)
 }
 
-pub(super) fn encrypt(plaintext: &[u8], key: &[u8]) -> Result<(Vec<u8>, Vec<u8>), VaultError> {
+pub(crate) fn encrypt(plaintext: &[u8], key: &[u8]) -> Result<(Vec<u8>, Vec<u8>), VaultError> {
     let cipher =
         Aes256Gcm::new_from_slice(key).map_err(|e| VaultError::Encryption(e.to_string()))?;
     let mut nonce_bytes = [0u8; NONCE_LEN];
@@ -35,7 +35,7 @@ pub(super) fn encrypt(plaintext: &[u8], key: &[u8]) -> Result<(Vec<u8>, Vec<u8>)
     Ok((ciphertext, nonce_bytes.to_vec()))
 }
 
-pub(super) fn decrypt(
+pub(crate) fn decrypt(
     ciphertext: &[u8],
     nonce_bytes: &[u8],
     key: &[u8],

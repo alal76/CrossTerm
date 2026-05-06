@@ -775,7 +775,7 @@ mod tests {
         assert!(url.contains("localhost:11434"));
 
         let available = state.available.read().unwrap();
-        assert!(*available == None, "available should be None on init");
+        assert!(available.is_none(), "available should be None on init");
     }
 
     #[test]

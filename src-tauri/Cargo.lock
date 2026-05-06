@@ -1140,6 +1140,7 @@ dependencies = [
  "keyring",
  "libc",
  "log",
+ "p256 0.13.2",
  "portable-pty",
  "rand 0.8.5",
  "regex",

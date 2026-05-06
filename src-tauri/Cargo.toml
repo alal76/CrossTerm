@@ -77,6 +77,9 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "tls1
 # OS Credential Store
 keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
 
+# FIDO2/WebAuthn software authenticator
+p256 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
+
 # System
 libc = "0.2"
 if-addrs = "0.13"

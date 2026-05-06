@@ -788,10 +788,10 @@ mod tests {
     use std::io::Write;
     use tempfile::TempDir;
 
-    /// Helpers: write events directly into a temp-dir-based audit file,
-    /// then read them back using the same module functions.
-    /// We override the profile path by constructing our own JSONL file
-    /// and calling `read_events_from_path` indirectly via the public helpers.
+    // Helpers: write events directly into a temp-dir-based audit file,
+    // then read them back using the same module functions.
+    // We override the profile path by constructing our own JSONL file
+    // and calling `read_events_from_path` indirectly via the public helpers.
 
     fn write_events_to_file(path: &std::path::Path, events: &[AuditEvent]) {
         let mut file = std::fs::OpenOptions::new()
