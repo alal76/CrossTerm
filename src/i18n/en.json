@@ -437,7 +437,9 @@
     "telemetryEnabled": "Send Crash Reports",
     "telemetryEnabledDescription": "Help improve CrossTerm by sending anonymous crash reports",
     "clipboardHistorySize": "Clipboard History Size",
-    "clipboardHistorySizeDescription": "Number of recent clipboard entries to remember (0 = disabled)"
+    "clipboardHistorySizeDescription": "Number of recent clipboard entries to remember (0 = disabled)",
+    "experimentalCategory": "Experimental",
+    "experimentalDescription": "Feature-flagged capabilities that require external setup before enabling"
   },
   "newTabMenu": {
     "localShell": "New Local Shell",

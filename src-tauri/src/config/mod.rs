@@ -1223,6 +1223,84 @@ pub fn config_is_portable_mode() -> bool {
     is_portable_mode()
 }
 
+// ── Feature Flags ────────────────────────────────────────────────────────
+
+/// Capabilities that are code-complete but require external resources or
+/// manual steps before they can be safely enabled in production.
+/// Each flag defaults to `false`; operators opt in explicitly via Settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FeatureFlags {
+    /// Sentry crash reporting — requires a DSN in SENTRY_DSN env var.
+    /// Manual prerequisite: Sentry project provisioned (see docs/V1.2_MANUAL_STEPS.md §1).
+    pub sentry_crash_reporter: bool,
+    /// SAML 2.0 SP — requires IdP metadata URL configured by IT admin.
+    /// Manual prerequisite: IdP smoke test (see docs/V1.2_MANUAL_STEPS.md §2).
+    pub saml_sso: bool,
+    /// Hardware FIDO2/YubiKey unlock — requires physical key present on this machine.
+    /// Manual prerequisite: YubiKey 5 / SoloKey procured (see docs/V1.2_MANUAL_STEPS.md §8).
+    pub yubikey_hardware_fido2: bool,
+    /// NPS survey prompt — requires Delighted/Typeform account configured.
+    /// Manual prerequisite: survey infrastructure (see docs/V1.2_MANUAL_STEPS.md §12).
+    pub nps_survey: bool,
+    /// aircrack-ng WiFi security testing tools — security-sensitive; requires
+    /// explicit disclaimer acceptance AND this flag enabled by the operator.
+    /// Manual prerequisite: install aircrack-ng on the host system.
+    pub aircrack_tools: bool,
+    /// Web thin-client WebSocket relay — exposes a local port; review firewall rules.
+    pub web_relay: bool,
+    /// WASM plugin runtime via wasmtime — enable once plugin SDK is published.
+    pub wasm_plugins: bool,
+}
+
+impl Default for FeatureFlags {
+    fn default() -> Self {
+        Self {
+            sentry_crash_reporter: false,
+            saml_sso: false,
+            yubikey_hardware_fido2: false,
+            nps_survey: false,
+            aircrack_tools: false,
+            web_relay: false,
+            wasm_plugins: false,
+        }
+    }
+}
+
+static FEATURE_FLAGS: std::sync::OnceLock<std::sync::Mutex<FeatureFlags>> =
+    std::sync::OnceLock::new();
+
+fn get_feature_flags_lock() -> &'static std::sync::Mutex<FeatureFlags> {
+    FEATURE_FLAGS.get_or_init(|| std::sync::Mutex::new(FeatureFlags::default()))
+}
+
+#[tauri::command]
+pub fn config_get_feature_flags() -> Result<FeatureFlags, String> {
+    let flags = get_feature_flags_lock()
+        .lock()
+        .map_err(|e| e.to_string())?
+        .clone();
+    Ok(flags)
+}
+
+#[tauri::command]
+pub fn config_set_feature_flag(flag: String, enabled: bool) -> Result<FeatureFlags, String> {
+    let mut flags = get_feature_flags_lock()
+        .lock()
+        .map_err(|e| e.to_string())?;
+    match flag.as_str() {
+        "sentry_crash_reporter" => flags.sentry_crash_reporter = enabled,
+        "saml_sso" => flags.saml_sso = enabled,
+        "yubikey_hardware_fido2" => flags.yubikey_hardware_fido2 = enabled,
+        "nps_survey" => flags.nps_survey = enabled,
+        "aircrack_tools" => flags.aircrack_tools = enabled,
+        "web_relay" => flags.web_relay = enabled,
+        "wasm_plugins" => flags.wasm_plugins = enabled,
+        other => return Err(format!("Unknown feature flag: {other}")),
+    }
+    Ok(flags.clone())
+}
+
 // ── BLD-05: Shell integration install ───────────────────────────────────
 
 #[tauri::command]

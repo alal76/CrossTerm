@@ -23,6 +23,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { useAppStore } from "@/stores/appStore";
+import { useFeatureFlagsStore } from "@/stores/featureFlagsStore";
 import { ThemeVariant } from "@/types";
 import type { BellStyle, CursorStyle, ThemeFile, ThemeTokens } from "@/types";
 import FieldHelp from "@/components/Help/FieldHelp";
@@ -59,7 +60,8 @@ type Category =
   | "keyboard"
   | "notifications"
   | "security"
-  | "advanced";
+  | "advanced"
+  | "experimental";
 
 interface BackendSettings {
   // Appearance
@@ -200,8 +202,9 @@ const CATEGORIES: { id: Category; labelKey: string; icon: React.ReactNode }[] = 
   { id: "file_transfer", labelKey: "settings.fileTransfer",      icon: <FolderSync size={15} /> },
   { id: "keyboard",      labelKey: "settings.keyboard",          icon: <Keyboard size={15} /> },
   { id: "notifications", labelKey: "settings.notifications",     icon: <Bell size={15} /> },
-  { id: "security",      labelKey: "settings.security",         icon: <Shield size={15} /> },
-  { id: "advanced",      labelKey: "settings.advancedCategory",  icon: <Cpu size={15} /> },
+  { id: "security",      labelKey: "settings.security",             icon: <Shield size={15} /> },
+  { id: "advanced",      labelKey: "settings.advancedCategory",      icon: <Cpu size={15} /> },
+  { id: "experimental",  labelKey: "settings.experimentalCategory",  icon: <RefreshCw size={15} /> },
 ];
 
 const DESCRIPTION_KEYS: Record<Category, string> = {
@@ -215,6 +218,7 @@ const DESCRIPTION_KEYS: Record<Category, string> = {
   notifications: "settings.notificationsDescription",
   security:      "settings.securityDescription",
   advanced:      "settings.advancedDescription",
+  experimental:  "settings.experimentalDescription",
 };
 
 const HEADING_KEYS: Record<Category, string> = {
@@ -228,6 +232,7 @@ const HEADING_KEYS: Record<Category, string> = {
   notifications: "settings.notifications",
   security:      "settings.security",
   advanced:      "settings.advancedCategory",
+  experimental:  "settings.experimentalCategory",
 };
 
 // ── Shared UI components ────────────────────────────────────────────────────
@@ -354,6 +359,9 @@ export default function SettingsPanel() {
   const [category, setCategory] = useState<Category>("general");
   const [settings, setSettings] = useState<BackendSettings>(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(true);
+
+  // Experimental feature flags (used in renderExperimental)
+  const featureFlags = useFeatureFlagsStore();
 
   const appTheme      = useAppStore((s) => s.theme);
   const setAppTheme   = useAppStore((s) => s.setTheme);
@@ -876,6 +884,97 @@ export default function SettingsPanel() {
     );
   }
 
+  function renderExperimental() {
+    const FLAG_META: Array<{
+      key: keyof typeof featureFlags;
+      label: string;
+      description: string;
+      prereq: string;
+    }> = [
+      {
+        key: "aircrack_tools",
+        label: "aircrack-ng Security Tools",
+        description: "Enable the WiFi security testing suite (aircrack-ng, airmon-ng). Requires aircrack-ng installed on this machine and disclaimer acceptance.",
+        prereq: "Install aircrack-ng: brew install aircrack-ng (macOS) or apt install aircrack-ng (Linux)",
+      },
+      {
+        key: "sentry_crash_reporter",
+        label: "Sentry Crash Reporter",
+        description: "Send anonymised crash reports to Sentry to help fix bugs. Requires a SENTRY_DSN environment variable set before launch.",
+        prereq: "Provision a Sentry project and set SENTRY_DSN — see docs/V1.2_MANUAL_STEPS.md §1",
+      },
+      {
+        key: "saml_sso",
+        label: "SAML 2.0 SSO",
+        description: "Enable SAML 2.0 Service Provider login. Requires your IT admin to configure the IdP metadata URL in enterprise settings.",
+        prereq: "IdP smoke test required — see docs/V1.2_MANUAL_STEPS.md §2",
+      },
+      {
+        key: "yubikey_hardware_fido2",
+        label: "YubiKey / Hardware FIDO2 Unlock",
+        description: "Unlock the vault with a physical YubiKey 5 or SoloKey instead of software TOTP. Requires hardware present on this machine.",
+        prereq: "Procure YubiKey 5 or SoloKey — see docs/V1.2_MANUAL_STEPS.md §8",
+      },
+      {
+        key: "nps_survey",
+        label: "NPS Feedback Prompt",
+        description: "Show an in-app Net Promoter Score survey after 14 days of active use. Requires a Delighted or Typeform account configured.",
+        prereq: "Set up survey infrastructure — see docs/V1.2_MANUAL_STEPS.md §12",
+      },
+      {
+        key: "web_relay",
+        label: "Web Thin-Client Relay",
+        description: "Start a local WebSocket relay server so you can access sessions from a browser. Exposes a local port — review firewall rules before enabling.",
+        prereq: "No external dependency; review network security before enabling",
+      },
+      {
+        key: "wasm_plugins",
+        label: "WASM Plugin Runtime",
+        description: "Load sandboxed WebAssembly plugins via the wasmtime runtime. Plugin SDK publishing is pending.",
+        prereq: "No external dependency; plugin SDK docs are in progress",
+      },
+    ];
+
+    return (
+      <div className="space-y-1">
+        <div className="mb-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-700 dark:text-amber-300">
+          <strong>Experimental features</strong> are code-complete but may require external accounts, hardware, or manual setup steps before they work correctly. Each toggle shows the prerequisite.
+        </div>
+        {FLAG_META.map(({ key, label, description, prereq }) => {
+          const isOn = featureFlags[key] as boolean;
+          return (
+            <div key={key} className="border border-border-subtle rounded-lg p-3 space-y-1">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <div className="text-sm font-medium text-text-primary">{label}</div>
+                  <div className="text-xs text-text-secondary mt-0.5">{description}</div>
+                </div>
+                <button
+                  onClick={() => { void featureFlags.setFlag(key as keyof import("@/stores/featureFlagsStore").FeatureFlags, !isOn); }}
+                  className={clsx(
+                    "relative shrink-0 w-10 h-5 rounded-full transition-colors",
+                    isOn ? "bg-accent-primary" : "bg-surface-tertiary"
+                  )}
+                  role="switch"
+                  aria-checked={isOn}
+                  aria-label={label}
+                >
+                  <span className={clsx(
+                    "absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform",
+                    isOn ? "translate-x-5" : "translate-x-0"
+                  )} />
+                </button>
+              </div>
+              {!isOn && (
+                <div className="text-[11px] text-text-disabled italic">⚠ {prereq}</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
   const renderCategory = () => {
     switch (category) {
       case "general":       return renderGeneral();
@@ -888,6 +987,7 @@ export default function SettingsPanel() {
       case "notifications": return renderNotifications();
       case "security":      return renderSecurity();
       case "advanced":      return renderAdvanced();
+      case "experimental":  return renderExperimental();
     }
   };
 

@@ -497,6 +497,9 @@ pub fn run() {
             config::mdm::config_mdm_load,
             config::mdm::config_mdm_get_policy,
             config::mdm::config_mdm_status,
+            // Feature flags
+            config::config_get_feature_flags,
+            config::config_set_feature_flag,
             // Team collaboration
             team::team_session_list,
             team::team_session_publish,
