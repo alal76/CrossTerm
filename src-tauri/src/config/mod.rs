@@ -1228,7 +1228,7 @@ pub fn config_is_portable_mode() -> bool {
 /// Capabilities that are code-complete but require external resources or
 /// manual steps before they can be safely enabled in production.
 /// Each flag defaults to `false`; operators opt in explicitly via Settings.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FeatureFlags {
     /// Sentry crash reporting — requires a DSN in SENTRY_DSN env var.
@@ -1251,20 +1251,6 @@ pub struct FeatureFlags {
     pub web_relay: bool,
     /// WASM plugin runtime via wasmtime — enable once plugin SDK is published.
     pub wasm_plugins: bool,
-}
-
-impl Default for FeatureFlags {
-    fn default() -> Self {
-        Self {
-            sentry_crash_reporter: false,
-            saml_sso: false,
-            yubikey_hardware_fido2: false,
-            nps_survey: false,
-            aircrack_tools: false,
-            web_relay: false,
-            wasm_plugins: false,
-        }
-    }
 }
 
 static FEATURE_FLAGS: std::sync::OnceLock<std::sync::Mutex<FeatureFlags>> =
