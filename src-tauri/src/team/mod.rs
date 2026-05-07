@@ -186,6 +186,11 @@ pub fn team_handoff_list() -> Result<Vec<SessionHandoffRequest>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // Lock to serialize library tests since they share global OnceLock state
+    // Using a static Mutex directly to ensure proper initialization on all platforms
+    static LIBRARY_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     fn make_shared_session(id: &str) -> SharedSession {
         SharedSession {
@@ -248,6 +253,7 @@ mod tests {
 
     #[test]
     fn test_team_library_publish_and_list() {
+        let _lock = LIBRARY_TEST_LOCK.lock().unwrap();
         clear_library();
 
         team_session_publish(make_shared_session("s1")).unwrap();
@@ -261,6 +267,7 @@ mod tests {
 
     #[test]
     fn test_team_library_unpublish() {
+        let _lock = LIBRARY_TEST_LOCK.lock().unwrap();
         clear_library();
 
         team_session_publish(make_shared_session("del-1")).unwrap();
