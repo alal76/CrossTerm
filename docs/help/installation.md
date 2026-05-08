@@ -55,9 +55,9 @@ On first launch macOS may show a Gatekeeper dialog â€” open **System Settings â†
 
 **Uninstall:** drag `CrossTerm.app` from `/Applications` to the Trash. To remove user data:
 ```bash
-rm -rf ~/Library/Application\ Support/com.crossterm.app
-rm -rf ~/Library/Preferences/com.crossterm.app.plist
-rm -rf ~/Library/Caches/com.crossterm.app
+rm -rf ~/Library/Application\ Support/com.crossterm.desktop
+rm -rf ~/Library/Preferences/com.crossterm.desktop.plist
+rm -rf ~/Library/Caches/com.crossterm.desktop
 ```
 
 ### Verify checksum (optional)

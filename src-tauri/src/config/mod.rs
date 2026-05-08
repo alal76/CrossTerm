@@ -289,7 +289,9 @@ pub struct SessionDefinition {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionCreateRequest {
+    pub id: Option<String>,
     pub name: String,
     pub session_type: SessionType,
     pub group: Option<String>,
@@ -308,6 +310,7 @@ pub struct SessionCreateRequest {
 }
 
 #[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionUpdateRequest {
     pub name: Option<String>,
     pub session_type: Option<SessionType>,
@@ -519,7 +522,7 @@ fn do_session_create(
     if !profile_file(profile_id).exists() {
         return Err(ConfigError::ProfileNotFound(profile_id.into()));
     }
-    let id = Uuid::new_v4().to_string();
+    let id = req.id.unwrap_or_else(|| Uuid::new_v4().to_string());
     let now = Utc::now();
     let session = SessionDefinition {
         id: id.clone(),
@@ -920,6 +923,7 @@ pub fn session_import_ssh_config(
         }
 
         let req = SessionCreateRequest {
+            id: None,
             name: host.name.clone(),
             session_type: SessionType::SshTerminal,
             group: Some("Imported".to_string()),
@@ -1097,6 +1101,7 @@ pub fn profile_import(
     // Import sessions
     for session in export.sessions {
         let req = SessionCreateRequest {
+            id: None,
             name: session.name,
             session_type: session.session_type,
             group: session.group,
@@ -1359,6 +1364,7 @@ mod tests {
 
     fn make_session_request(name: &str, host: &str) -> SessionCreateRequest {
         SessionCreateRequest {
+            id: None,
             name: name.to_string(),
             session_type: SessionType::SshTerminal,
             group: Some("servers".to_string()),
@@ -1971,6 +1977,7 @@ Host *
         let mut created_ids = Vec::new();
         for (stype, name) in &all_types {
             let req = SessionCreateRequest {
+                id: None,
                 name: name.to_string(),
                 session_type: stype.clone(),
                 group: Some("all-types-test".to_string()),
@@ -2266,6 +2273,7 @@ Host *
         protocol_opts.insert("known_hosts_policy".to_string(), serde_json::json!("strict"));
 
         let req = SessionCreateRequest {
+            id: None,
             name: "SSH with Options".to_string(),
             session_type: SessionType::SshTerminal,
             group: None,

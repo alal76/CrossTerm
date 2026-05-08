@@ -21,7 +21,7 @@ EN_LPROJ="$RESOURCES/en.lproj"
 
 # Book metadata
 BOOK_TITLE="CrossTerm Help"
-BOOK_ID="com.crossterm.app.help"
+BOOK_ID="com.crossterm.desktop.help"
 
 # ── Clean previous build ────────────────────────────────────────────────
 rm -rf "$BUNDLE_DIR"

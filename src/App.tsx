@@ -1848,7 +1848,7 @@ export default function App() {
             onOpenShortcuts={() => setShowShortcutOverlay(true)}
             onOpenHelpArticle={(slug) => { setHelpArticleSlug(slug); setShowHelpPanel(true); }}
           />
-          {showQuickConnect && <QuickConnect onConnect={() => setShowQuickConnect(false)} />}
+          {showQuickConnect && <QuickConnect onConnect={() => setShowQuickConnect(false)} onClose={() => setShowQuickConnect(false)} />}
           <HelpPanel open={showHelpPanel} onClose={() => setShowHelpPanel(false)} articleSlug={helpArticleSlug} />
           <ShortcutOverlay open={showShortcutOverlay} onClose={() => setShowShortcutOverlay(false)} />
           <WhatsNewPanel />

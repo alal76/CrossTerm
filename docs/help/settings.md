@@ -199,6 +199,6 @@ A button to **Export Audit Log** is also available here, which writes all audit 
 
 ## Settings Persistence
 
-Settings are stored per-profile in `~/Library/Application Support/com.crossterm.app/` (macOS), `%APPDATA%\com.crossterm.app\` (Windows), or `~/.config/com.crossterm.app/` (Linux).
+Settings are stored per-profile in `~/Library/Application Support/com.crossterm.desktop/` (macOS), `%APPDATA%\com.crossterm.desktop\` (Windows), or `~/.config/com.crossterm.desktop/` (Linux).
 
 To back up or migrate your settings, use **Profile Sync → Export** in the General tab.

@@ -520,6 +520,7 @@ pub fn run() {
             importer::bundle::session_bundle_import,
             // Startup timing
             startup::startup_get_timing,
+            startup::system_default_username,
             // Vault: reviewer keypair + recording encryption
             vault::shared::vault_generate_reviewer_keypair,
             vault::shared::vault_encrypt_recording,

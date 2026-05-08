@@ -2,10 +2,13 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useSessionStore, evaluateFilterExpr } from "@/stores/sessionStore";
 import { SessionType, ConnectionStatus } from "@/types";
 import type { Session } from "@/types";
+import { invoke } from "@tauri-apps/api/core";
 
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn(),
+  invoke: vi.fn(() => Promise.resolve()),
 }));
+
+const mockInvoke = vi.mocked(invoke);
 
 function makeSession(overrides: Partial<Session> = {}): Session {
   return {
@@ -56,6 +59,22 @@ describe("sessionStore", () => {
       expect(sessions[0].id).toBe("sess-1");
     });
 
+    it("persists to backend via session_create", () => {
+      const session = makeSession({ id: "persist-1", name: "Persisted" });
+      useSessionStore.getState().addSession(session);
+
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "session_create",
+        expect.objectContaining({
+          request: expect.objectContaining({
+            id: "persist-1",
+            name: "Persisted",
+            sessionType: SessionType.SSH,
+          }),
+        })
+      );
+    });
+
     it("appends multiple sessions", () => {
       useSessionStore.getState().addSession(makeSession({ id: "a" }));
       useSessionStore.getState().addSession(makeSession({ id: "b" }));
@@ -85,6 +104,15 @@ describe("sessionStore", () => {
       useSessionStore.getState().removeSession("non-existent");
 
       expect(useSessionStore.getState().sessions).toHaveLength(1);
+    });
+
+    it("calls backend session_delete", () => {
+      const session = makeSession({ id: "del-1" });
+      useSessionStore.getState().addSession(session);
+      mockInvoke.mockClear();
+      useSessionStore.getState().removeSession("del-1");
+
+      expect(mockInvoke).toHaveBeenCalledWith("session_delete", { id: "del-1" });
     });
   });
 
@@ -232,6 +260,22 @@ describe("sessionStore", () => {
       expect(updated.updatedAt).not.toBe(session.updatedAt);
 
       vi.useRealTimers();
+    });
+
+    it("calls backend session_update with the changed fields", () => {
+      const session = makeSession({ id: "upd-2" });
+      useSessionStore.getState().addSession(session);
+      mockInvoke.mockClear();
+
+      useSessionStore.getState().updateSession("upd-2", { name: "New Name" });
+
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "session_update",
+        expect.objectContaining({
+          id: "upd-2",
+          request: expect.objectContaining({ name: "New Name" }),
+        })
+      );
     });
   });
 

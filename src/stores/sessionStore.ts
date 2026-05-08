@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist, createJSONStorage } from "zustand/middleware";
 import { v4 as uuidv4 } from "uuid";
 import { invoke } from "@tauri-apps/api/core";
 import { ConnectionStatus } from "@/types";
@@ -60,7 +61,9 @@ interface SessionState {
   setActiveSmartGroup: (id: string | null) => void;
 }
 
-export const useSessionStore = create<SessionState>((set, get) => ({
+export const useSessionStore = create<SessionState>()(
+  persist(
+    (set, get) => ({
   sessions: [],
   sessionFolders: [],
 
@@ -86,23 +89,54 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
 
-  addSession: (session) =>
-    set((state) => ({ sessions: [...state.sessions, session] })),
+  addSession: (session) => {
+    set((state) => ({ sessions: [...state.sessions, session] }));
+    invoke("session_create", {
+      request: {
+        id: session.id,
+        name: session.name,
+        sessionType: session.type,
+        group: session.group || undefined,
+        tags: session.tags,
+        credentialRef: session.credentialRef,
+        connection: session.connection,
+        startupScript: session.startupScript,
+        notes: session.notes,
+        autoReconnect: session.autoReconnect,
+        keepAliveIntervalSeconds: session.keepAliveIntervalSeconds,
+      },
+    }).catch(() => {/* session will reload on next launch via loadSessions */});
+  },
 
-  removeSession: (id) =>
+  removeSession: (id) => {
     set((state) => ({
       sessions: state.sessions.filter((s) => s.id !== id),
       openTabs: state.openTabs.filter((t) => t.sessionId !== id),
       favorites: state.favorites.filter((fid) => fid !== id),
       selectedSessionIds: state.selectedSessionIds.filter((sid) => sid !== id),
-    })),
+    }));
+    invoke("session_delete", { id }).catch(() => {});
+  },
 
-  updateSession: (id, updates) =>
+  updateSession: (id, updates) => {
     set((state) => ({
       sessions: state.sessions.map((s) =>
         s.id === id ? { ...s, ...updates, updatedAt: new Date().toISOString() } : s
       ),
-    })),
+    }));
+    const request: Record<string, unknown> = {};
+    if (updates.name !== undefined) request.name = updates.name;
+    if (updates.type !== undefined) request.sessionType = updates.type;
+    if (updates.group !== undefined) request.group = updates.group;
+    if (updates.tags !== undefined) request.tags = updates.tags;
+    if (updates.credentialRef !== undefined) request.credentialRef = updates.credentialRef;
+    if (updates.connection !== undefined) request.connection = updates.connection;
+    if (updates.startupScript !== undefined) request.startupScript = updates.startupScript;
+    if (updates.notes !== undefined) request.notes = updates.notes;
+    if (updates.autoReconnect !== undefined) request.autoReconnect = updates.autoReconnect;
+    if (updates.keepAliveIntervalSeconds !== undefined) request.keepAliveIntervalSeconds = updates.keepAliveIntervalSeconds;
+    invoke("session_update", { id, request }).catch(() => {});
+  },
 
   openTab: (session) =>
     set((state) => {
@@ -253,7 +287,23 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     })),
 
   setActiveSmartGroup: (id) => set(() => ({ activeSmartGroupId: id })),
-}));
+}),
+    {
+      name: "crossterm-session-store",
+      storage: createJSONStorage(() => localStorage),
+      // Persist only client-only state. `sessions` are owned by the Rust
+      // backend and reloaded via session_list on startup.
+      partialize: (state) => ({
+        sessionFolders: state.sessionFolders,
+        favorites: state.favorites,
+        recentSessions: state.recentSessions,
+        smartGroups: state.smartGroups,
+        openTabs: state.openTabs,
+        activeTabId: state.activeTabId,
+      }),
+    }
+  )
+);
 
 // ── Pure utility: evaluate a FilterExpr against a Session ──────────────────
 

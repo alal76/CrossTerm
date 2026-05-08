@@ -95,9 +95,9 @@ On first launch macOS may show a Gatekeeper dialog — open **System Settings �
 
 **Uninstall:** drag \`CrossTerm.app\` from \`/Applications\` to the Trash. To remove user data:
 \`\`\`bash
-rm -rf ~/Library/Application\\ Support/com.crossterm.app
-rm -rf ~/Library/Preferences/com.crossterm.app.plist
-rm -rf ~/Library/Caches/com.crossterm.app
+rm -rf ~/Library/Application\\ Support/com.crossterm.desktop
+rm -rf ~/Library/Preferences/com.crossterm.desktop.plist
+rm -rf ~/Library/Caches/com.crossterm.desktop
 \`\`\`
 
 ### Verify checksum (optional)
@@ -1003,7 +1003,7 @@ The bottom of the Advanced tab shows read-only diagnostic information: Version, 
 
 ## Settings Persistence
 
-Settings are stored per-profile in \`~/Library/Application Support/com.crossterm.app/\` (macOS), \`%APPDATA%\\com.crossterm.app\\\` (Windows), or \`~/.config/com.crossterm.app/\` (Linux).
+Settings are stored per-profile in \`~/Library/Application Support/com.crossterm.desktop/\` (macOS), \`%APPDATA%\\com.crossterm.desktop\\\` (Windows), or \`~/.config/com.crossterm.desktop/\` (Linux).
 
 To back up or migrate your settings, use **Profile Sync → Export** in the General tab.`,
   },

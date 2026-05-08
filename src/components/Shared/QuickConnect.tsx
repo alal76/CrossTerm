@@ -2,12 +2,14 @@ import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import clsx from "clsx";
 import { Zap, ArrowRight } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
+import { invoke } from "@tauri-apps/api/core";
 import { useSessionStore } from "@/stores/sessionStore";
 import { SessionType } from "@/types";
 import type { Session } from "@/types";
 
 interface QuickConnectProps {
   onConnect?: (session: Session) => void;
+  onClose?: () => void;
 }
 
 function parseInput(raw: string): { user?: string; host: string; port: number } | null {
@@ -46,10 +48,10 @@ function parseInput(raw: string): { user?: string; host: string; port: number } 
   return { user, host, port };
 }
 
-export default function QuickConnect({ onConnect }: Readonly<QuickConnectProps>) {
-  const [open, setOpen] = useState(false);
+export default function QuickConnect({ onConnect, onClose }: Readonly<QuickConnectProps>) {
   const [input, setInput] = useState("");
   const [selectedIdx, setSelectedIdx] = useState(-1);
+  const [defaultUser, setDefaultUser] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const sessions = useSessionStore((s) => s.sessions);
@@ -58,10 +60,10 @@ export default function QuickConnect({ onConnect }: Readonly<QuickConnectProps>)
   const addRecentSession = useSessionStore((s) => s.addRecentSession);
 
   const close = useCallback(() => {
-    setOpen(false);
     setInput("");
     setSelectedIdx(-1);
-  }, []);
+    onClose?.();
+  }, [onClose]);
 
   // Autocomplete from saved sessions
   const suggestions = useMemo(() => {
@@ -76,30 +78,29 @@ export default function QuickConnect({ onConnect }: Readonly<QuickConnectProps>)
       .slice(0, 5);
   }, [input, sessions]);
 
-  // Global shortcut: Ctrl/Cmd+Shift+N
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "n") {
-        e.preventDefault();
-        setOpen((prev) => !prev);
-      }
-    }
-    globalThis.addEventListener("keydown", onKeyDown);
-    return () => globalThis.removeEventListener("keydown", onKeyDown);
-  }, []);
+  // Global shortcut handling now lives in App.tsx — parent controls mount.
 
   useEffect(() => {
-    if (open) requestAnimationFrame(() => inputRef.current?.focus());
-  }, [open]);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, []);
+
+  // Fetch the OS user's name once so we can use it as a fallback
+  // when the user types a host without a `user@` prefix.
+  useEffect(() => {
+    invoke<string>("system_default_username")
+      .then((u) => setDefaultUser(u || ""))
+      .catch(() => setDefaultUser(""));
+  }, []);
 
   function handleConnect() {
     const parsed = parseInput(input);
     if (!parsed) return;
 
+    const effectiveUser = parsed.user || defaultUser;
     const now = new Date().toISOString();
     const session: Session = {
       id: uuidv4(),
-      name: parsed.user ? `${parsed.user}@${parsed.host}` : parsed.host,
+      name: effectiveUser ? `${effectiveUser}@${parsed.host}` : parsed.host,
       type: SessionType.SSH,
       group: "",
       tags: [],
@@ -107,7 +108,7 @@ export default function QuickConnect({ onConnect }: Readonly<QuickConnectProps>)
         host: parsed.host,
         port: parsed.port,
         protocolOptions: {
-          username: parsed.user ?? "",
+          username: effectiveUser,
         },
       },
       createdAt: now,
@@ -154,8 +155,6 @@ export default function QuickConnect({ onConnect }: Readonly<QuickConnectProps>)
         break;
     }
   }
-
-  if (!open) return null;
 
   const parsed = parseInput(input);
 

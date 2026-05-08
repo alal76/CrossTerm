@@ -393,6 +393,46 @@ async fn check_port(ip: IpAddr, port: u16, timeout: Duration) -> Option<OpenPort
     }
 }
 
+/// Probe a host using the system `ping` command (ICMP echo).
+/// Returns true if the host responds within the timeout.
+/// Uses the OS `ping` binary so it works without raw-socket privileges.
+async fn ping_host(ip: IpAddr, timeout: Duration) -> bool {
+    let timeout_secs = timeout.as_secs().max(1);
+    let timeout_ms = timeout.as_millis().max(100).to_string();
+    let ip_str = ip.to_string();
+
+    // Platform-specific argv for a single-shot ping.
+    #[cfg(target_os = "windows")]
+    let args: Vec<String> = vec![
+        "-n".into(), "1".into(),
+        "-w".into(), timeout_ms,
+        ip_str,
+    ];
+    #[cfg(target_os = "macos")]
+    let args: Vec<String> = vec![
+        "-c".into(), "1".into(),
+        "-W".into(), timeout_ms, // BSD ping: -W in milliseconds
+        ip_str,
+    ];
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let args: Vec<String> = vec![
+        "-c".into(), "1".into(),
+        "-W".into(), timeout_secs.to_string(), // Linux ping: -W in seconds
+        ip_str,
+    ];
+
+    let _ = timeout_secs; // suppress unused warning on macOS/windows
+    let result = tokio::time::timeout(
+        timeout + Duration::from_millis(500),
+        tokio::process::Command::new("ping")
+            .args(&args)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status(),
+    ).await;
+    matches!(result, Ok(Ok(status)) if status.success())
+}
+
 /// Attempt reverse DNS lookup for an IP address.
 async fn reverse_dns(ip: IpAddr) -> Option<String> {
     tokio::task::spawn_blocking(move || dns_lookup_reverse(ip))
@@ -636,12 +676,17 @@ pub async fn network_explore_start(
                 let _permit = sem.acquire_owned().await.unwrap();
                 let start = Instant::now();
 
+                // Run TCP port checks and ICMP ping concurrently.
                 let port_futures: Vec<_> = ports.iter().map(|&p| check_port(ip, p, timeout)).collect();
-                let port_results = futures::future::join_all(port_futures).await;
+                let (port_results, ping_alive) = tokio::join!(
+                    futures::future::join_all(port_futures),
+                    ping_host(ip, timeout),
+                );
                 let open_ports: Vec<OpenPort> = port_results.into_iter().flatten().collect();
                 let response_time = start.elapsed().as_secs_f64() * 1000.0;
 
-                if !open_ports.is_empty() {
+                // Surface a host if any TCP port is open OR if it answered ping.
+                if !open_ports.is_empty() || ping_alive {
                     let hostname = reverse_dns(ip).await;
                     let os_guess = guess_os(&open_ports);
                     let suggested_session_type = suggest_session_type(&open_ports);
@@ -2576,6 +2621,38 @@ mod tests {
         let result = check_port(ip, 39999, timeout).await;
         // Port 39999 is almost certainly closed, so result should be None
         assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_ping_loopback() {
+        // Loopback should always respond to ping on supported platforms.
+        // If the test runner doesn't have `ping` in PATH the test is skipped.
+        if which_ping().is_none() {
+            eprintln!("skipping: `ping` binary not available in PATH");
+            return;
+        }
+        let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+        let alive = ping_host(ip, Duration::from_millis(2000)).await;
+        assert!(alive, "expected loopback to respond to ping");
+    }
+
+    #[tokio::test]
+    async fn test_ping_unreachable() {
+        // 192.0.2.0/24 is TEST-NET-1, reserved for documentation; should not respond.
+        let ip = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
+        let alive = ping_host(ip, Duration::from_millis(500)).await;
+        assert!(!alive, "TEST-NET-1 host must not respond to ping");
+    }
+
+    fn which_ping() -> Option<std::path::PathBuf> {
+        let candidates = if cfg!(windows) {
+            vec!["C:\\Windows\\System32\\PING.EXE"]
+        } else {
+            vec!["/sbin/ping", "/bin/ping", "/usr/bin/ping", "/usr/sbin/ping"]
+        };
+        candidates.into_iter()
+            .map(std::path::PathBuf::from)
+            .find(|p| p.exists())
     }
 
     #[test]

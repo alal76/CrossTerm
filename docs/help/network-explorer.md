@@ -48,6 +48,9 @@ Scans all 65 535 TCP ports on discovered hosts. Much slower but reveals unusual 
 
 Use the **Stop** button to abort a scan in progress.
 
+!!! tip "Hosts with no open ports"
+    A host is reported if **any** TCP port responds **or** if it answers an ICMP echo (ping). This means firewalled machines that block all probed ports but still respond to ping (a common configuration on Linux servers and IoT devices) will still appear in results, even though their **Open Ports** column may be empty.
+
 ---
 
 ## Results

@@ -6,13 +6,9 @@ import { useSessionStore } from "@/stores/sessionStore";
 import { SessionType } from "@/types";
 import type { Session } from "@/types";
 
-function openQuickConnect() {
-  fireEvent.keyDown(document, {
-    key: "n",
-    ctrlKey: true,
-    shiftKey: true,
-  });
-}
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(() => Promise.resolve("")),
+}));
 
 function makeSession(overrides: Partial<Session> = {}): Session {
   return {
@@ -47,35 +43,26 @@ describe("QuickConnect", () => {
     resetStore();
   });
 
-  it("renders nothing when not opened", () => {
-    const { container } = render(<QuickConnect />);
-    expect(container.firstChild).toBeNull();
-  });
-
-  it("opens via Ctrl+Shift+N and shows input", () => {
+  it("renders the input when mounted", () => {
     render(<QuickConnect />);
-    openQuickConnect();
-
     expect(
       screen.getByPlaceholderText("ssh user@host:port")
     ).toBeInTheDocument();
   });
 
-  it("closes on Escape", () => {
-    render(<QuickConnect />);
-    openQuickConnect();
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  it("calls onClose when Escape is pressed", () => {
+    const onClose = vi.fn();
+    render(<QuickConnect onClose={onClose} />);
 
     const input = screen.getByPlaceholderText("ssh user@host:port");
     fireEvent.keyDown(input, { key: "Escape" });
 
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(onClose).toHaveBeenCalled();
   });
 
   it("creates session on Enter with valid input", async () => {
     const onConnect = vi.fn();
     render(<QuickConnect onConnect={onConnect} />);
-    openQuickConnect();
 
     const input = screen.getByPlaceholderText("ssh user@host:port");
     await userEvent.type(input, "admin@myserver.com:2222");
@@ -96,7 +83,6 @@ describe("QuickConnect", () => {
     );
 
     render(<QuickConnect />);
-    openQuickConnect();
 
     const input = screen.getByPlaceholderText("ssh user@host:port");
     await userEvent.type(input, "prod");
