@@ -1081,7 +1081,7 @@ function SessionCanvas() {
         const isActive = tab.id === activeTabId;
 
         if (tab.sessionType === SessionType.SSH && session) {
-          const username = (session.connection.protocolOptions?.["username"] as string) ?? "root";
+          const username = (session.connection.protocolOptions?.["username"] as string) ?? "";
           const sessionHostColor = hostColor(session.connection.host);
           return (
             <div

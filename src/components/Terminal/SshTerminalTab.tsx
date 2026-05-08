@@ -79,6 +79,7 @@ export default function SshTerminalTab({
 
   // ── Credential prompt state (when connecting with none auth and auth is required) ──
   const [showCredentialPrompt, setShowCredentialPrompt] = useState(false);
+  const [credUsername, setCredUsername] = useState(username);
   const [credPassword, setCredPassword] = useState("");
   const [credSubmitting, setCredSubmitting] = useState(false);
 
@@ -269,7 +270,7 @@ export default function SshTerminalTab({
         sessionId,
         host,
         port,
-        username,
+        username: credUsername || username,
         auth: newAuth,
       });
       lastAuthPassword.current = credPassword;
@@ -289,7 +290,7 @@ export default function SshTerminalTab({
       setLoading(false);
       setCredSubmitting(false);
     }
-  }, [credPassword, sessionId, host, port, username, createTerminal, updateTabStatus]);
+  }, [credUsername, credPassword, sessionId, host, port, username, createTerminal, updateTabStatus]);
 
   const handleAuthSubmit = async () => {
     if (!authPrompt) return;
@@ -490,11 +491,20 @@ export default function SshTerminalTab({
             >
               <label className="text-xs text-text-secondary">{t("ssh.enterPassword")}</label>
               <input
-                type="password"
+                type="text"
                 autoFocus
+                value={credUsername}
+                onChange={(e) => setCredUsername(e.target.value)}
+                placeholder={t("ssh.usernamePlaceholder", "Username")}
+                autoComplete="username"
+                className="w-full px-3 py-2 text-sm rounded bg-surface-elevated border border-border-default text-text-primary focus:border-accent-primary focus:outline-none"
+              />
+              <input
+                type="password"
                 value={credPassword}
                 onChange={(e) => setCredPassword(e.target.value)}
                 placeholder={t("ssh.passwordPlaceholder", "Password")}
+                autoComplete="current-password"
                 className="w-full px-3 py-2 text-sm rounded bg-surface-elevated border border-border-default text-text-primary focus:border-accent-primary focus:outline-none"
               />
               <button

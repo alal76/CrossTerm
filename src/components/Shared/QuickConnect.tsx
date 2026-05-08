@@ -107,7 +107,7 @@ export default function QuickConnect({ onConnect }: Readonly<QuickConnectProps>)
         host: parsed.host,
         port: parsed.port,
         protocolOptions: {
-          username: parsed.user ?? "root",
+          username: parsed.user ?? "",
         },
       },
       createdAt: now,

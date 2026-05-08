@@ -57,6 +57,7 @@ export default function SessionEditor({ session, defaultType, onClose }: Session
   const [type, setType] = useState<SessionType>(session?.type ?? defaultType ?? SessionType.SSH);
   const [host, setHost] = useState(session?.connection.host ?? "");
   const [port, setPort] = useState(String(session?.connection.port ?? DEFAULT_PORTS[SessionType.SSH] ?? 22));
+  const [username, setUsername] = useState((session?.connection.protocolOptions?.["username"] as string) ?? "");
   const [group, setGroup] = useState(session?.group ?? "");
   const [tags, setTags] = useState(session?.tags.join(", ") ?? "");
   const [credentialRef, setCredentialRef] = useState(session?.credentialRef ?? "");
@@ -105,6 +106,9 @@ export default function SessionEditor({ session, defaultType, onClose }: Session
       .map((t) => t.trim())
       .filter(Boolean);
 
+    const usernameVal = username.trim();
+    const protocolOptions = usernameVal ? { username: usernameVal } : undefined;
+
     if (isEdit && session) {
       updateSession(session.id, {
         name: name.trim(),
@@ -112,7 +116,7 @@ export default function SessionEditor({ session, defaultType, onClose }: Session
         group: group.trim(),
         tags: parsedTags,
         credentialRef: credentialRef.trim() || undefined,
-        connection: { host: host.trim(), port: portNum },
+        connection: { host: host.trim(), port: portNum, protocolOptions },
         startupScript: startupScript.trim() || undefined,
         notes: notes.trim() || undefined,
       });
@@ -124,7 +128,7 @@ export default function SessionEditor({ session, defaultType, onClose }: Session
         group: group.trim(),
         tags: parsedTags,
         credentialRef: credentialRef.trim() || undefined,
-        connection: { host: host.trim(), port: portNum },
+        connection: { host: host.trim(), port: portNum, protocolOptions },
         startupScript: startupScript.trim() || undefined,
         notes: notes.trim() || undefined,
         createdAt: now,
@@ -219,6 +223,19 @@ export default function SessionEditor({ session, defaultType, onClose }: Session
                 />
               </Field>
             </div>
+          )}
+
+          {/* Username */}
+          {needsHost && (
+            <Field label="Username">
+              <input
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="e.g. admin, ubuntu, root"
+                autoComplete="username"
+                className={inputClass(false)}
+              />
+            </Field>
           )}
 
           {/* Group */}
