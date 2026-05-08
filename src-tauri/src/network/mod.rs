@@ -397,31 +397,27 @@ async fn check_port(ip: IpAddr, port: u16, timeout: Duration) -> Option<OpenPort
 /// Returns true if the host responds within the timeout.
 /// Uses the OS `ping` binary so it works without raw-socket privileges.
 async fn ping_host(ip: IpAddr, timeout: Duration) -> bool {
-    let timeout_secs = timeout.as_secs().max(1);
-    let timeout_ms = timeout.as_millis().max(100).to_string();
     let ip_str = ip.to_string();
 
     // Platform-specific argv for a single-shot ping.
     #[cfg(target_os = "windows")]
-    let args: Vec<String> = vec![
-        "-n".into(), "1".into(),
-        "-w".into(), timeout_ms,
-        ip_str,
-    ];
+    let args: Vec<String> = {
+        let timeout_ms = timeout.as_millis().max(100).to_string();
+        vec!["-n".into(), "1".into(), "-w".into(), timeout_ms, ip_str]
+    };
     #[cfg(target_os = "macos")]
-    let args: Vec<String> = vec![
-        "-c".into(), "1".into(),
-        "-W".into(), timeout_ms, // BSD ping: -W in milliseconds
-        ip_str,
-    ];
+    let args: Vec<String> = {
+        // BSD ping: -W is in milliseconds.
+        let timeout_ms = timeout.as_millis().max(100).to_string();
+        vec!["-c".into(), "1".into(), "-W".into(), timeout_ms, ip_str]
+    };
     #[cfg(all(unix, not(target_os = "macos")))]
-    let args: Vec<String> = vec![
-        "-c".into(), "1".into(),
-        "-W".into(), timeout_secs.to_string(), // Linux ping: -W in seconds
-        ip_str,
-    ];
+    let args: Vec<String> = {
+        // Linux ping: -W is in seconds.
+        let timeout_secs = timeout.as_secs().max(1).to_string();
+        vec!["-c".into(), "1".into(), "-W".into(), timeout_secs, ip_str]
+    };
 
-    let _ = timeout_secs; // suppress unused warning on macOS/windows
     let result = tokio::time::timeout(
         timeout + Duration::from_millis(500),
         tokio::process::Command::new("ping")
