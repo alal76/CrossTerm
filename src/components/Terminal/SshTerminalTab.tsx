@@ -115,6 +115,20 @@ export default function SshTerminalTab({
       listen<SshAuthSuccessEvent>("ssh:auth_success", (event) => {
         if (!cancelled) { authSuccessInfo.current = event.payload; }
       }),
+      listen<{ host: string; port: number; algorithm: string; fingerprint: string }>(
+        "ssh:host_key_new",
+        (event) => {
+          if (cancelled) return;
+          if (event.payload.host !== host || event.payload.port !== port) return;
+          setConnectLogs((prev) => [
+            ...prev,
+            {
+              level: "warn",
+              message: `New host key trusted (TOFU): ${event.payload.algorithm} ${event.payload.fingerprint}`,
+            } as SshConnectLogEvent,
+          ]);
+        },
+      ),
     ];
 
     async function connect() {
@@ -445,6 +459,33 @@ export default function SshTerminalTab({
   }
 
   if (error) {
+    const isHostKeyChanged = error.includes("Host key changed");
+    const retryConnect = () => {
+      setError(null);
+      setLoading(true);
+      setConnectLogs([]);
+      authSuccessInfo.current = null;
+      invoke<string>("ssh_connect", { sessionId, host, port, username, auth })
+        .then((connId) => {
+          createTerminal(sessionId, connId);
+          setConnectionId(connId);
+          setLoading(false);
+        })
+        .catch((e) => {
+          setError(String(e));
+          setLoading(false);
+        });
+    };
+    const forgetAndRetry = async () => {
+      try {
+        await invoke("ssh_forget_host_key", { host, port });
+      } catch (e) {
+        // surface and abort if the forget itself fails
+        setError(`Failed to forget host key: ${String(e)}`);
+        return;
+      }
+      retryConnect();
+    };
     return (
       <div className="flex items-center justify-center w-full h-full bg-surface-primary">
         <div className="flex flex-col items-center gap-3 max-w-md w-full px-6 text-center">
@@ -520,34 +561,42 @@ export default function SshTerminalTab({
               </button>
             </form>
           ) : (
-            <div className="flex gap-2">
-              <button
-                onClick={() => setShowCredentialPrompt(true)}
-                className="px-3 py-1.5 text-xs rounded bg-interactive-default hover:bg-interactive-hover text-text-primary transition-colors duration-[var(--duration-short)]"
-              >
-                {t("ssh.retryWithCredentials")}
-              </button>
-              <button
-                onClick={() => {
-                  setError(null);
-                  setLoading(true);
-                  setConnectLogs([]);
-                  authSuccessInfo.current = null;
-                  invoke<string>("ssh_connect", { sessionId, host, port, username, auth })
-                    .then((connId) => {
-                      createTerminal(sessionId, connId);
-                      setConnectionId(connId);
-                      setLoading(false);
-                    })
-                    .catch((e) => {
-                      setError(String(e));
-                      setLoading(false);
-                    });
-                }}
-                className="px-3 py-1.5 text-xs rounded text-text-secondary hover:text-text-primary transition-colors duration-[var(--duration-short)]"
-              >
-                {t("common.retry", "Retry")}
-              </button>
+            <div className="flex flex-wrap gap-2 justify-center">
+              {isHostKeyChanged ? (
+                <>
+                  <button
+                    onClick={forgetAndRetry}
+                    className="px-3 py-1.5 text-xs rounded bg-status-disconnected/80 hover:bg-status-disconnected text-white transition-colors duration-[var(--duration-short)]"
+                    title={t(
+                      "ssh.forgetHostKeyHelp",
+                      "Removes the saved host key for this server. Only do this if you trust the new key (e.g. the server was reinstalled or rekeyed)."
+                    )}
+                  >
+                    {t("ssh.forgetHostKeyAndRetry", "Forget host key & retry")}
+                  </button>
+                  <button
+                    onClick={() => setShowCredentialPrompt(true)}
+                    className="px-3 py-1.5 text-xs rounded text-text-secondary hover:text-text-primary transition-colors duration-[var(--duration-short)]"
+                  >
+                    {t("ssh.retryWithCredentials")}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={() => setShowCredentialPrompt(true)}
+                    className="px-3 py-1.5 text-xs rounded bg-interactive-default hover:bg-interactive-hover text-text-primary transition-colors duration-[var(--duration-short)]"
+                  >
+                    {t("ssh.retryWithCredentials")}
+                  </button>
+                  <button
+                    onClick={retryConnect}
+                    className="px-3 py-1.5 text-xs rounded text-text-secondary hover:text-text-primary transition-colors duration-[var(--duration-short)]"
+                  >
+                    {t("common.retry", "Retry")}
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>

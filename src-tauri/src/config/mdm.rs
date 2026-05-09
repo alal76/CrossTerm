@@ -83,6 +83,10 @@ pub fn config_mdm_status() -> Result<MdmStatus, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // Serialize tests that touch the global MDM_POLICY store so they can't race.
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     fn fresh_store() {
         // Reset by writing None to the mutex (OnceLock can't be reset, but we can clear the inner value)
@@ -94,6 +98,7 @@ mod tests {
 
     #[test]
     fn test_mdm_status_unmanaged() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         fresh_store();
         let status = config_mdm_status().unwrap();
         assert!(!status.managed);
@@ -102,6 +107,7 @@ mod tests {
 
     #[test]
     fn test_mdm_load_policy() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         fresh_store();
         let json = r#"{"enforce_sso":true,"disable_local_vault":false,"require_recording":false,"disable_plugin_installation":false,"version":3}"#;
         let status = config_mdm_load(json.to_string()).unwrap();
@@ -113,6 +119,7 @@ mod tests {
 
     #[test]
     fn test_mdm_load_from_file() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         use std::io::Write;
         let mut tmp = tempfile::NamedTempFile::new().unwrap();
         let json = r#"{"enforce_sso":false,"disable_local_vault":true,"require_recording":true,"disable_plugin_installation":true,"version":5}"#;
