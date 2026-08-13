@@ -149,6 +149,12 @@ export default function NetworkScanner() {
                     {t('network.hostname')}
                   </th>
                   <th className="px-3 py-2 text-left font-medium text-text-secondary">
+                    MAC Address
+                  </th>
+                  <th className="px-3 py-2 text-left font-medium text-text-secondary">
+                    Vendor
+                  </th>
+                  <th className="px-3 py-2 text-left font-medium text-text-secondary">
                     {t('network.openPorts')}
                   </th>
                   <th className="px-3 py-2 text-right font-medium text-text-secondary" />
@@ -163,6 +169,12 @@ export default function NetworkScanner() {
                     <td className="px-3 py-2 text-text-primary">{result.ip}</td>
                     <td className="px-3 py-2 text-text-secondary">
                       {result.hostname ?? '—'}
+                    </td>
+                    <td className="px-3 py-2 text-text-secondary font-mono text-xs">
+                      {result.mac_address ?? '—'}
+                    </td>
+                    <td className="px-3 py-2 text-text-secondary text-xs">
+                      {result.mac_vendor ?? '—'}
                     </td>
                     <td className="px-3 py-2">
                       <div className="flex flex-wrap gap-1">

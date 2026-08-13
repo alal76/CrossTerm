@@ -89,6 +89,7 @@ pub struct ScanResult {
     pub ip: String,
     pub hostname: Option<String>,
     pub mac_address: Option<String>,
+    pub mac_vendor: Option<String>,
     pub open_ports: Vec<OpenPort>,
     pub os_guess: Option<String>,
     pub response_time_ms: f64,
@@ -237,6 +238,7 @@ pub struct ExploreResult {
     pub ip: String,
     pub hostname: Option<String>,
     pub mac_address: Option<String>,
+    pub mac_vendor: Option<String>,
     pub open_ports: Vec<OpenPort>,
     pub os_guess: Option<String>,
     pub response_time_ms: f64,
@@ -438,11 +440,13 @@ async fn reverse_dns(ip: IpAddr) -> Option<String> {
 }
 
 /// System-level reverse DNS via getnameinfo(3) — Unix only.
+/// Falls back to numeric form if no PTR record; caller receives None in that case.
 #[cfg(unix)]
 fn dns_lookup_reverse(ip: IpAddr) -> Option<String> {
     use std::ffi::CStr;
     use std::mem;
 
+    let ip_str = ip.to_string();
     let mut host = [0i8; 256];
 
     let ret = match ip {
@@ -457,7 +461,7 @@ fn dns_lookup_reverse(ip: IpAddr) -> Option<String> {
                 host.len() as libc::socklen_t,
                 std::ptr::null_mut(),
                 0,
-                libc::NI_NAMEREQD,
+                0, // no NI_NAMEREQD — mDNS/.local names resolve on macOS via system resolver
             )
         },
         IpAddr::V6(v6) => unsafe {
@@ -471,14 +475,16 @@ fn dns_lookup_reverse(ip: IpAddr) -> Option<String> {
                 host.len() as libc::socklen_t,
                 std::ptr::null_mut(),
                 0,
-                libc::NI_NAMEREQD,
+                0,
             )
         },
     };
 
     if ret == 0 {
         let cstr = unsafe { CStr::from_ptr(host.as_ptr()) };
-        Some(cstr.to_string_lossy().into_owned())
+        let resolved = cstr.to_string_lossy().into_owned();
+        // Only return when getnameinfo actually found a name, not the numeric fallback
+        if resolved != ip_str { Some(resolved) } else { None }
     } else {
         None
     }
@@ -486,6 +492,44 @@ fn dns_lookup_reverse(ip: IpAddr) -> Option<String> {
 
 #[cfg(not(unix))]
 fn dns_lookup_reverse(_ip: IpAddr) -> Option<String> {
+    None
+}
+
+/// Look up the MAC address for an IP from the system ARP cache.
+async fn resolve_arp_mac(ip: IpAddr) -> Option<String> {
+    let ip_str = ip.to_string();
+    let output = tokio::process::Command::new("arp")
+        .args(["-n", &ip_str])
+        .output()
+        .await
+        .ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let re = regex::Regex::new(r"([0-9a-fA-F]{2}[:\-]){5}[0-9a-fA-F]{2}").ok()?;
+    let m = re.find(&text)?;
+    Some(m.as_str().replace('-', ":").to_uppercase())
+}
+
+/// Query macvendors.com for the NIC manufacturer matching the OUI prefix of a MAC.
+async fn lookup_mac_vendor(mac: &str) -> Option<String> {
+    let clean: String = mac.chars().filter(|c| c.is_ascii_hexdigit()).collect();
+    if clean.len() < 6 {
+        return None;
+    }
+    let oui = format!("{}-{}-{}", &clean[0..2], &clean[2..4], &clean[4..6]);
+    let url = format!("https://api.macvendors.com/{}", oui);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .ok()?;
+    let resp = client.get(&url).send().await.ok()?;
+    if resp.status().is_success() {
+        let text = resp.text().await.ok()?;
+        let text = text.trim().to_string();
+        // API returns plain text on success; JSON on error (rate-limit etc.)
+        if !text.is_empty() && !text.starts_with('{') {
+            return Some(text);
+        }
+    }
     None
 }
 
@@ -580,12 +624,18 @@ pub async fn network_scan_start(
                 let response_time = start.elapsed().as_secs_f64() * 1000.0;
 
                 if !open_ports.is_empty() {
-                    let hostname = reverse_dns(ip).await;
+                    let (hostname, mac_address) = tokio::join!(reverse_dns(ip), resolve_arp_mac(ip));
+                    let mac_vendor = if let Some(ref mac) = mac_address {
+                        lookup_mac_vendor(mac).await
+                    } else {
+                        None
+                    };
                     let os_guess = guess_os(&open_ports);
                     let result = ScanResult {
                         ip: ip.to_string(),
                         hostname,
-                        mac_address: None,
+                        mac_address,
+                        mac_vendor,
                         open_ports,
                         os_guess,
                         response_time_ms: response_time,
@@ -683,13 +733,19 @@ pub async fn network_explore_start(
 
                 // Surface a host if any TCP port is open OR if it answered ping.
                 if !open_ports.is_empty() || ping_alive {
-                    let hostname = reverse_dns(ip).await;
+                    let (hostname, mac_address) = tokio::join!(reverse_dns(ip), resolve_arp_mac(ip));
+                    let mac_vendor = if let Some(ref mac) = mac_address {
+                        lookup_mac_vendor(mac).await
+                    } else {
+                        None
+                    };
                     let os_guess = guess_os(&open_ports);
                     let suggested_session_type = suggest_session_type(&open_ports);
                     let result = ExploreResult {
                         ip: ip.to_string(),
                         hostname,
-                        mac_address: None,
+                        mac_address,
+                        mac_vendor,
                         open_ports,
                         os_guess,
                         response_time_ms: response_time,

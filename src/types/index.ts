@@ -13,6 +13,27 @@ export enum SessionType {
   KubernetesExec = "kubernetes_exec",
   DockerExec = "docker_exec",
   NetworkExplorer = "network_explorer",
+  // Extended protocol breadth
+  Mosh = "mosh",
+  WinRM = "winrm",
+  WebSocketTerminal = "websocket_terminal",
+  TN3270 = "tn3270",
+  TN5250 = "tn5250",
+  IpmiSol = "ipmi_sol",
+  Redfish = "redfish",
+  NetConf = "netconf",
+  Snmp = "snmp",
+  Smb = "smb",
+  WebDav = "webdav",
+  GrpcExplorer = "grpc_explorer",
+  MqttClient = "mqtt_client",
+  KubernetesPortForward = "kubernetes_port_forward",
+  DockerLogs = "docker_logs",
+  SpiceConsole = "spice_console",
+  ProxmoxConsole = "proxmox_console",
+  Rlogin = "rlogin",
+  X11Forward = "x11_forward",
+  NfsExplorer = "nfs_explorer",
 }
 
 export enum ConnectionStatus {
@@ -476,6 +497,7 @@ export interface ScanResult {
   ip: string;
   hostname?: string;
   mac_address?: string;
+  mac_vendor?: string;
   open_ports: OpenPort[];
   os_guess?: string;
   response_time_ms: number;
@@ -538,6 +560,7 @@ export interface ExploreResult {
   ip: string;
   hostname?: string;
   mac_address?: string;
+  mac_vendor?: string;
   open_ports: OpenPort[];
   os_guess?: string;
   response_time_ms: number;

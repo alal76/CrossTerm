@@ -9,8 +9,21 @@ mod editor;
 mod error;
 mod team;
 mod ftp;
+mod grpc;
 mod importer;
+mod ipmi;
 mod keygen;
+mod mosh;
+mod mqtt;
+mod netconf;
+mod redfish;
+mod smb;
+mod snmp;
+mod tn3270;
+mod tn5250;
+mod webdav;
+mod websocket_term;
+mod winrm;
 mod keymgr;
 mod l10n;
 mod macros;
@@ -70,7 +83,20 @@ pub fn run() {
         .manage(security::SecurityState::new())
         .manage(cloud::CloudState::new())
         .manage(ftp::FtpState::new())
+        .manage(grpc::GrpcState::new())
+        .manage(ipmi::IpmiState::new())
+        .manage(mosh::MoshState::new())
+        .manage(mqtt::MqttState::new())
+        .manage(netconf::NetconfState::new())
         .manage(network::NetworkState::new())
+        .manage(redfish::RedfishState::new())
+        .manage(smb::SmbState::new())
+        .manage(snmp::SnmpState::new())
+        .manage(tn3270::Tn3270State::new())
+        .manage(tn5250::Tn5250State::new())
+        .manage(webdav::WebDavState::new())
+        .manage(websocket_term::WsTermState::new())
+        .manage(winrm::WinRmState::new())
         .manage(rdp::RdpState::new())
         .manage(recording::RecordingState::new())
         .manage(serial::SerialState::new())
@@ -275,6 +301,80 @@ pub fn run() {
             cloud::gcp::cloud_gcp_list_objects,
             cloud::gcp::cloud_gcp_cloud_shell,
             cloud::gcp::cloud_gcp_log_tail,
+            // Mosh
+            mosh::mosh_connect,
+            mosh::mosh_disconnect,
+            mosh::mosh_list,
+            // WinRM
+            winrm::winrm_connect,
+            winrm::winrm_run_command,
+            winrm::winrm_disconnect,
+            winrm::winrm_list,
+            // WebSocket Terminal
+            websocket_term::wsterm_connect,
+            websocket_term::wsterm_send,
+            websocket_term::wsterm_disconnect,
+            websocket_term::wsterm_list,
+            // TN3270
+            tn3270::tn3270_connect,
+            tn3270::tn3270_send,
+            tn3270::tn3270_disconnect,
+            tn3270::tn3270_list,
+            // TN5250
+            tn5250::tn5250_connect,
+            tn5250::tn5250_send,
+            tn5250::tn5250_disconnect,
+            tn5250::tn5250_list,
+            // IPMI SOL
+            ipmi::ipmi_sol_connect,
+            ipmi::ipmi_sol_send,
+            ipmi::ipmi_sol_disconnect,
+            ipmi::ipmi_list,
+            // Redfish
+            redfish::redfish_connect,
+            redfish::redfish_get_systems,
+            redfish::redfish_power_control,
+            redfish::redfish_disconnect,
+            redfish::redfish_list,
+            // NETCONF
+            netconf::netconf_connect,
+            netconf::netconf_get_config,
+            netconf::netconf_rpc,
+            netconf::netconf_disconnect,
+            netconf::netconf_list,
+            // SNMP
+            snmp::snmp_add_session,
+            snmp::snmp_get,
+            snmp::snmp_walk,
+            snmp::snmp_remove_session,
+            snmp::snmp_list_sessions,
+            // SMB
+            smb::smb_connect,
+            smb::smb_list_dir,
+            smb::smb_list_shares,
+            smb::smb_disconnect,
+            smb::smb_list_sessions,
+            // WebDAV
+            webdav::webdav_connect,
+            webdav::webdav_list,
+            webdav::webdav_get,
+            webdav::webdav_put,
+            webdav::webdav_delete,
+            webdav::webdav_disconnect,
+            webdav::webdav_list_sessions,
+            // gRPC
+            grpc::grpc_connect,
+            grpc::grpc_list_services,
+            grpc::grpc_invoke,
+            grpc::grpc_disconnect,
+            grpc::grpc_list_sessions,
+            // MQTT
+            mqtt::mqtt_connect,
+            mqtt::mqtt_subscribe,
+            mqtt::mqtt_publish,
+            mqtt::mqtt_unsubscribe,
+            mqtt::mqtt_disconnect,
+            mqtt::mqtt_list_sessions,
             // FTP
             ftp::ftp_connect,
             ftp::ftp_disconnect,

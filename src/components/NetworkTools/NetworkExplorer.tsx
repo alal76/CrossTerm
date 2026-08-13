@@ -362,6 +362,8 @@ export default function NetworkExplorer() {
         (r) =>
           r.ip.includes(q) ||
           (r.hostname ?? '').toLowerCase().includes(q) ||
+          (r.mac_address ?? '').toLowerCase().includes(q) ||
+          (r.mac_vendor ?? '').toLowerCase().includes(q) ||
           r.open_ports.some((p) => p.service_name.includes(q))
       );
     }
@@ -608,6 +610,8 @@ export default function NetworkExplorer() {
                       [
                         { key: 'ip' as SortKey, label: t('network.ip') },
                         { key: 'hostname' as SortKey, label: t('network.hostname') },
+                        { key: null, label: 'MAC Address' },
+                        { key: null, label: 'Vendor' },
                         { key: null, label: t('network.os') },
                         { key: 'ports' as SortKey, label: t('network.openPorts') },
                         { key: 'response' as SortKey, label: t('network.responseTime') },
@@ -636,6 +640,8 @@ export default function NetworkExplorer() {
                     <tr key={result.ip} className="border-b border-border-subtle last:border-0 hover:bg-surface-secondary">
                       <td className="px-3 py-2 text-text-primary font-mono text-xs">{result.ip}</td>
                       <td className="px-3 py-2 text-text-secondary">{result.hostname ?? '—'}</td>
+                      <td className="px-3 py-2 text-text-secondary font-mono text-xs">{result.mac_address ?? '—'}</td>
+                      <td className="px-3 py-2 text-text-secondary text-xs">{result.mac_vendor ?? '—'}</td>
                       <td className="px-3 py-2 text-text-secondary">{result.os_guess ?? '—'}</td>
                       <td className="px-3 py-2">
                         <div className="flex flex-wrap gap-1">
