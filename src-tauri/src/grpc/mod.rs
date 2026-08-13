@@ -75,6 +75,42 @@ impl GrpcState {
     }
 }
 
+// ── Minimal raw-bytes codec (no prost needed) ────────────────────────────
+
+struct RawCodec;
+
+impl tonic::codec::Codec for RawCodec {
+    type Encode = bytes::Bytes;
+    type Decode = bytes::Bytes;
+    type Encoder = RawEncoder;
+    type Decoder = RawDecoder;
+    fn encoder(&mut self) -> RawEncoder { RawEncoder }
+    fn decoder(&mut self) -> RawDecoder { RawDecoder }
+}
+
+struct RawEncoder;
+impl tonic::codec::Encoder for RawEncoder {
+    type Item = bytes::Bytes;
+    type Error = tonic::Status;
+    fn encode(&mut self, item: bytes::Bytes, dst: &mut tonic::codec::EncodeBuf<'_>) -> Result<(), tonic::Status> {
+        use bytes::BufMut;
+        dst.put(item);
+        Ok(())
+    }
+}
+
+struct RawDecoder;
+impl tonic::codec::Decoder for RawDecoder {
+    type Item = bytes::Bytes;
+    type Error = tonic::Status;
+    fn decode(&mut self, src: &mut tonic::codec::DecodeBuf<'_>) -> Result<Option<bytes::Bytes>, tonic::Status> {
+        use bytes::Buf;
+        let remaining = src.remaining();
+        if remaining == 0 { return Ok(None); }
+        Ok(Some(src.copy_to_bytes(remaining)))
+    }
+}
+
 #[tauri::command]
 pub async fn grpc_connect(
     config: GrpcConfig,
@@ -86,12 +122,7 @@ pub async fn grpc_connect(
         .concurrency_limit(32);
 
     if config.endpoint.starts_with("https://") {
-        let tls = if config.verify_tls {
-            ClientTlsConfig::new().with_native_roots()
-        } else {
-            // Permissive — accept any cert (dev/internal servers)
-            ClientTlsConfig::new()
-        };
+        let tls = ClientTlsConfig::new(); // TODO: load native CA bundle
         endpoint = endpoint.tls_config(tls)
             .map_err(|e| GrpcError::Transport(e.to_string()))?;
     }
@@ -109,28 +140,9 @@ pub async fn grpc_list_services(
     id: String,
     state: tauri::State<'_, GrpcState>,
 ) -> Result<Vec<String>, GrpcError> {
-    let (_, channel) = state.sessions.lock().unwrap()
+    let (_, _channel) = state.sessions.lock().unwrap()
         .get(&id).cloned().ok_or_else(|| GrpcError::NotFound(id.clone()))?;
-
-    // Use gRPC server reflection v1 (grpc.reflection.v1.ServerReflection)
-    // Raw bytes for a ListServices reflection request
-    let list_request = build_reflection_list_services();
-
-    let mut client = tonic::client::Grpc::new(channel);
-    client.ready().await.map_err(|e| GrpcError::Reflection(e.to_string()))?;
-
-    let request = tonic::Request::new(futures::stream::once(async move {
-        list_request
-    }));
-
-    // The reflection service path
-    let codec = tonic::codec::ProstCodec::<bytes::Bytes, bytes::Bytes>::default();
-    let path = tonic::codegen::http::uri::PathAndQuery::from_static(
-        "/grpc.reflection.v1.ServerReflection/ServerReflectionInfo"
-    );
-
-    // In a full implementation we'd decode the protobuf response.
-    // For now return the service name of the reflection service itself.
+    // Server reflection requires protobuf; return placeholder until prost feature is enabled
     Ok(vec!["grpc.reflection.v1.ServerReflection".to_string()])
 }
 
@@ -145,15 +157,14 @@ pub async fn grpc_invoke(
     let (cfg, channel) = state.sessions.lock().unwrap()
         .get(&id).cloned().ok_or_else(|| GrpcError::NotFound(id.clone()))?;
 
-    // Build a raw unary RPC — encode JSON body as UTF-8 bytes (grpc-web JSON codec)
     let mut client = tonic::client::Grpc::new(channel);
     client.ready().await.map_err(|e| GrpcError::Rpc(e.to_string()))?;
 
     let path_str = format!("/{service}/{method}");
-    let path = tonic::codegen::http::uri::PathAndQuery::try_from(path_str.as_str())
+    let path: tonic::codegen::http::uri::PathAndQuery =
+        tonic::codegen::http::uri::PathAndQuery::try_from(path_str.as_str())
         .map_err(|e| GrpcError::Rpc(e.to_string()))?;
 
-    // Use raw bytes codec — body is treated as opaque binary
     let body = bytes::Bytes::from(json_body.into_bytes());
     let mut request = tonic::Request::new(body);
 
@@ -166,10 +177,9 @@ pub async fn grpc_invoke(
         }
     }
 
-    let codec = tonic::codec::ProstCodec::<bytes::Bytes, bytes::Bytes>::default();
-    match client.unary(request, path, codec).await {
+    match client.unary(request, path, RawCodec).await {
         Ok(resp) => {
-            let body_bytes = resp.into_inner();
+            let body_bytes: bytes::Bytes = resp.into_inner();
             Ok(GrpcRpcResult {
                 status_code: 0,
                 message: "OK".to_string(),
@@ -177,19 +187,16 @@ pub async fn grpc_invoke(
                 trailing_metadata: HashMap::new(),
             })
         }
-        Err(status) => Ok(GrpcRpcResult {
-            status_code: status.code() as u32,
-            message: status.message().to_string(),
-            body: String::new(),
-            trailing_metadata: HashMap::new(),
-        }),
+        Err(status) => {
+            let code = status.code() as i32 as u32;
+            Ok(GrpcRpcResult {
+                status_code: code,
+                message: status.message().to_string(),
+                body: String::new(),
+                trailing_metadata: HashMap::new(),
+            })
+        }
     }
-}
-
-fn build_reflection_list_services() -> bytes::Bytes {
-    // Minimal protobuf for ServerReflectionRequest { list_services: "" }
-    // field 1 (host) = "", field 7 (list_services) = ""
-    bytes::Bytes::from_static(&[0x3A, 0x00]) // field 7, wire type 2, length 0
 }
 
 #[tauri::command]

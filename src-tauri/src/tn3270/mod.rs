@@ -170,8 +170,7 @@ pub async fn tn3270_connect(
 #[tauri::command]
 pub fn tn3270_send(
     id: String,
-    /// Base64-encoded 3270 AID+data record
-    data_b64: String,
+    data_b64: String, // base64-encoded 3270 AID+data record
     state: tauri::State<'_, Tn3270State>,
 ) -> Result<(), Tn3270Error> {
     let data = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &data_b64)

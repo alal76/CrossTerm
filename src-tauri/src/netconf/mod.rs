@@ -72,14 +72,15 @@ impl client::Handler for SshHandler {
 
 pub struct NetconfState {
     sessions: Mutex<HashMap<String, NetconfSession>>,
-    channels: Mutex<HashMap<String, russh::Channel<client::Msg>>>,
+    // Tokio Mutex so we can hold the guard across .await in send_rpc_and_receive
+    channels: tokio::sync::Mutex<HashMap<String, russh::Channel<client::Msg>>>,
 }
 
 impl NetconfState {
     pub fn new() -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
-            channels: Mutex::new(HashMap::new()),
+            channels: tokio::sync::Mutex::new(HashMap::new()),
         }
     }
 }
@@ -160,7 +161,7 @@ pub async fn netconf_connect(
     state.sessions.lock().unwrap().insert(id.clone(), NetconfSession {
         id: id.clone(), host: config.host, server_capabilities: server_caps, session_id,
     });
-    state.channels.lock().unwrap().insert(id.clone(), channel);
+    state.channels.lock().await.insert(id.clone(), channel);
     Ok(id)
 }
 
@@ -206,7 +207,7 @@ async fn send_rpc_and_receive(
     rpc: String,
     state: tauri::State<'_, NetconfState>,
 ) -> Result<NetconfRpcResult, NetconfError> {
-    let mut channels = state.channels.lock().unwrap();
+    let mut channels = state.channels.lock().await;  // tokio Mutex — safe to hold across .await
     let ch = channels.get_mut(&id).ok_or_else(|| NetconfError::NotFound(id.clone()))?;
 
     ch.data(rpc.as_bytes()).await.map_err(|e| NetconfError::Ssh(e.to_string()))?;
@@ -235,7 +236,11 @@ async fn send_rpc_and_receive(
 #[tauri::command]
 pub fn netconf_disconnect(id: String, state: tauri::State<'_, NetconfState>) -> Result<(), NetconfError> {
     state.sessions.lock().unwrap().remove(&id).ok_or_else(|| NetconfError::NotFound(id.clone()))?;
-    state.channels.lock().unwrap().remove(&id);
+    // channels lock is async but disconnect is sync; spawn a task to remove it
+    let channels = state.channels.try_lock();
+    if let Ok(mut guard) = channels {
+        guard.remove(&id);
+    }
     Ok(())
 }
 

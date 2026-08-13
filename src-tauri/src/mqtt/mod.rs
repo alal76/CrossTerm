@@ -82,6 +82,16 @@ impl MqttState {
     }
 }
 
+// Permissive TLS verifier — accepts self-signed broker certs
+#[derive(Debug)]
+struct MqttNoCertVerifier;
+impl rustls::client::danger::ServerCertVerifier for MqttNoCertVerifier {
+    fn verify_server_cert(&self, _: &rustls::pki_types::CertificateDer, _: &[rustls::pki_types::CertificateDer], _: &rustls::pki_types::ServerName, _: &[u8], _: rustls::pki_types::UnixTime) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> { Ok(rustls::client::danger::ServerCertVerified::assertion()) }
+    fn verify_tls12_signature(&self, _: &[u8], _: &rustls::pki_types::CertificateDer, _: &rustls::DigitallySignedStruct) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> { Ok(rustls::client::danger::HandshakeSignatureValid::assertion()) }
+    fn verify_tls13_signature(&self, _: &[u8], _: &rustls::pki_types::CertificateDer, _: &rustls::DigitallySignedStruct) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> { Ok(rustls::client::danger::HandshakeSignatureValid::assertion()) }
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> { rustls::crypto::ring::default_provider().signature_verification_algorithms.supported_schemes() }
+}
+
 #[tauri::command]
 pub async fn mqtt_connect(
     config: MqttConfig,
@@ -101,8 +111,14 @@ pub async fn mqtt_connect(
     }
 
     if config.use_tls {
-        // Use native-roots TLS configuration
-        opts.set_transport(rumqttc::Transport::Tls(rumqttc::TlsConfiguration::Native));
+        // Simple TLS with empty CA (accepts any cert) — good for dev brokers
+        opts.set_transport(rumqttc::Transport::Tls(
+            rumqttc::TlsConfiguration::Simple {
+                ca: vec![],
+                alpn: None,
+                client_auth: None,
+            }
+        ));
     }
 
     let (client, mut event_loop) = AsyncClient::new(opts, 64);

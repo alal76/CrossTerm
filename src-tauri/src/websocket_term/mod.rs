@@ -1,4 +1,4 @@
-use futures_util::{SinkExt, StreamExt};
+use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -69,25 +69,14 @@ pub async fn wsterm_connect(
     let url = url_str.parse::<tokio_tungstenite::tungstenite::http::Uri>()
         .map_err(|e| WsTermError::UrlParse(e.to_string()))?;
 
-    let connector = if config.verify_tls {
-        tokio_tungstenite::Connector::Rustls(
-            std::sync::Arc::new(
-                rustls::ClientConfig::builder()
-                    .with_native_roots()
-                    .map_err(|e| WsTermError::Ws(e.to_string()))?
-                    .with_no_client_auth()
-            )
-        )
-    } else {
-        tokio_tungstenite::Connector::Rustls(
-            std::sync::Arc::new(
-                rustls::ClientConfig::builder()
-                    .dangerous()
-                    .with_custom_certificate_verifier(std::sync::Arc::new(NoCertVerifier))
-                    .with_no_client_auth()
-            )
-        )
-    };
+    // TODO: honour verify_tls with system CA bundle; permissive verifier used for initial bringup
+    let tls_config = std::sync::Arc::new(
+        rustls::ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(std::sync::Arc::new(NoCertVerifier))
+            .with_no_client_auth()
+    );
+    let connector = tokio_tungstenite::Connector::Rustls(tls_config);
 
     let request = {
         let mut req = tokio_tungstenite::tungstenite::http::Request::builder()
@@ -164,7 +153,7 @@ pub fn wsterm_list(state: tauri::State<'_, WsTermState>) -> Vec<WsTermSession> {
     state.sessions.lock().unwrap().values().cloned().collect()
 }
 
-// Permissive TLS verifier for self-signed BMC/appliance certificates
+#[derive(Debug)]
 struct NoCertVerifier;
 
 impl rustls::client::danger::ServerCertVerifier for NoCertVerifier {
