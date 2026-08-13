@@ -478,27 +478,45 @@ async fn ping_host(ip: IpAddr, timeout: Duration) -> bool {
 }
 
 /// Aggressively resolve a hostname for an IP using all available methods in parallel.
-/// Returns the first non-None result; tries: getnameinfo, /etc/hosts, nslookup, nmblookup, arp.
-async fn resolve_hostname_aggressive(ip: IpAddr) -> Option<String> {
+/// open_ports is used to attempt TLS certificate hostname extraction.
+/// Returns the first non-None result from 8 concurrent methods.
+async fn resolve_hostname_aggressive(ip: IpAddr, open_ports: Vec<OpenPort>) -> Option<String> {
     let ip_str = ip.to_string();
 
-    let (r_dns, r_hosts, r_nslookup, r_netbios, r_arp) = tokio::join!(
+    // Check for any open TLS ports we can grab a cert from
+    const TLS_PORTS: &[u16] = &[443, 5986, 6443, 8443, 8883, 50051];
+    let tls_port = TLS_PORTS.iter()
+        .find(|&&p| open_ports.iter().any(|op| op.port == p))
+        .copied();
+
+    let tls_fut = async move {
+        if let Some(port) = tls_port {
+            extract_tls_cert_hostname(ip, port).await
+        } else {
+            None
+        }
+    };
+
+    let (r_dns, r_hosts, r_nslookup, r_netbios, r_arp, r_dig, r_host_cmd, r_tls) = tokio::join!(
         reverse_dns_getnameinfo(ip),
         lookup_hosts_file(ip_str.clone()),
         nslookup_reverse(ip_str.clone()),
         nmblookup_name(ip_str.clone()),
         arp_hostname(ip_str.clone()),
+        dig_reverse(ip_str.clone()),
+        host_reverse(ip_str.clone()),
+        tls_fut,
     );
 
-    r_dns.or(r_hosts).or(r_nslookup).or(r_netbios).or(r_arp)
+    r_dns.or(r_hosts).or(r_nslookup).or(r_netbios).or(r_arp).or(r_dig).or(r_host_cmd).or(r_tls)
 }
 
-/// Method 1 — getnameinfo: resolves PTR records and, on macOS, mDNS via the system resolver.
+/// Method 1 — getnameinfo with timeout: PTR + mDNS via the system resolver.
 async fn reverse_dns_getnameinfo(ip: IpAddr) -> Option<String> {
-    tokio::task::spawn_blocking(move || dns_lookup_via_getnameinfo(ip))
-        .await
-        .ok()
-        .flatten()
+    tokio::time::timeout(
+        Duration::from_secs(4),
+        tokio::task::spawn_blocking(move || dns_lookup_via_getnameinfo(ip)),
+    ).await.ok()?.ok().flatten()
 }
 
 #[cfg(unix)]
@@ -661,7 +679,85 @@ async fn arp_hostname(ip: String) -> Option<String> {
     None
 }
 
-/// Query macvendors.com for the NIC manufacturer matching the OUI prefix of a MAC.
+/// Method 6 — dig +short -x: cleaner than nslookup; returns nothing on failure.
+async fn dig_reverse(ip: String) -> Option<String> {
+    let output = tokio::time::timeout(
+        Duration::from_secs(3),
+        tokio::process::Command::new("dig")
+            .args(["+short", "+time=2", "+tries=1", "-x", &ip])
+            .output(),
+    ).await.ok()?.ok()?;
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    let name = text.lines()
+        .find(|l| !l.starts_with(';') && !l.trim().is_empty())?
+        .trim()
+        .trim_end_matches('.');
+    if !name.is_empty() { Some(name.to_string()) } else { None }
+}
+
+/// Method 7 — host command: POSIX reverse DNS, available on macOS and most Linux distros.
+async fn host_reverse(ip: String) -> Option<String> {
+    let output = tokio::time::timeout(
+        Duration::from_secs(3),
+        tokio::process::Command::new("host").arg(&ip).output(),
+    ).await.ok()?.ok()?;
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    for line in text.lines() {
+        if line.contains("domain name pointer") {
+            let name = line.split("domain name pointer").nth(1)?
+                .trim().trim_end_matches('.');
+            if !name.is_empty() { return Some(name.to_string()); }
+        }
+    }
+    None
+}
+
+/// Method 8 — TLS cert CN/SAN: extract hostname from X.509 cert on any open TLS port.
+/// Works even when DNS has no PTR record (HTTPS, WinRM-TLS, K8s API, gRPC-TLS, MQTT-TLS...).
+async fn extract_tls_cert_hostname(ip: IpAddr, port: u16) -> Option<String> {
+    let addr = format!("{}:{}", ip, port);
+    let script = format!(
+        "echo Q | openssl s_client -connect {addr} 2>/dev/null | openssl x509 -noout -subject -ext subjectAltName 2>/dev/null"
+    );
+    let output = tokio::time::timeout(
+        Duration::from_secs(5),
+        tokio::process::Command::new("sh").args(["-c", &script]).output(),
+    ).await.ok()?.ok()?;
+
+    let text = String::from_utf8_lossy(&output.stdout);
+
+    // Prefer SAN DNS entries (more authoritative than CN)
+    for line in text.lines() {
+        if line.contains("DNS:") {
+            for seg in line.split(',') {
+                if let Some(name) = seg.trim().strip_prefix("DNS:") {
+                    let name = name.trim().trim_end_matches('.');
+                    if !name.is_empty() && !name.starts_with('*') {
+                        return Some(name.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // Fall back to CN from subject line
+    for line in text.lines() {
+        if let Some(cn_pos) = line.find("CN") {
+            let after = &line[cn_pos + 2..];
+            let cn = after.trim_start_matches(|c: char| c == '=' || c == ' ');
+            let cn = cn.split([',', '/']).next()?.trim().trim_end_matches('.');
+            // Skip empty, single-char, or space-containing CN values
+            if cn.len() > 1 && !cn.contains(' ') {
+                return Some(cn.to_string());
+            }
+        }
+    }
+    None
+}
+
+
 async fn lookup_mac_vendor(mac: &str) -> Option<String> {
     let clean: String = mac.chars().filter(|c| c.is_ascii_hexdigit()).collect();
     if clean.len() < 6 {
@@ -776,7 +872,7 @@ pub async fn network_scan_start(
                 let response_time = start.elapsed().as_secs_f64() * 1000.0;
 
                 if !open_ports.is_empty() {
-                    let (hostname, mac_address) = tokio::join!(resolve_hostname_aggressive(ip), resolve_arp_mac(ip));
+                    let (hostname, mac_address) = tokio::join!(resolve_hostname_aggressive(ip, open_ports.clone()), resolve_arp_mac(ip));
                     let mac_vendor = if let Some(ref mac) = mac_address {
                         lookup_mac_vendor(mac).await
                     } else {
@@ -893,7 +989,7 @@ pub async fn network_explore_start(
 
                 // Surface a host if any TCP port is open OR if it answered ping.
                 if !open_ports.is_empty() || ping_alive {
-                    let (hostname, mac_address) = tokio::join!(resolve_hostname_aggressive(ip), resolve_arp_mac(ip));
+                    let (hostname, mac_address) = tokio::join!(resolve_hostname_aggressive(ip, open_ports.clone()), resolve_arp_mac(ip));
                     let mac_vendor = if let Some(ref mac) = mac_address {
                         lookup_mac_vendor(mac).await
                     } else {
