@@ -199,6 +199,17 @@ pub enum ServiceFilter {
     Postgresql,
     Redis,
     Mongodb,
+    // New protocol breadth additions
+    WinRm,
+    WinRmTls,
+    Mqtt,
+    MqttTls,
+    Netconf,
+    Grpc,
+    KubeApi,
+    DockerApi,
+    DockerApiTls,
+    WsTerminal,
     Custom(u16),
 }
 
@@ -217,6 +228,16 @@ impl ServiceFilter {
             ServiceFilter::Postgresql => 5432,
             ServiceFilter::Redis => 6379,
             ServiceFilter::Mongodb => 27017,
+            ServiceFilter::WinRm => 5985,
+            ServiceFilter::WinRmTls => 5986,
+            ServiceFilter::Mqtt => 1883,
+            ServiceFilter::MqttTls => 8883,
+            ServiceFilter::Netconf => 830,
+            ServiceFilter::Grpc => 50051,
+            ServiceFilter::KubeApi => 6443,
+            ServiceFilter::DockerApi => 2375,
+            ServiceFilter::DockerApiTls => 2376,
+            ServiceFilter::WsTerminal => 7681,
             ServiceFilter::Custom(p) => *p,
         }
     }
@@ -344,16 +365,26 @@ fn guess_service(port: u16) -> String {
         143 => "imap".to_string(),
         443 => "https".to_string(),
         445 => "smb".to_string(),
+        830 => "netconf".to_string(),
         993 => "imaps".to_string(),
         995 => "pop3s".to_string(),
+        1883 => "mqtt".to_string(),
+        2375 => "docker-api".to_string(),
+        2376 => "docker-api-tls".to_string(),
         3306 => "mysql".to_string(),
         3389 => "rdp".to_string(),
         5432 => "postgresql".to_string(),
         5900 => "vnc".to_string(),
+        5985 => "winrm".to_string(),
+        5986 => "winrm-tls".to_string(),
         6379 => "redis".to_string(),
+        6443 => "kube-api".to_string(),
+        7681 => "wsterm".to_string(),
         8080 => "http-alt".to_string(),
         8443 => "https-alt".to_string(),
+        8883 => "mqtt-tls".to_string(),
         27017 => "mongodb".to_string(),
+        50051 => "grpc".to_string(),
         _ => format!("port-{}", port),
     }
 }
@@ -367,6 +398,20 @@ fn suggest_session_type(open_ports: &[OpenPort]) -> Option<String> {
         Some("rdp".to_string())
     } else if ports.contains(&5900) {
         Some("vnc".to_string())
+    } else if ports.contains(&5985) || ports.contains(&5986) {
+        Some("winrm".to_string())
+    } else if ports.contains(&6443) {
+        Some("kubernetes_exec".to_string())
+    } else if ports.contains(&2375) || ports.contains(&2376) {
+        Some("docker_exec".to_string())
+    } else if ports.contains(&1883) || ports.contains(&8883) {
+        Some("mqtt_client".to_string())
+    } else if ports.contains(&50051) {
+        Some("grpc_explorer".to_string())
+    } else if ports.contains(&830) {
+        Some("netconf".to_string())
+    } else if ports.contains(&7681) {
+        Some("websocket_terminal".to_string())
     } else if ports.contains(&23) {
         Some("telnet".to_string())
     } else if ports.contains(&21) {
@@ -378,8 +423,9 @@ fn suggest_session_type(open_ports: &[OpenPort]) -> Option<String> {
 
 /// Common ports to scan by default.
 const DEFAULT_PORTS: &[u16] = &[
-    22, 23, 25, 53, 80, 110, 143, 443, 445, 993, 995, 3306, 3389, 5432, 5900, 6379, 8080, 8443,
-    27017,
+    21, 22, 23, 25, 53, 80, 110, 143, 443, 445,
+    830, 993, 995, 1883, 2375, 2376, 3306, 3389, 5432, 5900,
+    5985, 5986, 6379, 6443, 7681, 8080, 8443, 8883, 27017, 50051,
 ];
 
 /// Try to connect to a TCP port with a timeout.
@@ -777,6 +823,14 @@ const DEFAULT_EXPLORE_SERVICES: &[ServiceFilter] = &[
     ServiceFilter::Telnet,
     ServiceFilter::Ftp,
     ServiceFilter::Smb,
+    ServiceFilter::WinRm,
+    ServiceFilter::WinRmTls,
+    ServiceFilter::Mqtt,
+    ServiceFilter::Netconf,
+    ServiceFilter::Grpc,
+    ServiceFilter::KubeApi,
+    ServiceFilter::DockerApi,
+    ServiceFilter::WsTerminal,
 ];
 
 #[tauri::command]

@@ -547,6 +547,16 @@ export type ServiceFilter =
   | 'postgresql'
   | 'redis'
   | 'mongodb'
+  | 'win_rm'
+  | 'win_rm_tls'
+  | 'mqtt'
+  | 'mqtt_tls'
+  | 'netconf'
+  | 'grpc'
+  | 'kube_api'
+  | 'docker_api'
+  | 'docker_api_tls'
+  | 'ws_terminal'
   | { custom: number };
 
 export interface ExploreTarget {

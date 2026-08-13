@@ -61,6 +61,15 @@ const WELL_KNOWN_SERVICES: { id: ServiceFilter; label: string; port: number }[] 
   { id: 'postgresql', label: 'PostgreSQL (5432)', port: 5432 },
   { id: 'redis', label: 'Redis (6379)', port: 6379 },
   { id: 'mongodb', label: 'MongoDB (27017)', port: 27017 },
+  { id: 'win_rm', label: 'WinRM (5985)', port: 5985 },
+  { id: 'win_rm_tls', label: 'WinRM TLS (5986)', port: 5986 },
+  { id: 'mqtt', label: 'MQTT (1883)', port: 1883 },
+  { id: 'mqtt_tls', label: 'MQTT TLS (8883)', port: 8883 },
+  { id: 'netconf', label: 'NETCONF (830)', port: 830 },
+  { id: 'grpc', label: 'gRPC (50051)', port: 50051 },
+  { id: 'kube_api', label: 'Kubernetes API (6443)', port: 6443 },
+  { id: 'docker_api', label: 'Docker API (2375)', port: 2375 },
+  { id: 'ws_terminal', label: 'WS Terminal / ttyd (7681)', port: 7681 },
 ];
 
 const SESSION_ICON: Record<string, string> = {
@@ -106,6 +115,21 @@ const SESSION_TYPE_MAP: Record<string, SessionType> = {
   rdp: SessionType.RDP,
   vnc: SessionType.VNC,
   telnet: SessionType.Telnet,
+  winrm: SessionType.WinRM,
+  'winrm-tls': SessionType.WinRM,
+  'kube-api': SessionType.KubernetesExec,
+  'docker-api': SessionType.DockerExec,
+  'docker-api-tls': SessionType.DockerExec,
+  mqtt: SessionType.MqttClient,
+  'mqtt-tls': SessionType.MqttClient,
+  grpc: SessionType.GrpcExplorer,
+  netconf: SessionType.NetConf,
+  wsterm: SessionType.WebSocketTerminal,
+  kubernetes_exec: SessionType.KubernetesExec,
+  docker_exec: SessionType.DockerExec,
+  mqtt_client: SessionType.MqttClient,
+  grpc_explorer: SessionType.GrpcExplorer,
+  websocket_terminal: SessionType.WebSocketTerminal,
 };
 
 type SortKey = 'ip' | 'hostname' | 'ports' | 'response';
