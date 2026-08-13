@@ -432,18 +432,19 @@ async fn ping_host(ip: IpAddr, timeout: Duration) -> bool {
 }
 
 /// Aggressively resolve a hostname for an IP using all available methods in parallel.
-/// Returns the first non-None result; tries: getnameinfo, /etc/hosts, nslookup, nmblookup.
+/// Returns the first non-None result; tries: getnameinfo, /etc/hosts, nslookup, nmblookup, arp.
 async fn resolve_hostname_aggressive(ip: IpAddr) -> Option<String> {
     let ip_str = ip.to_string();
 
-    let (r_dns, r_hosts, r_nslookup, r_netbios) = tokio::join!(
+    let (r_dns, r_hosts, r_nslookup, r_netbios, r_arp) = tokio::join!(
         reverse_dns_getnameinfo(ip),
         lookup_hosts_file(ip_str.clone()),
         nslookup_reverse(ip_str.clone()),
         nmblookup_name(ip_str.clone()),
+        arp_hostname(ip_str.clone()),
     );
 
-    r_dns.or(r_hosts).or(r_nslookup).or(r_netbios)
+    r_dns.or(r_hosts).or(r_nslookup).or(r_netbios).or(r_arp)
 }
 
 /// Method 1 — getnameinfo: resolves PTR records and, on macOS, mDNS via the system resolver.
@@ -593,6 +594,25 @@ async fn resolve_arp_mac(ip: IpAddr) -> Option<String> {
     let re = regex::Regex::new(r"([0-9a-fA-F]{2}[:\-]){5}[0-9a-fA-F]{2}").ok()?;
     let m = re.find(&text)?;
     Some(m.as_str().replace('-', ":").to_uppercase())
+}
+
+/// Method 5 — arp: extract hostname from the ARP cache line for this IP.
+/// On macOS/Linux, `arp -n <ip>` may print the hostname resolved from the ARP table.
+/// Example macOS output: `homelab.local (192.168.1.5) at aa:bb:cc:dd:ee:ff ...`
+async fn arp_hostname(ip: String) -> Option<String> {
+    let output = tokio::time::timeout(
+        Duration::from_secs(1),
+        tokio::process::Command::new("arp").arg(&ip).output(),
+    ).await.ok()?.ok()?;
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    // macOS/Linux format: "hostname (ip) at mac ..."
+    // The hostname is the first token if it differs from the IP.
+    let first_token = text.split_whitespace().next()?.to_string();
+    if first_token != ip && first_token != "?" && !first_token.is_empty() {
+        return Some(first_token.trim_end_matches('.').to_string());
+    }
+    None
 }
 
 /// Query macvendors.com for the NIC manufacturer matching the OUI prefix of a MAC.
