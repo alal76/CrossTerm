@@ -431,18 +431,31 @@ async fn ping_host(ip: IpAddr, timeout: Duration) -> bool {
     matches!(result, Ok(Ok(status)) if status.success())
 }
 
-/// Attempt reverse DNS lookup for an IP address.
-async fn reverse_dns(ip: IpAddr) -> Option<String> {
-    tokio::task::spawn_blocking(move || dns_lookup_reverse(ip))
+/// Aggressively resolve a hostname for an IP using all available methods in parallel.
+/// Returns the first non-None result; tries: getnameinfo, /etc/hosts, nslookup, nmblookup.
+async fn resolve_hostname_aggressive(ip: IpAddr) -> Option<String> {
+    let ip_str = ip.to_string();
+
+    let (r_dns, r_hosts, r_nslookup, r_netbios) = tokio::join!(
+        reverse_dns_getnameinfo(ip),
+        lookup_hosts_file(ip_str.clone()),
+        nslookup_reverse(ip_str.clone()),
+        nmblookup_name(ip_str.clone()),
+    );
+
+    r_dns.or(r_hosts).or(r_nslookup).or(r_netbios)
+}
+
+/// Method 1 — getnameinfo: resolves PTR records and, on macOS, mDNS via the system resolver.
+async fn reverse_dns_getnameinfo(ip: IpAddr) -> Option<String> {
+    tokio::task::spawn_blocking(move || dns_lookup_via_getnameinfo(ip))
         .await
         .ok()
         .flatten()
 }
 
-/// System-level reverse DNS via getnameinfo(3) — Unix only.
-/// Falls back to numeric form if no PTR record; caller receives None in that case.
 #[cfg(unix)]
-fn dns_lookup_reverse(ip: IpAddr) -> Option<String> {
+fn dns_lookup_via_getnameinfo(ip: IpAddr) -> Option<String> {
     use std::ffi::CStr;
     use std::mem;
 
@@ -461,7 +474,7 @@ fn dns_lookup_reverse(ip: IpAddr) -> Option<String> {
                 host.len() as libc::socklen_t,
                 std::ptr::null_mut(),
                 0,
-                0, // no NI_NAMEREQD — mDNS/.local names resolve on macOS via system resolver
+                0, // no NI_NAMEREQD — allows mDNS/.local resolution via system resolver
             )
         },
         IpAddr::V6(v6) => unsafe {
@@ -483,7 +496,6 @@ fn dns_lookup_reverse(ip: IpAddr) -> Option<String> {
     if ret == 0 {
         let cstr = unsafe { CStr::from_ptr(host.as_ptr()) };
         let resolved = cstr.to_string_lossy().into_owned();
-        // Only return when getnameinfo actually found a name, not the numeric fallback
         if resolved != ip_str { Some(resolved) } else { None }
     } else {
         None
@@ -491,7 +503,81 @@ fn dns_lookup_reverse(ip: IpAddr) -> Option<String> {
 }
 
 #[cfg(not(unix))]
-fn dns_lookup_reverse(_ip: IpAddr) -> Option<String> {
+fn dns_lookup_via_getnameinfo(ip: IpAddr) -> Option<String> {
+    // On Windows use nslookup (spawned below); getnameinfo is available but
+    // the nslookup path is cleaner across MSVC and GNUC toolchains.
+    None
+}
+
+/// Method 2 — /etc/hosts (or Windows hosts file): instant, no network needed.
+async fn lookup_hosts_file(ip: String) -> Option<String> {
+    tokio::task::spawn_blocking(move || {
+        #[cfg(target_os = "windows")]
+        let path = r"C:\Windows\System32\drivers\etc\hosts";
+        #[cfg(not(target_os = "windows"))]
+        let path = "/etc/hosts";
+
+        let content = std::fs::read_to_string(path).ok()?;
+        for line in content.lines() {
+            let line = line.trim();
+            if line.starts_with('#') || line.is_empty() { continue; }
+            let mut parts = line.split_whitespace();
+            if parts.next()? == ip {
+                return parts.next().map(str::to_string);
+            }
+        }
+        None
+    }).await.ok().flatten()
+}
+
+/// Method 3 — nslookup: cross-platform DNS reverse lookup (works on macOS, Linux, Windows).
+async fn nslookup_reverse(ip: String) -> Option<String> {
+    let output = tokio::time::timeout(
+        Duration::from_secs(3),
+        tokio::process::Command::new("nslookup").arg(&ip).output(),
+    ).await.ok()?.ok()?;
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    // Output contains lines like: "1.1.168.192.in-addr.arpa  name = hostname.domain."
+    for line in text.lines() {
+        if let Some(pos) = line.find("name = ") {
+            let name = line[pos + 7..].trim().trim_end_matches('.');
+            if !name.is_empty() && !name.contains("NXDOMAIN") {
+                return Some(name.to_string());
+            }
+        }
+        // Windows nslookup sometimes uses "Name:" format
+        if let Some(rest) = line.strip_prefix("Name:") {
+            let name = rest.trim();
+            if !name.is_empty() {
+                return Some(name.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Method 4 — nmblookup: NetBIOS name resolution for Windows hosts (requires Samba/winbind).
+/// Falls back gracefully if nmblookup is not installed.
+async fn nmblookup_name(ip: String) -> Option<String> {
+    let output = tokio::time::timeout(
+        Duration::from_secs(3),
+        tokio::process::Command::new("nmblookup")
+            .args(["-A", &ip])
+            .output(),
+    ).await.ok()?.ok()?;
+
+    if !output.status.success() { return None; }
+    let text = String::from_utf8_lossy(&output.stdout);
+    // Look for <00> workstation/computer name entries (not GROUP entries)
+    for line in text.lines() {
+        if line.contains("<00>") && !line.contains("GROUP") {
+            let name = line.trim().split_whitespace().next()?;
+            if !name.is_empty() && name != "Looking" {
+                return Some(name.to_string());
+            }
+        }
+    }
     None
 }
 
@@ -624,7 +710,7 @@ pub async fn network_scan_start(
                 let response_time = start.elapsed().as_secs_f64() * 1000.0;
 
                 if !open_ports.is_empty() {
-                    let (hostname, mac_address) = tokio::join!(reverse_dns(ip), resolve_arp_mac(ip));
+                    let (hostname, mac_address) = tokio::join!(resolve_hostname_aggressive(ip), resolve_arp_mac(ip));
                     let mac_vendor = if let Some(ref mac) = mac_address {
                         lookup_mac_vendor(mac).await
                     } else {
@@ -733,7 +819,7 @@ pub async fn network_explore_start(
 
                 // Surface a host if any TCP port is open OR if it answered ping.
                 if !open_ports.is_empty() || ping_alive {
-                    let (hostname, mac_address) = tokio::join!(reverse_dns(ip), resolve_arp_mac(ip));
+                    let (hostname, mac_address) = tokio::join!(resolve_hostname_aggressive(ip), resolve_arp_mac(ip));
                     let mac_vendor = if let Some(ref mac) = mac_address {
                         lookup_mac_vendor(mac).await
                     } else {
