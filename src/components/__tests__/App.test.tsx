@@ -6,7 +6,8 @@ import { useAppStore } from "@/stores/appStore";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useVaultStore } from "@/stores/vaultStore";
-import { ThemeVariant } from "@/types";
+import { ThemeVariant, SessionType, ConnectionStatus } from "@/types";
+import type { Session, Tab } from "@/types";
 
 // Mock ResizeObserver (not available in jsdom)
 class MockResizeObserver {
@@ -31,6 +32,26 @@ vi.mock("@/components/Terminal/SshTerminalTab", () => ({
 
 vi.mock("@/components/Terminal/SplitPaneContainer", () => ({
   default: () => <div data-testid="split-pane-container">SplitPaneContainer Mock</div>,
+}));
+
+// Mock the four orphaned-viewer components (RDP/VNC/Telnet/Serial) so their
+// routing branches in App.tsx can be exercised without pulling in canvas/
+// xterm rendering.
+vi.mock("@/components/RdpViewer/RdpViewer", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`rdp-viewer-${sessionId}`}>RdpViewer Mock</div>
+  ),
+}));
+vi.mock("@/components/VncViewer/VncViewer", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`vnc-viewer-${sessionId}`}>VncViewer Mock</div>
+  ),
+}));
+vi.mock("@/components/Telnet/TelnetTerminal", () => ({
+  default: () => <div data-testid="telnet-terminal">TelnetTerminal Mock</div>,
+}));
+vi.mock("@/components/Serial/SerialTerminal", () => ({
+  default: () => <div data-testid="serial-terminal">SerialTerminal Mock</div>,
 }));
 
 // Mock components that use localStorage directly (tested separately)
@@ -175,6 +196,95 @@ describe("App", () => {
     await waitFor(() => {
       expect(document.documentElement.classList.contains("light")).toBe(true);
       expect(document.documentElement.classList.contains("dark")).toBe(false);
+    });
+  });
+
+  // Regression coverage for wiring RDP/VNC/Telnet/Serial into the tab
+  // router: before this, SessionType.SSH was the only type with a real
+  // component — everything else (including these four, whose components
+  // were fully built but never imported anywhere) silently fell through to
+  // the generic local-shell TerminalTab fallback.
+  describe("session type routing (previously-orphaned viewers)", () => {
+    function baseSession(overrides: Partial<Session>): Session {
+      return {
+        id: "sess-1",
+        name: "Test Session",
+        type: SessionType.SSH,
+        tags: [],
+        connection: { host: "192.168.0.11", port: 22 },
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+        autoReconnect: false,
+        keepAliveIntervalSeconds: 30,
+        ...overrides,
+      };
+    }
+
+    function baseTab(overrides: Partial<Tab>): Tab {
+      return {
+        id: "tab-1",
+        sessionId: "sess-1",
+        title: "Test Tab",
+        sessionType: SessionType.SSH,
+        status: ConnectionStatus.Idle,
+        pinned: false,
+        order: 0,
+        ...overrides,
+      };
+    }
+
+    it("routes an RDP tab to RdpViewer, not the generic local-shell fallback", () => {
+      const session = baseSession({ type: SessionType.RDP, connection: { host: "192.168.0.11", port: 3389 } });
+      const tab = baseTab({ sessionType: SessionType.RDP });
+      useSessionStore.setState({ sessions: [session], openTabs: [tab], activeTabId: tab.id });
+
+      render(<App />);
+
+      expect(screen.getByTestId(`rdp-viewer-${tab.sessionId}`)).toBeInTheDocument();
+      expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
+    });
+
+    it("routes a VNC tab to VncViewer, not the generic local-shell fallback", () => {
+      const session = baseSession({ type: SessionType.VNC, connection: { host: "192.168.0.11", port: 5900 } });
+      const tab = baseTab({ sessionType: SessionType.VNC });
+      useSessionStore.setState({ sessions: [session], openTabs: [tab], activeTabId: tab.id });
+
+      render(<App />);
+
+      expect(screen.getByTestId(`vnc-viewer-${tab.sessionId}`)).toBeInTheDocument();
+      expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
+    });
+
+    it("routes a Telnet tab to TelnetTerminal, not the generic local-shell fallback", () => {
+      const session = baseSession({ type: SessionType.Telnet });
+      const tab = baseTab({ sessionType: SessionType.Telnet });
+      useSessionStore.setState({ sessions: [session], openTabs: [tab], activeTabId: tab.id });
+
+      render(<App />);
+
+      expect(screen.getByTestId("telnet-terminal")).toBeInTheDocument();
+      expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
+    });
+
+    it("routes a Serial tab to SerialTerminal, not the generic local-shell fallback", () => {
+      const session = baseSession({ type: SessionType.Serial });
+      const tab = baseTab({ sessionType: SessionType.Serial });
+      useSessionStore.setState({ sessions: [session], openTabs: [tab], activeTabId: tab.id });
+
+      render(<App />);
+
+      expect(screen.getByTestId("serial-terminal")).toBeInTheDocument();
+      expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
+    });
+
+    it("still falls back to the generic TerminalTab for a session type with no dedicated component", () => {
+      const session = baseSession({ type: SessionType.WSL });
+      const tab = baseTab({ sessionType: SessionType.WSL });
+      useSessionStore.setState({ sessions: [session], openTabs: [tab], activeTabId: tab.id });
+
+      render(<App />);
+
+      expect(screen.getByTestId(`terminal-tab-${tab.sessionId}`)).toBeInTheDocument();
     });
   });
 });

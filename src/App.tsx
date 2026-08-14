@@ -45,6 +45,11 @@ import type { Session } from "@/types";
 import { useBreakpoint } from "@/hooks/useBreakpoint";
 import TerminalTab from "@/components/Terminal/TerminalTab";
 import SshTerminalTab from "@/components/Terminal/SshTerminalTab";
+import RdpViewer from "@/components/RdpViewer/RdpViewer";
+import VncViewer from "@/components/VncViewer/VncViewer";
+import TelnetTerminal from "@/components/Telnet/TelnetTerminal";
+import SerialTerminal from "@/components/Serial/SerialTerminal";
+import { buildRdpConfig, buildVncConfig } from "@/utils/sessionConfig";
 import SplitPaneContainer from "@/components/Terminal/SplitPaneContainer";
 import CommandPalette from "@/components/Shared/CommandPalette";
 import QuickConnect from "@/components/Shared/QuickConnect";
@@ -1132,6 +1137,38 @@ function SessionCanvas() {
               className={clsx("absolute inset-0 overflow-auto p-4", isActive ? "z-10" : "z-0 hidden")}
             >
               <NetworkExplorer />
+            </div>
+          );
+        }
+
+        if (tab.sessionType === SessionType.RDP && session) {
+          return (
+            <div key={tab.id} className={clsx("absolute inset-0", isActive ? "z-10" : "z-0 hidden")}>
+              <RdpViewer sessionId={tab.sessionId} config={buildRdpConfig(session)} />
+            </div>
+          );
+        }
+
+        if (tab.sessionType === SessionType.VNC && session) {
+          return (
+            <div key={tab.id} className={clsx("absolute inset-0", isActive ? "z-10" : "z-0 hidden")}>
+              <VncViewer sessionId={tab.sessionId} config={buildVncConfig(session)} />
+            </div>
+          );
+        }
+
+        if (tab.sessionType === SessionType.Telnet) {
+          return (
+            <div key={tab.id} className={clsx("absolute inset-0", isActive ? "z-10" : "z-0 hidden")}>
+              <TelnetTerminal />
+            </div>
+          );
+        }
+
+        if (tab.sessionType === SessionType.Serial) {
+          return (
+            <div key={tab.id} className={clsx("absolute inset-0", isActive ? "z-10" : "z-0 hidden")}>
+              <SerialTerminal />
             </div>
           );
         }

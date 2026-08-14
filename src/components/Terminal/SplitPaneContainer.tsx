@@ -3,9 +3,14 @@ import clsx from "clsx";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { SplitDirection, SessionType } from "@/types";
-import type { SplitPane, SplitPaneLeaf, SplitPaneContainer as SplitPaneContainerType } from "@/types";
+import type { SplitPane, SplitPaneLeaf, SplitPaneContainer as SplitPaneContainerType, Session } from "@/types";
 import TerminalTab from "@/components/Terminal/TerminalTab";
 import SshTerminalTab from "@/components/Terminal/SshTerminalTab";
+import RdpViewer from "@/components/RdpViewer/RdpViewer";
+import VncViewer from "@/components/VncViewer/VncViewer";
+import TelnetTerminal from "@/components/Telnet/TelnetTerminal";
+import SerialTerminal from "@/components/Serial/SerialTerminal";
+import { buildRdpConfig, buildVncConfig } from "@/utils/sessionConfig";
 
 // ── Resize Handle ──
 
@@ -68,6 +73,36 @@ function ResizeHandle({
 
 // ── Leaf Renderer ──
 
+function renderPaneContent(tab: { sessionId: string; sessionType: SessionType }, session: Session | undefined, isActive: boolean) {
+  if (tab.sessionType === SessionType.SSH && session) {
+    const pw = (session.connection.protocolOptions?.["password"] as string) ?? "";
+    return (
+      <SshTerminalTab
+        sessionId={tab.sessionId}
+        isActive={isActive}
+        host={session.connection.host}
+        port={session.connection.port}
+        username={(session.connection.protocolOptions?.["username"] as string) ?? ""}
+        credentialRef={session.credentialRef}
+        auth={pw ? { type: "password" as const, password: pw } : { type: "none" as const }}
+      />
+    );
+  }
+  if (tab.sessionType === SessionType.RDP && session) {
+    return <RdpViewer sessionId={tab.sessionId} config={buildRdpConfig(session)} />;
+  }
+  if (tab.sessionType === SessionType.VNC && session) {
+    return <VncViewer sessionId={tab.sessionId} config={buildVncConfig(session)} />;
+  }
+  if (tab.sessionType === SessionType.Telnet) {
+    return <TelnetTerminal />;
+  }
+  if (tab.sessionType === SessionType.Serial) {
+    return <SerialTerminal />;
+  }
+  return <TerminalTab sessionId={tab.sessionId} isActive={isActive} />;
+}
+
 function LeafPane({
   pane,
   isActive,
@@ -101,22 +136,7 @@ function LeafPane({
       )}
       onClick={() => setActivePaneId(pane.tabId)}
     >
-      {tab.sessionType === SessionType.SSH && session ? (
-        <SshTerminalTab
-          sessionId={tab.sessionId}
-          isActive={isActive}
-          host={session.connection.host}
-          port={session.connection.port}
-          username={(session.connection.protocolOptions?.["username"] as string) ?? ""}
-          credentialRef={session.credentialRef}
-          auth={(() => {
-            const pw = (session.connection.protocolOptions?.["password"] as string) ?? "";
-            return pw ? { type: "password" as const, password: pw } : { type: "none" as const };
-          })()}
-        />
-      ) : (
-        <TerminalTab sessionId={tab.sessionId} isActive={isActive} />
-      )}
+      {renderPaneContent(tab, session, isActive)}
     </div>
   );
 }
