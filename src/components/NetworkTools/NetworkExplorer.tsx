@@ -32,8 +32,9 @@ import {
   Lock,
   Radio,
   Info,
+  Pencil,
 } from 'lucide-react';
-import type { ExploreResult, ExploreProgress, ExploreHostFound, ExploreMdnsUpdate, ServiceFilter, Session } from '@/types';
+import type { ExploreResult, ExploreProgress, ExploreHostFound, ExploreMdnsUpdate, MdnsRecord, ServiceFilter, Session } from '@/types';
 import { SessionType } from '@/types';
 import { useSessionStore } from '@/stores/sessionStore';
 import { useToast } from '@/components/Shared/Toast';
@@ -79,6 +80,19 @@ const WELL_KNOWN_SERVICES: { id: ServiceFilter; label: string; port: number }[] 
   { id: 'docker_api', label: 'Docker API (2375)', port: 2375 },
   { id: 'ws_terminal', label: 'WS Terminal / ttyd (7681)', port: 7681 },
   { id: 'rtsp', label: 'RTSP (554)', port: 554 },
+];
+
+// Mirrors the backend's `DEFAULT_EXPLORE_SERVICES` (src-tauri/src/network/mod.rs).
+// `network_explore_start` only falls back to that Rust-side default when the
+// `services` array sent from here is empty — since this UI always sends a
+// concrete list, the two have to be kept in sync explicitly or the backend's
+// broader default silently never takes effect. Deliberately excludes the
+// database ports (mysql/postgresql/redis/mongodb) and mqtt_tls/docker_api_tls,
+// same as the backend default — those stay opt-in via the checkboxes.
+const DEFAULT_SELECTED_SERVICES = [
+  'ssh', 'rdp', 'vnc', 'http', 'https', 'telnet', 'ftp', 'smb',
+  'win_rm', 'win_rm_tls', 'mqtt', 'netconf', 'grpc', 'kube_api',
+  'docker_api', 'ws_terminal', 'rtsp',
 ];
 
 const SESSION_ICON: Record<string, string> = {
@@ -142,7 +156,16 @@ const SESSION_TYPE_MAP: Record<string, SessionType> = {
   websocket_terminal: SessionType.WebSocketTerminal,
 };
 
-type SortKey = 'ip' | 'hostname' | 'ports' | 'response';
+type SortKey = 'ip' | 'hostname' | 'mac' | 'vendor' | 'os' | 'ports' | 'response' | 'session';
+
+/// String compare that always sorts missing values last, regardless of
+/// sort direction — `dir` only flips the ordering among present values.
+function compareNullable(a: string | null | undefined, b: string | null | undefined, dir: number): number {
+  if (a == null && b == null) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  return dir * a.localeCompare(b);
+}
 
 function ipToNum(ip: string): number {
   const parts = ip.split('.').map(Number);
@@ -152,6 +175,38 @@ function ipToNum(ip: string): number {
 function SortIcon({ col, sortBy, sortDir }: { col: SortKey; sortBy: SortKey; sortDir: 'asc' | 'desc' }) {
   if (sortBy !== col) return <ArrowUpDown size={11} className="opacity-30" />;
   return sortDir === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />;
+}
+
+// mDNS instances often carry a device-identifying name that reverse-DNS/
+// NetBIOS/ARP/TLS-CN resolution never sees, since these devices don't run a
+// resolvable DNS/NetBIOS name at all. Prefer, in order: the Google
+// Cast/Chromecast TXT "fn" (friendly name, e.g. "Hall clock" — the most
+// human-readable label a device advertises about itself), the advertised
+// `hostname` field (a real DNS-style name, but Cast devices often set this
+// to an opaque device UUID), then the service instance name as a last resort.
+function deriveMdnsHostname(records: MdnsRecord[] | undefined): string | undefined {
+  if (!records || records.length === 0) return undefined;
+  const withFriendlyName = records.find((r) => r.txt?.fn);
+  if (withFriendlyName?.txt.fn) return withFriendlyName.txt.fn;
+  const withHost = records.find((r) => r.hostname);
+  if (withHost?.hostname) return withHost.hostname;
+  return records[0].instance_name || undefined;
+}
+
+// Cast-ecosystem TXT "md" (model) strings are self-reported by the device and
+// often identify the actual product/brand more specifically than the NIC's
+// OUI vendor lookup can — e.g. a MAC registered to "Motorola (Wuhan) Mobility
+// Technologies" (Lenovo's OEM/manufacturing arm) shows up here as
+// "LenovoCD-24502F", which is what actually answers "whose device is this".
+function deriveMdnsEvidence(records: MdnsRecord[] | undefined): string[] {
+  if (!records) return [];
+  const notes: string[] = [];
+  for (const r of records) {
+    if (r.txt?.md) {
+      notes.push(`mDNS (${r.service_type}): model "${r.txt.md}"${r.txt.fn ? ` — "${r.txt.fn}"` : ''}`);
+    }
+  }
+  return notes;
 }
 
 export default function NetworkExplorer() {
@@ -165,7 +220,7 @@ export default function NetworkExplorer() {
   const [progressMap, setProgressMap] = useState<Map<string, ExploreProgress>>(new Map());
   const [extraPortsInput, setExtraPortsInput] = useState('');
   const [selectedServices, setSelectedServices] = useState<Set<string>>(
-    () => new Set(['ssh', 'rdp', 'vnc', 'http', 'https'])
+    () => new Set(DEFAULT_SELECTED_SERVICES)
   );
   const [showFilters, setShowFilters] = useState(false);
   const [filterService, setFilterService] = useState<string>('all');
@@ -177,8 +232,61 @@ export default function NetworkExplorer() {
   const [showHistory, setShowHistory] = useState(false);
   const [expandedIp, setExpandedIp] = useState<string | null>(null);
 
+  // User-assigned friendly device names, keyed by MAC address (IP as
+  // fallback for the rare host with no resolvable MAC) — persisted in
+  // per-profile Settings (network_device_labels), not the credential vault:
+  // labels aren't secrets, and the vault's CredentialType enum has no
+  // generic-metadata variant, so storing them there would mean modifying
+  // security-sensitive code just to gate a UI label behind vault unlock for
+  // no security benefit. Settings has neither restriction.
+  const [deviceLabels, setDeviceLabels] = useState<Record<string, string>>({});
+  const [editingLabelKey, setEditingLabelKey] = useState<string | null>(null);
+  const [editingLabelValue, setEditingLabelValue] = useState('');
+  const settingsRef = useRef<Record<string, unknown> | null>(null);
+  const cancelLabelEditRef = useRef(false);
+
+  useEffect(() => {
+    invoke<Record<string, unknown>>('settings_get')
+      .then((s) => {
+        settingsRef.current = s;
+        const labels = s.network_device_labels;
+        if (labels && typeof labels === 'object') {
+          setDeviceLabels(labels as Record<string, string>);
+        }
+      })
+      .catch(() => {}); // graceful degradation in browser/stub mode
+  }, []);
+
+  const deviceLabelKey = useCallback((result: ExploreResult) => result.mac_address ?? result.ip, []);
+
+  const commitDeviceLabel = useCallback(async (key: string, rawValue: string) => {
+    const trimmed = rawValue.trim();
+    if ((deviceLabels[key] ?? '') === trimmed) return; // unchanged, skip the write
+    const next = { ...deviceLabels };
+    if (trimmed) {
+      next[key] = trimmed;
+    } else {
+      delete next[key];
+    }
+    setDeviceLabels(next); // optimistic
+    try {
+      const base = settingsRef.current ?? (await invoke<Record<string, unknown>>('settings_get'));
+      const updated = { ...base, network_device_labels: next };
+      settingsRef.current = updated;
+      await invoke('settings_update', { settings: updated });
+    } catch {
+      toast('error', 'Failed to save device label');
+    }
+  }, [deviceLabels, toast]);
+
   // Set of currently active scan IDs (one per CIDR)
   const activeScanIdsRef = useRef<Set<string>>(new Set());
+  // mDNS discovery's 4s window typically closes well before a full CIDR
+  // sweep finishes, so `network:explore_mdns_update` usually arrives before
+  // most `network:explore_host_found` events for the same scan. Buffer
+  // records by IP here so a host row picks up its mDNS data (and derived
+  // hostname) whichever event lands first.
+  const mdnsRecordsRef = useRef<Record<string, MdnsRecord[]>>({});
 
   // Auto-detect local subnets on mount
   useEffect(() => {
@@ -196,8 +304,45 @@ export default function NetworkExplorer() {
       'network:explore_host_found',
       (event) => {
         if (activeScanIdsRef.current.has(event.payload.scan_id)) {
-          setResults((prev) => [...prev, event.payload.result]);
+          let result = event.payload.result;
+          const pendingMdns = mdnsRecordsRef.current[result.ip];
+          if (pendingMdns && pendingMdns.length > 0) {
+            result = {
+              ...result,
+              mdns: pendingMdns,
+              hostname: result.hostname || deriveMdnsHostname(pendingMdns),
+              evidence: [...result.evidence, ...deriveMdnsEvidence(pendingMdns)],
+            };
+          }
+          setResults((prev) => [...prev, result]);
         }
+      }
+    );
+
+    // The backend now surfaces a host as soon as the port scan/ping finishes
+    // (fast — just open ports, no banner/hostname/MAC/vendor yet) and streams
+    // the slower enrichment (banners, TLS, 9-method hostname resolution, ARP/
+    // OUI vendor lookup) in afterward via this event. Not gated on
+    // activeScanIdsRef: progress (and therefore `scanning`) advances at the
+    // fast port-scan pass, so by the time the last few hosts' enrichment
+    // lands, their scan_id may already be gone from the active set — same
+    // reasoning as the mDNS-update merge below.
+    const unlistenEnriched = listen<ExploreHostFound>(
+      'network:explore_host_enriched',
+      (event) => {
+        const enriched = event.payload.result;
+        setResults((prev) =>
+          prev.map((r) =>
+            r.ip === enriched.ip
+              ? {
+                  ...enriched,
+                  mdns: r.mdns, // preserve mDNS data merged onto this row separately
+                  hostname: enriched.hostname || r.hostname, // resolver wins; else keep mDNS-derived fallback
+                  evidence: Array.from(new Set([...enriched.evidence, ...r.evidence])),
+                }
+              : r
+          )
+        );
       }
     );
 
@@ -222,14 +367,25 @@ export default function NetworkExplorer() {
       'network:explore_mdns_update',
       (event) => {
         const { records } = event.payload;
+        mdnsRecordsRef.current = { ...mdnsRecordsRef.current, ...records };
         setResults((prev) =>
-          prev.map((r) => (records[r.ip] ? { ...r, mdns: records[r.ip] } : r))
+          prev.map((r) =>
+            records[r.ip]
+              ? {
+                  ...r,
+                  mdns: records[r.ip],
+                  hostname: r.hostname || deriveMdnsHostname(records[r.ip]),
+                  evidence: [...r.evidence, ...deriveMdnsEvidence(records[r.ip])],
+                }
+              : r
+          )
         );
       }
     );
 
     return () => {
       unlistenHost.then((fn) => fn());
+      unlistenEnriched.then((fn) => fn());
       unlistenProgress.then((fn) => fn());
       unlistenMdns.then((fn) => fn());
     };
@@ -264,6 +420,7 @@ export default function NetworkExplorer() {
     setProgressMap(new Map());
     setExpandedIp(null);
     activeScanIdsRef.current = new Set();
+    mdnsRecordsRef.current = {};
 
     const services: ServiceFilter[] = Array.from(selectedServices) as ServiceFilter[];
     const extra_ports = parseExtraPorts(extraPortsInput);
@@ -449,11 +606,23 @@ export default function NetworkExplorer() {
       case 'hostname':
         sorted.sort((a, b) => dir * (a.hostname ?? a.ip).localeCompare(b.hostname ?? b.ip));
         break;
+      case 'mac':
+        sorted.sort((a, b) => compareNullable(a.mac_address, b.mac_address, dir));
+        break;
+      case 'vendor':
+        sorted.sort((a, b) => compareNullable(a.mac_vendor, b.mac_vendor, dir));
+        break;
+      case 'os':
+        sorted.sort((a, b) => compareNullable(a.os_guess, b.os_guess, dir));
+        break;
       case 'ports':
         sorted.sort((a, b) => dir * (a.open_ports.length - b.open_ports.length));
         break;
       case 'response':
         sorted.sort((a, b) => dir * (a.response_time_ms - b.response_time_ms));
+        break;
+      case 'session':
+        sorted.sort((a, b) => compareNullable(a.suggested_session_type, b.suggested_session_type, dir));
         break;
       default: // 'ip'
         sorted.sort((a, b) => dir * (ipToNum(a.ip) - ipToNum(b.ip)));
@@ -695,12 +864,12 @@ export default function NetworkExplorer() {
                       [
                         { key: 'ip' as SortKey, label: t('network.ip') },
                         { key: 'hostname' as SortKey, label: t('network.hostname') },
-                        { key: null, label: 'MAC Address' },
-                        { key: null, label: 'Vendor' },
-                        { key: null, label: t('network.os') },
+                        { key: 'mac' as SortKey, label: 'MAC Address' },
+                        { key: 'vendor' as SortKey, label: 'Vendor' },
+                        { key: 'os' as SortKey, label: t('network.os') },
                         { key: 'ports' as SortKey, label: t('network.openPorts') },
                         { key: 'response' as SortKey, label: t('network.responseTime') },
-                        { key: null, label: t('network.sessionType') },
+                        { key: 'session' as SortKey, label: t('network.sessionType') },
                         { key: null, label: '' },
                       ] as { key: SortKey | null; label: string }[]
                     ).map((col, i) => (
@@ -747,7 +916,46 @@ export default function NetworkExplorer() {
                             {result.ip}
                           </button>
                         </td>
-                        <td className="px-3 py-2 text-text-secondary">{result.hostname ?? '—'}</td>
+                        <td className="px-3 py-2 text-text-secondary">
+                          {editingLabelKey === deviceLabelKey(result) ? (
+                            <input
+                              autoFocus
+                              value={editingLabelValue}
+                              onChange={(e) => setEditingLabelValue(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') e.currentTarget.blur();
+                                if (e.key === 'Escape') {
+                                  cancelLabelEditRef.current = true;
+                                  setEditingLabelKey(null);
+                                }
+                              }}
+                              onBlur={() => {
+                                const key = deviceLabelKey(result);
+                                setEditingLabelKey(null);
+                                if (cancelLabelEditRef.current) {
+                                  cancelLabelEditRef.current = false;
+                                  return;
+                                }
+                                commitDeviceLabel(key, editingLabelValue);
+                              }}
+                              className="w-full min-w-0 rounded border border-accent-primary bg-surface-primary px-1 py-0.5 text-xs text-text-primary outline-none"
+                            />
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const key = deviceLabelKey(result);
+                                setEditingLabelKey(key);
+                                setEditingLabelValue(deviceLabels[key] ?? result.hostname ?? '');
+                              }}
+                              title="Click to set a friendly name"
+                              className="group flex w-full items-center gap-1 text-left hover:text-text-primary"
+                            >
+                              <span className="truncate">{deviceLabels[deviceLabelKey(result)] ?? result.hostname ?? '—'}</span>
+                              <Pencil size={10} className="shrink-0 opacity-0 group-hover:opacity-50" />
+                            </button>
+                          )}
+                        </td>
                         <td className="px-3 py-2 text-text-secondary font-mono text-xs">{result.mac_address ?? '—'}</td>
                         <td className="px-3 py-2 text-text-secondary text-xs">{result.mac_vendor ?? '—'}</td>
                         <td className="px-3 py-2 text-text-secondary">{result.os_guess ?? '—'}</td>

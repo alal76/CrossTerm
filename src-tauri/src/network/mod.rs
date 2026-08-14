@@ -314,6 +314,26 @@ pub struct MdnsRecord {
     pub txt: HashMap<String, String>,
 }
 
+/// Best-effort human-readable name for a host from its mDNS records, for
+/// callers (like [`run_explore_and_dump`]) that have the full record set
+/// in hand and want a single display name rather than the raw list. Mirrors
+/// `deriveMdnsHostname` in `NetworkExplorer.tsx`, which the live streaming
+/// UI applies at merge time instead — its host and mDNS results arrive as
+/// two separate async event streams with no guaranteed order, so that
+/// derivation has to happen client-side wherever the two are joined.
+/// Priority: Google Cast/Chromecast TXT "fn" (the most human-readable label
+/// a device self-reports) → advertised `hostname` (real DNS-style name, but
+/// Cast devices often set this to an opaque device UUID) → instance name.
+fn derive_mdns_hostname(records: &[MdnsRecord]) -> Option<String> {
+    if let Some(fn_name) = records.iter().find_map(|r| r.txt.get("fn")) {
+        return Some(fn_name.clone());
+    }
+    if let Some(host) = records.iter().find_map(|r| r.hostname.clone()) {
+        return Some(host);
+    }
+    records.first().map(|r| r.instance_name.clone())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExploreProgress {
     pub scan_id: String,
@@ -485,11 +505,116 @@ const DEFAULT_PORTS: &[u16] = &[
     5985, 5986, 6379, 6443, 7681, 8080, 8443, 8883, 27017, 50051,
 ];
 
+// ── Interface-bound connect ────────────────────────────────────────────
+// A VPN client (Tailscale, in the case that motivated this) can install a
+// competing route for the exact same LAN prefix we're scanning via its
+// tunnel interface (e.g. because some peer on the tailnet advertises that
+// subnet as a route). When our probe traffic loses that race and goes out
+// the tunnel instead of the physical NIC, the connection can still succeed
+// (the VPN forwards it), but no ARP entry is ever created for the
+// destination on the physical interface — so MAC/vendor lookup fails
+// *permanently* for that host, not just intermittently, and retrying the
+// ARP-cache read (see `resolve_arp_mac`) can never fix it. Forcing our
+// scan sockets onto the interface that actually owns the target subnet
+// closes that race deterministically.
+tokio::task_local! {
+    static BOUND_INTERFACE: Option<String>;
+}
+
+fn current_bound_interface() -> Option<String> {
+    BOUND_INTERFACE.try_with(|v| v.clone()).unwrap_or(None)
+}
+
+/// The local interface whose directly-connected subnet matches `cidr`
+/// exactly (e.g. "en0" for "192.168.0.0/24" when that's this machine's own
+/// LAN segment). `None` when no local interface owns this subnet (routing
+/// a scan through a gateway rather than a directly-attached LAN), in which
+/// case binding isn't meaningful and default OS routing is used.
+fn interface_for_cidr(cidr: &str) -> Option<String> {
+    let (net_str, prefix_str) = cidr.split_once('/')?;
+    let network: Ipv4Addr = net_str.parse().ok()?;
+    let prefix: u32 = prefix_str.parse().ok()?;
+    let mask: u32 = if prefix == 0 { 0 } else { u32::MAX << (32 - prefix) };
+    let target_net = u32::from(network) & mask;
+
+    let interfaces = if_addrs::get_if_addrs().ok()?;
+    interfaces.into_iter().find_map(|iface| {
+        if iface.is_loopback() {
+            return None;
+        }
+        if let if_addrs::IfAddr::V4(v4) = iface.addr {
+            let iface_mask = u32::from(v4.netmask);
+            let iface_net = u32::from(v4.ip) & iface_mask;
+            if iface_mask == mask && iface_net == target_net {
+                return Some(iface.name);
+            }
+        }
+        None
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn bind_socket_to_interface(socket: &socket2::Socket, iface: &str) -> std::io::Result<()> {
+    use std::os::unix::io::AsRawFd;
+    let cstr = std::ffi::CString::new(iface)
+        .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    let index = unsafe { libc::if_nametoindex(cstr.as_ptr()) };
+    if index == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let ret = unsafe {
+        libc::setsockopt(
+            socket.as_raw_fd(),
+            libc::IPPROTO_IP,
+            libc::IP_BOUND_IF,
+            &index as *const _ as *const libc::c_void,
+            std::mem::size_of::<u32>() as libc::socklen_t,
+        )
+    };
+    if ret != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn bind_socket_to_interface(socket: &socket2::Socket, iface: &str) -> std::io::Result<()> {
+    socket.bind_device(Some(iface.as_bytes()))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn bind_socket_to_interface(_socket: &socket2::Socket, _iface: &str) -> std::io::Result<()> {
+    // No portable equivalent wired up on other targets (e.g. Windows would
+    // need IP_UNICAST_IF with an interface *index*, not name); scans there
+    // fall back to default OS routing, same as before this fix.
+    Ok(())
+}
+
+/// `TcpStream::connect`, but bound to `BOUND_INTERFACE` (set for the
+/// duration of a scan's per-host task) when one applies to the target
+/// subnet — see the module note above `BOUND_INTERFACE`.
+async fn connect_bound(ip: IpAddr, port: u16, timeout: Duration) -> std::io::Result<TcpStream> {
+    let bound_if = current_bound_interface();
+    let addr = SocketAddr::new(ip, port);
+    let std_stream = tokio::task::spawn_blocking(move || -> std::io::Result<std::net::TcpStream> {
+        let domain = if addr.is_ipv4() { socket2::Domain::IPV4 } else { socket2::Domain::IPV6 };
+        let socket = socket2::Socket::new(domain, socket2::Type::STREAM, Some(socket2::Protocol::TCP))?;
+        if let Some(iface) = bound_if.as_deref() {
+            bind_socket_to_interface(&socket, iface)?;
+        }
+        socket.connect_timeout(&addr.into(), timeout)?;
+        socket.set_nonblocking(true)?;
+        Ok(socket.into())
+    })
+    .await
+    .map_err(std::io::Error::other)??;
+    TcpStream::from_std(std_stream)
+}
+
 /// Try to connect to a TCP port with a timeout.
 async fn check_port(ip: IpAddr, port: u16, timeout: Duration) -> Option<OpenPort> {
-    let addr = SocketAddr::new(ip, port);
-    match tokio::time::timeout(timeout, TcpStream::connect(addr)).await {
-        Ok(Ok(_stream)) => Some(OpenPort {
+    match connect_bound(ip, port, timeout).await {
+        Ok(_stream) => Some(OpenPort {
             port,
             service_name: guess_service(port),
             protocol: "tcp".to_string(),
@@ -506,6 +631,9 @@ async fn check_port(ip: IpAddr, port: u16, timeout: Duration) -> Option<OpenPort
 /// Uses the OS `ping` binary so it works without raw-socket privileges.
 async fn ping_host(ip: IpAddr, timeout: Duration) -> (bool, Option<u8>) {
     let ip_str = ip.to_string();
+    // See the `BOUND_INTERFACE` note above `connect_bound`: same VPN-route
+    // race applies to ping's ICMP socket, so bind it the same way.
+    let bound_if = current_bound_interface();
 
     // Platform-specific argv for a single-shot ping.
     #[cfg(target_os = "windows")]
@@ -515,15 +643,27 @@ async fn ping_host(ip: IpAddr, timeout: Duration) -> (bool, Option<u8>) {
     };
     #[cfg(target_os = "macos")]
     let args: Vec<String> = {
-        // BSD ping: -W is in milliseconds.
+        // BSD ping: -W is in milliseconds. Apple's `-b boundif` must precede the host.
         let timeout_ms = timeout.as_millis().max(100).to_string();
-        vec!["-c".into(), "1".into(), "-W".into(), timeout_ms, ip_str]
+        let mut a = vec!["-c".into(), "1".into(), "-W".into(), timeout_ms];
+        if let Some(iface) = &bound_if {
+            a.push("-b".into());
+            a.push(iface.clone());
+        }
+        a.push(ip_str);
+        a
     };
     #[cfg(all(unix, not(target_os = "macos")))]
     let args: Vec<String> = {
-        // Linux ping: -W is in seconds.
+        // Linux ping: -W is in seconds; -I binds to an interface.
         let timeout_secs = timeout.as_secs().max(1).to_string();
-        vec!["-c".into(), "1".into(), "-W".into(), timeout_secs, ip_str]
+        let mut a = vec!["-c".into(), "1".into(), "-W".into(), timeout_secs];
+        if let Some(iface) = &bound_if {
+            a.push("-I".into());
+            a.push(iface.clone());
+        }
+        a.push(ip_str);
+        a
     };
 
     let result = tokio::time::timeout(
@@ -721,18 +861,48 @@ async fn nmblookup_name(ip: String) -> Option<String> {
     None
 }
 
-/// Look up the MAC address for an IP from the system ARP cache.
+/// Look up the MAC address for an IP from the system ARP cache. One short
+/// retry covers the case where the cache write from the TCP connect/ping
+/// that just happened hasn't landed yet.
 async fn resolve_arp_mac(ip: IpAddr) -> Option<String> {
+    for delay_ms in [0, 150, 350] {
+        if delay_ms > 0 {
+            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+        }
+        if let Some(mac) = resolve_arp_mac_once(ip).await {
+            return Some(mac);
+        }
+    }
+    None
+}
+
+async fn resolve_arp_mac_once(ip: IpAddr) -> Option<String> {
     let ip_str = ip.to_string();
-    let output = tokio::process::Command::new("arp")
-        .args(["-n", &ip_str])
-        .output()
-        .await
-        .ok()?;
-    let text = String::from_utf8_lossy(&output.stdout);
-    let re = regex::Regex::new(r"([0-9a-fA-F]{2}[:\-]){5}[0-9a-fA-F]{2}").ok()?;
-    let m = re.find(&text)?;
-    Some(m.as_str().replace('-', ":").to_uppercase())
+    let output = tokio::process::Command::new("arp").args(["-n", &ip_str]).output().await.ok()?;
+    parse_arp_mac_output(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// Extract and canonicalize a MAC address from `arp -n` output. macOS/BSD's
+/// `arp` does **not** zero-pad single-hex-digit octets — a real line looks
+/// like `? (192.168.0.39) at ac:a7:f1:8:6:a7 on en0 ifscope [ethernet]`, not
+/// `...:08:06:a7`. A naive `{2}`-per-octet regex silently fails to match
+/// roughly 2 in 5 real MAC addresses (any with at least one octet < 0x10),
+/// which looked exactly like an intermittent timing race — the same devices
+/// failed every single time, retries never helped — but was actually a
+/// deterministic parse miss. Padding each octet back to 2 digits here also
+/// matters for `lookup_mac_vendor`'s downstream OUI-prefix slice, which
+/// assumes a fully-padded, colon-free 12-hex-digit string.
+fn parse_arp_mac_output(text: &str) -> Option<String> {
+    let re = regex::Regex::new(r"(?:[0-9a-fA-F]{1,2}[:\-]){5}[0-9a-fA-F]{1,2}").ok()?;
+    let raw = re.find(text)?.as_str();
+    let octets: Vec<String> = raw
+        .split(|c| c == ':' || c == '-')
+        .map(|o| format!("{:0>2}", o.to_ascii_uppercase()))
+        .collect();
+    if octets.len() != 6 {
+        return None;
+    }
+    Some(octets.join(":"))
 }
 
 /// Method 5 — arp: extract hostname from the ARP cache line for this IP.
@@ -833,8 +1003,7 @@ fn tls_client_config() -> Arc<rustls::ClientConfig> {
 
 /// Connect + TLS handshake against `ip:port`, returning the decrypted stream.
 async fn tls_connect(ip: IpAddr, port: u16, timeout: Duration) -> Option<tokio_rustls::client::TlsStream<TcpStream>> {
-    let addr = SocketAddr::new(ip, port);
-    let tcp = tokio::time::timeout(timeout, TcpStream::connect(addr)).await.ok()?.ok()?;
+    let tcp = connect_bound(ip, port, timeout).await.ok()?;
     let connector = tokio_rustls::TlsConnector::from(tls_client_config());
     let server_name = rustls::pki_types::ServerName::try_from(ip).ok()?;
     tokio::time::timeout(Duration::from_secs(4), connector.connect(server_name, tcp)).await.ok()?.ok()
@@ -890,8 +1059,7 @@ const TLS_PROBE_PORTS: &[u16] = &[443, 5986, 6443, 8443, 8883, 50051];
 /// anything ourselves. Covers SSH/FTP/SMTP/POP3/IMAP/MySQL/VNC, which are
 /// all "server speaks first" protocols.
 async fn grab_banner(ip: IpAddr, port: u16, timeout: Duration) -> Option<String> {
-    let addr = SocketAddr::new(ip, port);
-    let mut stream = tokio::time::timeout(timeout, TcpStream::connect(addr)).await.ok()?.ok()?;
+    let mut stream = connect_bound(ip, port, timeout).await.ok()?;
 
     let mut buf = [0u8; 256];
     let n = tokio::time::timeout(Duration::from_millis(1500), stream.read(&mut buf)).await.ok()?.ok()?;
@@ -941,8 +1109,7 @@ async fn probe_http(ip: IpAddr, port: u16, tls: bool, timeout: Duration) -> Opti
         stream.write_all(request.as_bytes()).await.ok()?;
         read_response_bounded(&mut stream).await?
     } else {
-        let addr = SocketAddr::new(ip, port);
-        let mut stream = tokio::time::timeout(timeout, TcpStream::connect(addr)).await.ok()?.ok()?;
+        let mut stream = connect_bound(ip, port, timeout).await.ok()?;
         stream.write_all(request.as_bytes()).await.ok()?;
         read_response_bounded(&mut stream).await?
     };
@@ -962,8 +1129,7 @@ async fn probe_http(ip: IpAddr, port: u16, tls: bool, timeout: Duration) -> Opti
 
 /// RTSP OPTIONS probe — the `Public:` methods line is a reliable IP-camera signal.
 async fn probe_rtsp(ip: IpAddr, port: u16, timeout: Duration) -> Option<String> {
-    let addr = SocketAddr::new(ip, port);
-    let mut stream = tokio::time::timeout(timeout, TcpStream::connect(addr)).await.ok()?.ok()?;
+    let mut stream = connect_bound(ip, port, timeout).await.ok()?;
     let request = format!("OPTIONS rtsp://{ip} RTSP/1.0\r\nCSeq: 1\r\n\r\n");
     stream.write_all(request.as_bytes()).await.ok()?;
 
@@ -1047,6 +1213,8 @@ const MDNS_SERVICE_TYPES: &[&str] = &[
     "_esphomebuilder._tcp.local.",
     "_dcp._tcp.local.",
     "_rfb._tcp.local.",
+    "_onvif._tcp.local.",
+    "_rtsp._tcp.local.",
 ];
 
 /// Browse the curated mDNS service-type list for `duration`, returning
@@ -1390,6 +1558,7 @@ const DEFAULT_EXPLORE_SERVICES: &[ServiceFilter] = &[
     ServiceFilter::KubeApi,
     ServiceFilter::DockerApi,
     ServiceFilter::WsTerminal,
+    ServiceFilter::Rtsp,
 ];
 
 /// How long the concurrent mDNS/Bonjour browse runs for each explore scan.
@@ -1428,6 +1597,12 @@ pub async fn network_explore_start(
     let cancel_flag = Arc::new(AtomicBool::new(false));
     state.explore_cancel_flags.lock().unwrap().insert(scan_id.clone(), Arc::clone(&cancel_flag));
 
+    // See the `BOUND_INTERFACE` note above `connect_bound`: pin probe
+    // traffic to whichever local interface actually owns this subnet, so a
+    // VPN's competing route for the same prefix can't steal it and starve
+    // ARP resolution.
+    let bound_if = interface_for_cidr(&target.cidr);
+
     tokio::spawn(async move {
         const MAX_CONCURRENT: usize = 25;
         let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT));
@@ -1462,8 +1637,9 @@ pub async fn network_explore_start(
             let found_counter = Arc::clone(&hosts_found);
             let ports = Arc::clone(&ports);
             let cancelled = Arc::clone(&cancel_flag);
+            let bound_if = bound_if.clone();
 
-            tasks.spawn(async move {
+            tasks.spawn(BOUND_INTERFACE.scope(bound_if, async move {
                 let _permit = sem.acquire_owned().await.unwrap();
                 if cancelled.load(Ordering::Relaxed) {
                     return;
@@ -1477,54 +1653,90 @@ pub async fn network_explore_start(
                     ping_host(ip, timeout),
                 );
                 let open_ports: Vec<OpenPort> = port_results.into_iter().flatten().collect();
+                let found = !open_ports.is_empty() || ping_alive;
 
-                // Surface a host if any TCP port is open OR if it answered ping.
-                if !open_ports.is_empty() || ping_alive {
-                    // Enrich every open port with a banner/version/TLS-cert/title
-                    // where the protocol allows it cheaply, concurrently.
-                    let enrich_futures: Vec<_> = open_ports
-                        .into_iter()
-                        .map(|p| enrich_port(ip, p, timeout))
-                        .collect();
-                    let open_ports: Vec<OpenPort> = futures::future::join_all(enrich_futures).await;
-                    let response_time = start.elapsed().as_secs_f64() * 1000.0;
-
-                    let (hostname, mac_address) = tokio::join!(resolve_hostname_aggressive(ip, open_ports.clone()), resolve_arp_mac(ip));
-                    let mac_vendor = if let Some(ref mac) = mac_address {
-                        lookup_mac_vendor(mac).await
-                    } else {
-                        None
-                    };
-                    let (os_guess, evidence) = guess_os(&open_ports, ttl);
-                    let suggested_session_type = suggest_session_type(&open_ports);
-                    let result = ExploreResult {
-                        ip: ip.to_string(),
-                        hostname,
-                        mac_address,
-                        mac_vendor,
-                        open_ports,
-                        os_guess,
-                        response_time_ms: response_time,
-                        suggested_session_type,
-                        ttl,
-                        mdns: Vec::new(),
-                        evidence,
-                    };
+                // Progress/"scanned" advances here, at the fast port-scan/ping
+                // pass, not after the slower enrichment below — so the
+                // progress bar (and the Stop button's lifetime) reflects
+                // actual scan coverage instead of stalling on the tail
+                // latency of hostname/ARP/banner resolution for whichever
+                // hosts happen to be slowest. Enrichment keeps streaming
+                // in afterward via `explore_host_enriched`, same pattern as
+                // the mDNS merge-by-IP update already uses.
+                if found {
                     found_counter.fetch_add(1, Ordering::Relaxed);
-                    let _ = app.emit("network:explore_host_found", ExploreHostFound {
-                        scan_id: scan_id.clone(),
-                        result,
-                    });
                 }
-
                 let scanned = counter.fetch_add(1, Ordering::Relaxed) + 1;
                 let _ = app.emit("network:explore_progress", ExploreProgress {
-                    scan_id,
+                    scan_id: scan_id.clone(),
                     hosts_scanned: scanned,
                     total_hosts,
                     hosts_found: found_counter.load(Ordering::Relaxed),
                 });
-            });
+
+                if !found {
+                    return;
+                }
+
+                // Phase 1: surface the host immediately with just what the
+                // port scan/ping already know — real ports, a TTL-only OS
+                // guess, a ports-only suggested session type. No banner/TLS/
+                // hostname/MAC/vendor yet; those come from phase 2 below.
+                let (early_os_guess, early_evidence) = guess_os(&open_ports, ttl);
+                let suggested_session_type = suggest_session_type(&open_ports);
+                let early_result = ExploreResult {
+                    ip: ip.to_string(),
+                    hostname: None,
+                    mac_address: None,
+                    mac_vendor: None,
+                    open_ports: open_ports.clone(),
+                    os_guess: early_os_guess,
+                    response_time_ms: start.elapsed().as_secs_f64() * 1000.0,
+                    suggested_session_type: suggested_session_type.clone(),
+                    ttl,
+                    mdns: Vec::new(),
+                    evidence: early_evidence,
+                };
+                let _ = app.emit("network:explore_host_found", ExploreHostFound {
+                    scan_id: scan_id.clone(),
+                    result: early_result,
+                });
+
+                // Phase 2: banner/version/TLS/RTSP enrichment, 9-method
+                // hostname resolution, ARP/OUI vendor lookup — the slower
+                // probes — then push the completed picture as an update.
+                let enrich_futures: Vec<_> = open_ports
+                    .into_iter()
+                    .map(|p| enrich_port(ip, p, timeout))
+                    .collect();
+                let open_ports: Vec<OpenPort> = futures::future::join_all(enrich_futures).await;
+                let response_time = start.elapsed().as_secs_f64() * 1000.0;
+
+                let (hostname, mac_address) = tokio::join!(resolve_hostname_aggressive(ip, open_ports.clone()), resolve_arp_mac(ip));
+                let mac_vendor = if let Some(ref mac) = mac_address {
+                    lookup_mac_vendor(mac).await
+                } else {
+                    None
+                };
+                let (os_guess, evidence) = guess_os(&open_ports, ttl);
+                let result = ExploreResult {
+                    ip: ip.to_string(),
+                    hostname,
+                    mac_address,
+                    mac_vendor,
+                    open_ports,
+                    os_guess,
+                    response_time_ms: response_time,
+                    suggested_session_type,
+                    ttl,
+                    mdns: Vec::new(),
+                    evidence,
+                };
+                let _ = app.emit("network:explore_host_enriched", ExploreHostFound {
+                    scan_id,
+                    result,
+                });
+            }));
         }
 
         while tasks.join_next().await.is_some() {}
@@ -1541,6 +1753,128 @@ pub fn network_explore_stop(scan_id: String, state: tauri::State<'_, NetworkStat
     if let Some(flag) = state.explore_cancel_flags.lock().unwrap().get(&scan_id) {
         flag.store(true, Ordering::Relaxed);
     }
+}
+
+/// JSON shape written by [`run_explore_and_dump`].
+#[derive(Serialize)]
+pub struct ExploreDump {
+    pub cidr: String,
+    pub bound_interface: Option<String>,
+    pub ports_scanned: Vec<u16>,
+    pub host_count: usize,
+    pub results: Vec<ExploreResult>,
+    /// mDNS records whose advertised address never answered a scanned port
+    /// or ping — useful for spotting devices the port scan alone misses.
+    pub unmerged_mdns: HashMap<String, Vec<MdnsRecord>>,
+}
+
+/// Runs the exact same discovery/enrichment pipeline as `network_explore_start`
+/// (interface-bound probes, port scan, banner/TLS/RTSP enrichment, 9-method
+/// hostname resolution, ARP/OUI vendor lookup, OS guess, mDNS/Bonjour merge)
+/// but with no Tauri `AppHandle`/`State` and no event stream — it runs to
+/// completion and writes one JSON file. This is the mechanism behind the
+/// `network-explore-cli` binary: it lets the real scanner run standalone,
+/// without launching the app, unlocking the vault, or going through any UI,
+/// which is what makes it fast to use for debugging scan/enrichment gaps.
+pub async fn run_explore_and_dump(
+    cidr: &str,
+    services: Option<&[ServiceFilter]>,
+    extra_ports: &[u16],
+    timeout_ms: u64,
+    out_path: &str,
+) -> Result<usize, NetworkError> {
+    let addresses = parse_cidr(cidr)?;
+    let timeout = Duration::from_millis(timeout_ms);
+    let bound_if = interface_for_cidr(cidr);
+
+    let mut ports: Vec<u16> = services
+        .unwrap_or(DEFAULT_EXPLORE_SERVICES)
+        .iter()
+        .map(|s| s.port())
+        .collect();
+    ports.extend(extra_ports);
+    ports.sort_unstable();
+    ports.dedup();
+    let ports = Arc::new(ports);
+
+    let semaphore = Arc::new(Semaphore::new(25));
+    let host_futs = addresses.into_iter().map(|addr| {
+        let ip = IpAddr::V4(addr);
+        let ports = Arc::clone(&ports);
+        let sem = Arc::clone(&semaphore);
+        async move {
+            let _permit = sem.acquire_owned().await.unwrap();
+            let port_futures: Vec<_> = ports.iter().map(|&p| check_port(ip, p, timeout)).collect();
+            let (port_results, (ping_alive, ttl)) = tokio::join!(
+                futures::future::join_all(port_futures),
+                ping_host(ip, timeout),
+            );
+            let open_ports: Vec<OpenPort> = port_results.into_iter().flatten().collect();
+            if open_ports.is_empty() && !ping_alive {
+                return None;
+            }
+            let enrich_futures: Vec<_> = open_ports.into_iter().map(|p| enrich_port(ip, p, timeout)).collect();
+            let open_ports: Vec<OpenPort> = futures::future::join_all(enrich_futures).await;
+            let (hostname, mac_address) = tokio::join!(
+                resolve_hostname_aggressive(ip, open_ports.clone()),
+                resolve_arp_mac(ip),
+            );
+            let mac_vendor = if let Some(ref mac) = mac_address { lookup_mac_vendor(mac).await } else { None };
+            let (os_guess, evidence) = guess_os(&open_ports, ttl);
+            let suggested_session_type = suggest_session_type(&open_ports);
+            Some(ExploreResult {
+                ip: ip.to_string(),
+                hostname,
+                mac_address,
+                mac_vendor,
+                open_ports,
+                os_guess,
+                response_time_ms: 0.0,
+                suggested_session_type,
+                ttl,
+                mdns: Vec::new(),
+                evidence,
+            })
+        }
+    });
+
+    let (mdns_records, host_results) = tokio::join!(
+        mdns_discover(MDNS_DISCOVER_WINDOW),
+        BOUND_INTERFACE.scope(bound_if.clone(), futures::future::join_all(host_futs)),
+    );
+    let mdns_by_ip: HashMap<String, Vec<MdnsRecord>> =
+        mdns_records.into_iter().map(|(ip, recs)| (ip.to_string(), recs)).collect();
+
+    let mut results: Vec<ExploreResult> = host_results.into_iter().flatten().collect();
+    for r in &mut results {
+        if let Some(recs) = mdns_by_ip.get(&r.ip) {
+            r.mdns = recs.clone();
+            if r.hostname.is_none() {
+                r.hostname = derive_mdns_hostname(recs);
+            }
+        }
+    }
+    results.sort_by_key(|r| r.ip.split('.').filter_map(|o| o.parse::<u32>().ok()).fold(0u32, |acc, o| acc * 256 + o));
+
+    let merged_ips: HashSet<&str> = results.iter().map(|r| r.ip.as_str()).collect();
+    let unmerged_mdns: HashMap<String, Vec<MdnsRecord>> = mdns_by_ip
+        .into_iter()
+        .filter(|(ip, _)| !merged_ips.contains(ip.as_str()))
+        .collect();
+
+    let host_count = results.len();
+    let dump = ExploreDump {
+        cidr: cidr.to_string(),
+        bound_interface: bound_if,
+        ports_scanned: (*ports).clone(),
+        host_count,
+        results,
+        unmerged_mdns,
+    };
+    let json = serde_json::to_string_pretty(&dump)
+        .map_err(|e| NetworkError::Io(format!("JSON serialization failed: {e}")))?;
+    std::fs::write(out_path, json).map_err(|e| NetworkError::Io(format!("failed to write {out_path}: {e}")))?;
+    Ok(host_count)
 }
 
 #[tauri::command]
@@ -3647,14 +3981,197 @@ mod tests {
 
     #[test]
     fn test_default_explore_services() {
-        // Ensure default list has the 8 core services
-        assert_eq!(DEFAULT_EXPLORE_SERVICES.len(), 8);
+        // Ensure default list has the 17 core + protocol-breadth + RTSP services
+        assert_eq!(DEFAULT_EXPLORE_SERVICES.len(), 17);
         let ports: Vec<u16> = DEFAULT_EXPLORE_SERVICES.iter().map(|s| s.port()).collect();
         assert!(ports.contains(&22));  // ssh
         assert!(ports.contains(&3389)); // rdp
         assert!(ports.contains(&5900)); // vnc
         assert!(ports.contains(&80));  // http
         assert!(ports.contains(&443)); // https
+        assert!(ports.contains(&554)); // rtsp — the IP-camera protocol
+    }
+
+    #[test]
+    fn test_parse_ping_ttl() {
+        assert_eq!(parse_ping_ttl("64 bytes from 127.0.0.1: icmp_seq=0 ttl=64 time=0.05 ms"), Some(64));
+        assert_eq!(parse_ping_ttl("Reply from 192.168.1.1: bytes=32 time=1ms TTL=128"), Some(128));
+        assert_eq!(parse_ping_ttl("no ttl field here"), None);
+        assert_eq!(parse_ping_ttl(""), None);
+    }
+
+    #[test]
+    fn test_summarize_banner() {
+        assert_eq!(summarize_banner("SSH-2.0-OpenSSH_9.6"), "OpenSSH 9.6");
+        assert_eq!(summarize_banner("SSH-1.99-Cisco-1.25"), "Cisco-1.25");
+        assert_eq!(summarize_banner("220 mail.example.com ESMTP"), "220 mail.example.com ESMTP");
+    }
+
+    #[test]
+    fn test_oui_lookup_known_prefix() {
+        // First line of resources/oui-prefixes.txt is 000000 -> XEROX CORPORATION.
+        assert_eq!(oui_database().get("000000").map(|s| s.as_str()), Some("XEROX CORPORATION"));
+    }
+
+    #[tokio::test]
+    async fn test_lookup_mac_vendor_bundled_db() {
+        // Uses a MAC whose OUI is bundled, so this resolves offline without
+        // falling through to the api.macvendors.com network call.
+        let vendor = lookup_mac_vendor("00:00:00:11:22:33").await;
+        assert_eq!(vendor.as_deref(), Some("XEROX CORPORATION"));
+    }
+
+    #[tokio::test]
+    async fn test_grab_banner_reads_first_line() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let _ = stream.write_all(b"SSH-2.0-OpenSSH_9.6\r\nignored second line\r\n").await;
+            }
+        });
+
+        let banner = grab_banner(addr.ip(), addr.port(), Duration::from_millis(500)).await;
+        assert_eq!(banner.as_deref(), Some("SSH-2.0-OpenSSH_9.6"));
+    }
+
+    #[tokio::test]
+    async fn test_probe_rtsp_captures_public_methods() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let mut buf = [0u8; 256];
+                let _ = stream.read(&mut buf).await;
+                let _ = stream.write_all(
+                    b"RTSP/1.0 200 OK\r\nCSeq: 1\r\nPublic: OPTIONS, DESCRIBE, SETUP, PLAY\r\n\r\n"
+                ).await;
+            }
+        });
+
+        let result = probe_rtsp(addr.ip(), addr.port(), Duration::from_millis(500)).await;
+        assert_eq!(result.as_deref(), Some("Public: OPTIONS, DESCRIBE, SETUP, PLAY"));
+    }
+
+    #[test]
+    fn test_parse_arp_mac_output_unpadded_octets() {
+        // Real macOS output for a MAC with several octets < 0x10 — this
+        // exact line is what caused .4/.5/.6/.7/.26/.39/.52 etc. to show a
+        // blank MAC/vendor on every single scan, deterministically, not
+        // intermittently: a `{2}`-per-octet regex simply never matched it.
+        let line = "? (192.168.0.39) at ac:a7:f1:8:6:a7 on en0 ifscope [ethernet]\n";
+        assert_eq!(parse_arp_mac_output(line).as_deref(), Some("AC:A7:F1:08:06:A7"));
+
+        let line2 = "? (192.168.0.4) at bc:24:11:41:65:1 on en0 ifscope [ethernet]\n";
+        assert_eq!(parse_arp_mac_output(line2).as_deref(), Some("BC:24:11:41:65:01"));
+
+        // Fully-padded input (the common case) still works.
+        let line3 = "? (192.168.0.2) at 50:88:11:c3:a2:39 on en0 ifscope [ethernet]\n";
+        assert_eq!(parse_arp_mac_output(line3).as_deref(), Some("50:88:11:C3:A2:39"));
+
+        assert_eq!(parse_arp_mac_output("192.168.0.99 (192.168.0.99) -- no entry\n"), None);
+    }
+
+    #[test]
+    fn test_parse_arp_mac_output_feeds_correct_oui_prefix() {
+        // The whole point of zero-padding: lookup_mac_vendor's downstream
+        // hex-digit-strip must land on the real OUI prefix, not a
+        // misaligned one shifted left by however many digits were dropped.
+        let line = "? (192.168.0.26) at 6:17:b6:5:4b:a5 on en0 ifscope [ethernet]\n";
+        let mac = parse_arp_mac_output(line).unwrap();
+        let clean: String = mac.chars().filter(|c| c.is_ascii_hexdigit()).collect();
+        assert_eq!(&clean[0..6], "0617B6");
+    }
+
+    #[test]
+    fn test_derive_mdns_hostname_prefers_cast_friendly_name() {
+        // Real record captured from this LAN: a MAC registered to "Motorola
+        // (Wuhan) Mobility Technologies" (Lenovo's OEM arm) that only
+        // resolve_hostname_aggressive's 8 DNS/NetBIOS/ARP/TLS methods can't
+        // name at all — but the device's own Cast advertisement says exactly
+        // what it is.
+        let records = vec![MdnsRecord {
+            service_type: "_googlecast._tcp.local.".to_string(),
+            instance_name: "LenovoCD-24502F-453e6721".to_string(),
+            hostname: Some("453e6721-d97d-f36c-d859.local".to_string()),
+            txt: HashMap::from([
+                ("fn".to_string(), "Hall clock".to_string()),
+                ("md".to_string(), "LenovoCD-24502F".to_string()),
+            ]),
+        }];
+        assert_eq!(derive_mdns_hostname(&records).as_deref(), Some("Hall clock"));
+
+        // No "fn" TXT key: falls back to the advertised hostname.
+        let no_fn = vec![MdnsRecord {
+            service_type: "_ssh._tcp.local.".to_string(),
+            instance_name: "Living Room TV".to_string(),
+            hostname: Some("living-room-tv.local".to_string()),
+            txt: HashMap::new(),
+        }];
+        assert_eq!(derive_mdns_hostname(&no_fn).as_deref(), Some("living-room-tv.local"));
+
+        // Neither "fn" nor hostname: falls back to the instance name.
+        let instance_only = vec![MdnsRecord {
+            service_type: "_home-assistant._tcp.local.".to_string(),
+            instance_name: "Home".to_string(),
+            hostname: None,
+            txt: HashMap::new(),
+        }];
+        assert_eq!(derive_mdns_hostname(&instance_only).as_deref(), Some("Home"));
+
+        assert_eq!(derive_mdns_hostname(&[]), None);
+    }
+
+    #[tokio::test]
+    async fn test_enrich_port_dispatches_banner_first() {
+        // enrich_port dispatches purely on `open_port.port`, which is also the
+        // port it connects to — so unlike the other probe tests, this one has
+        // to bind the *real* well-known port (3306/MySQL: in BANNER_FIRST_PORTS,
+        // and unlike 21/22/25/110/143 it doesn't need root to bind). Skips
+        // gracefully if something else already owns the port on this machine.
+        let listener = match tokio::net::TcpListener::bind("127.0.0.1:3306").await {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("skipping: could not bind 127.0.0.1:3306 ({e})");
+                return;
+            }
+        };
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let _ = stream.write_all(b"\x4a\x00\x00\x00\x0a8.0.34\x00mysql banner\r\n").await;
+            }
+        });
+
+        let open_port = OpenPort {
+            port: 3306,
+            service_name: "mysql".to_string(),
+            protocol: "tcp".to_string(),
+            ..Default::default()
+        };
+        let enriched = enrich_port(
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            open_port,
+            Duration::from_millis(500),
+        ).await;
+
+        assert!(enriched.banner.is_some(), "expected a banner to be grabbed from the canned MySQL greeting");
+        assert!(enriched.version.is_some());
+    }
+
+    /// Debug-only: runs the real scan pipeline (via [`run_explore_and_dump`],
+    /// the same function backing the `network-explore-cli` binary) against a
+    /// real CIDR with no Tauri State/AppHandle/UI, dumping every
+    /// `ExploreResult` field to a JSON file for inspection on disk instead of
+    /// re-running the app and screenshotting it. Ignored by default:
+    ///   NETWORK_DEBUG_CIDR=192.168.0.0/24 NETWORK_DEBUG_OUT=/path/to/out.json \
+    ///     cargo test --lib network::tests::dump_full_scan_debug -- --ignored --nocapture
+    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    #[ignore]
+    async fn dump_full_scan_debug() {
+        let cidr = std::env::var("NETWORK_DEBUG_CIDR").unwrap_or_else(|_| "192.168.0.0/24".to_string());
+        let out_path = std::env::var("NETWORK_DEBUG_OUT")
+            .unwrap_or_else(|_| "/tmp/network_debug_scan.json".to_string());
+        run_explore_and_dump(&cidr, None, &[], 1500, &out_path).await.unwrap();
     }
 }
 

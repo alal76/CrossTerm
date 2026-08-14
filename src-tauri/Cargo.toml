@@ -7,10 +7,19 @@ license = "AGPL-3.0-only"
 repository = "https://github.com/alal76/CrossTerm"
 edition = "2021"
 rust-version = "1.77.2"
+# `tauri dev` shells out to `cargo run` with no --bin; adding the
+# network-explore-cli binary target made that ambiguous without this.
+default-run = "crossterm-app"
 
 [lib]
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+# Standalone Network Explorer runner: exercises the real scan pipeline with
+# no Tauri app, no vault unlock, no UI — see src/bin/network-explore-cli.rs.
+[[bin]]
+name = "network-explore-cli"
+path = "src/bin/network-explore-cli.rs"
 
 [build-dependencies]
 tauri-build = { version = "2.5.6", features = [] }
@@ -83,6 +92,7 @@ p256 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
 # System
 libc = "0.2"
 if-addrs = "0.13"
+socket2 = "0.5"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 
 # Network discovery (mDNS/Bonjour + TLS certificate inspection for Network Explorer)

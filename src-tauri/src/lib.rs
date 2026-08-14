@@ -27,7 +27,7 @@ mod winrm;
 mod keymgr;
 mod l10n;
 mod macros;
-mod network;
+pub mod network;
 mod notifications;
 mod plugin_rt;
 mod rbac;

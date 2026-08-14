@@ -114,6 +114,16 @@ pub struct Settings {
     // ── Advanced ──────────────────────────────────────────────────────
     pub log_level: String,
     pub telemetry_enabled: bool,
+
+    // ── Network Explorer ──────────────────────────────────────────────
+    /// User-assigned friendly names for discovered network devices, keyed by
+    /// MAC address (canonical `AA:BB:CC:DD:EE:FF`, uppercase) — falls back to
+    /// IP address for the rare host no MAC could be resolved for. Persisted
+    /// per-profile so labels survive a fresh Network Explorer scan; not a
+    /// secret, so it lives in Settings rather than the credential vault
+    /// (whose CredentialType enum has no generic-metadata variant and would
+    /// otherwise gate labels behind a vault unlock for no security benefit).
+    pub network_device_labels: HashMap<String, String>,
 }
 
 impl Default for Settings {
@@ -194,6 +204,9 @@ impl Default for Settings {
             // Advanced
             log_level: "info".into(),
             telemetry_enabled: false,
+
+            // Network Explorer
+            network_device_labels: HashMap::new(),
         }
     }
 }
@@ -1706,6 +1719,19 @@ mod tests {
         assert!(profile.settings.copy_on_select);
         assert!(!profile.settings.auto_update);
         assert_eq!(profile.settings.terminal_opacity, 0.9);
+    }
+
+    #[test]
+    fn test_network_device_labels_persist_across_reload() {
+        let env = TestEnv::new();
+        let mut labels = HashMap::new();
+        labels.insert("AC:A7:F1:08:06:A7".to_string(), "Front door camera".to_string());
+        labels.insert("192.168.0.26".to_string(), "Unlabeled MAC-less device".to_string());
+
+        do_settings_update(env.id(), Settings { network_device_labels: labels.clone(), ..Default::default() }).unwrap();
+
+        let profile = do_profile_get(env.id()).unwrap();
+        assert_eq!(profile.settings.network_device_labels, labels);
     }
 
     // ── UT-C-05: Settings defaults ──────────────────────────────────
