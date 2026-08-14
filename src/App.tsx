@@ -54,6 +54,7 @@ import {
   RedfishTabPane,
   WebDavTabPane,
   MqttTabPane,
+  SmbTabPane,
 } from "@/components/Terminal/ProtocolTabPanes";
 import SplitPaneContainer from "@/components/Terminal/SplitPaneContainer";
 import CommandPalette from "@/components/Shared/CommandPalette";
@@ -1206,6 +1207,14 @@ function SessionCanvas() {
           return (
             <div key={tab.id} className={clsx("absolute inset-0 overflow-hidden", isActive ? "z-10" : "z-0 hidden")}>
               <MqttTabPane sessionId={tab.sessionId} session={session} />
+            </div>
+          );
+        }
+
+        if (tab.sessionType === SessionType.Smb && session) {
+          return (
+            <div key={tab.id} className={clsx("absolute inset-0 overflow-auto", isActive ? "z-10" : "z-0 hidden")}>
+              <SmbTabPane sessionId={tab.sessionId} session={session} />
             </div>
           );
         }

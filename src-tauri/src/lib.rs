@@ -352,6 +352,9 @@ pub fn run() {
             smb::smb_connect,
             smb::smb_list_dir,
             smb::smb_list_shares,
+            smb::smb_get,
+            smb::smb_put,
+            smb::smb_delete,
             smb::smb_disconnect,
             smb::smb_list_sessions,
             // WebDAV

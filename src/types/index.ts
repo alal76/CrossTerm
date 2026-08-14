@@ -1280,3 +1280,23 @@ export interface MqttMessage {
   qos: number;
   retain: boolean;
 }
+
+// --- SMB/CIFS ---
+
+export interface SmbConfig {
+  host: string;
+  port: number;
+  username?: string;
+  password?: string;
+  domain?: string;
+  share: string;
+}
+
+export type SmbEntryType = "file" | "directory";
+
+export interface SmbEntry {
+  name: string;
+  entry_type: SmbEntryType;
+  size: number;
+  modified?: string;
+}

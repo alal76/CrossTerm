@@ -8,7 +8,7 @@
 // specific fields yet — domain, NLA, codec, etc. — so those fall back to
 // sensible defaults here until the editor grows per-type fields).
 
-import type { Session, RdpConfig, VncConfig, WsTermConfig, RedfishConfig, WebDavConfig, MqttConfig } from '@/types';
+import type { Session, RdpConfig, VncConfig, WsTermConfig, RedfishConfig, WebDavConfig, MqttConfig, SmbConfig } from '@/types';
 
 export function buildRdpConfig(session: Session): RdpConfig {
   const opts = session.connection.protocolOptions;
@@ -88,5 +88,22 @@ export function buildMqttConfig(session: Session): MqttConfig {
     keep_alive_secs: 30,
     use_tls: session.connection.port === 8883,
     clean_session: true,
+  };
+}
+
+/// SMB can't actually connect without a share name, which isn't a field
+/// the generic Session model has — this builder leaves `share` empty when
+/// protocolOptions doesn't have one, and SmbBrowser itself detects that and
+/// shows a share picker (via smb_list_shares) before ever calling
+/// smb_connect, rather than failing to connect with a misleading error.
+export function buildSmbConfig(session: Session): SmbConfig {
+  const opts = session.connection.protocolOptions;
+  return {
+    host: session.connection.host,
+    port: session.connection.port,
+    username: opts?.['username'] as string | undefined,
+    password: opts?.['password'] as string | undefined,
+    domain: opts?.['domain'] as string | undefined,
+    share: (opts?.['share'] as string) ?? '',
   };
 }

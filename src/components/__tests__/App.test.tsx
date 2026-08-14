@@ -76,6 +76,11 @@ vi.mock("@/components/Mqtt/MqttClient", () => ({
     <div data-testid={`mqtt-client-${sessionId}`}>MqttClient Mock</div>
   ),
 }));
+vi.mock("@/components/Smb/SmbBrowser", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`smb-browser-${sessionId}`}>SmbBrowser Mock</div>
+  ),
+}));
 
 // Mock components that use localStorage directly (tested separately)
 vi.mock("@/components/Help/WhatsNewPanel", () => ({
@@ -351,6 +356,17 @@ describe("App", () => {
       render(<App />);
 
       expect(screen.getByTestId(`mqtt-client-${tab.sessionId}`)).toBeInTheDocument();
+      expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
+    });
+
+    it("routes an SMB tab to SmbBrowser, not the generic local-shell fallback", () => {
+      const session = baseSession({ type: SessionType.Smb, connection: { host: "192.168.0.30", port: 445 } });
+      const tab = baseTab({ sessionType: SessionType.Smb });
+      useSessionStore.setState({ sessions: [session], openTabs: [tab], activeTabId: tab.id });
+
+      render(<App />);
+
+      expect(screen.getByTestId(`smb-browser-${tab.sessionId}`)).toBeInTheDocument();
       expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
     });
   });

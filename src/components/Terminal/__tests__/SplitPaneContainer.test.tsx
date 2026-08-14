@@ -56,6 +56,11 @@ vi.mock("@/components/Mqtt/MqttClient", () => ({
     <div data-testid={`mqtt-client-${sessionId}`}>MqttClient Mock</div>
   ),
 }));
+vi.mock("@/components/Smb/SmbBrowser", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`smb-browser-${sessionId}`}>SmbBrowser Mock</div>
+  ),
+}));
 
 function baseSession(overrides: Partial<Session> = {}): Session {
   return {
@@ -181,5 +186,15 @@ describe("SplitPaneContainer session type routing", () => {
     render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
 
     expect(screen.getByTestId(`mqtt-client-${tab.sessionId}`)).toBeInTheDocument();
+  });
+
+  it("routes an SMB leaf pane to SmbBrowser", () => {
+    const session = baseSession({ type: SessionType.Smb, connection: { host: "192.168.0.30", port: 445 } });
+    const tab = baseTab({ sessionType: SessionType.Smb });
+    useSessionStore.setState({ sessions: [session], openTabs: [tab] });
+
+    render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
+
+    expect(screen.getByTestId(`smb-browser-${tab.sessionId}`)).toBeInTheDocument();
   });
 });

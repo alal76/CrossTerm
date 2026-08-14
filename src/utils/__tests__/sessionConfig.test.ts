@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildRdpConfig, buildVncConfig, buildWsTermConfig, buildRedfishConfig, buildWebDavConfig, buildMqttConfig } from "@/utils/sessionConfig";
+import { buildRdpConfig, buildVncConfig, buildWsTermConfig, buildRedfishConfig, buildWebDavConfig, buildMqttConfig, buildSmbConfig } from "@/utils/sessionConfig";
 import type { Session } from "@/types";
 import { SessionType } from "@/types";
 
@@ -160,5 +160,28 @@ describe("buildMqttConfig", () => {
 
     const explicit = buildMqttConfig(baseSession({ connection: { host: "h", port: 1883, protocolOptions: { client_id: "my-client" } } }));
     expect(explicit.client_id).toBe("my-client");
+  });
+});
+
+describe("buildSmbConfig", () => {
+  it("maps host/port and credentials from protocolOptions", () => {
+    const config = buildSmbConfig(
+      baseSession({
+        connection: { host: "192.168.0.30", port: 445, protocolOptions: { username: "alal", password: "hunter2", domain: "WORKGROUP", share: "public" } },
+      })
+    );
+    expect(config.host).toBe("192.168.0.30");
+    expect(config.port).toBe(445);
+    expect(config.username).toBe("alal");
+    expect(config.password).toBe("hunter2");
+    expect(config.domain).toBe("WORKGROUP");
+    expect(config.share).toBe("public");
+  });
+
+  it("defaults share to an empty string when protocolOptions doesn't have one", () => {
+    const config = buildSmbConfig(baseSession({ connection: { host: "192.168.0.30", port: 445 } }));
+    expect(config.share).toBe("");
+    expect(config.username).toBeUndefined();
+    expect(config.domain).toBeUndefined();
   });
 });

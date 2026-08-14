@@ -15,6 +15,7 @@ import {
   RedfishTabPane,
   WebDavTabPane,
   MqttTabPane,
+  SmbTabPane,
 } from "@/components/Terminal/ProtocolTabPanes";
 
 // ── Resize Handle ──
@@ -116,6 +117,9 @@ function renderPaneContent(tab: { sessionId: string; sessionType: SessionType },
   }
   if (tab.sessionType === SessionType.MqttClient && session) {
     return <MqttTabPane sessionId={tab.sessionId} session={session} />;
+  }
+  if (tab.sessionType === SessionType.Smb && session) {
+    return <SmbTabPane sessionId={tab.sessionId} session={session} />;
   }
   return <TerminalTab sessionId={tab.sessionId} isActive={isActive} />;
 }
