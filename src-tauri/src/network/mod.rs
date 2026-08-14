@@ -525,22 +525,64 @@ fn current_bound_interface() -> Option<String> {
     BOUND_INTERFACE.try_with(|v| v.clone()).unwrap_or(None)
 }
 
-// ── Gateway-direct reverse DNS ──────────────────────────────────────────
-// Home routers commonly run a tiny local DNS zone populated from DHCP
-// client hostnames (e.g. "jellyfin2.home", "device-70.home") but only
-// answer PTR queries for it if asked *directly* — the system's configured
-// resolver (which might be a VPN's DNS, an upstream ISP resolver, or
-// anything else `/etc/resolv.conf`/scutil points at) has no idea that zone
-// exists and returns nothing. Confirmed on a real LAN: `dig -x <ip>` via
-// the default resolver came back empty for 8 hosts (VMs, phones, cameras)
-// that `dig -x <ip> @<gateway>` resolved instantly. Detected and cached
-// once per scan, same pattern as `BOUND_INTERFACE`.
-tokio::task_local! {
-    static GATEWAY_IP: Option<IpAddr>;
+// ── Local-DNS-server-direct reverse DNS ─────────────────────────────────
+// Routers/gateways commonly run a tiny local DNS zone populated from DHCP
+// client hostnames (e.g. "jellyfin2.home", "device-70.home") — and so does
+// anything else acting as the LAN's DNS server (a Pi-hole, a NAS, a
+// Windows AD box) — but each only answers PTR queries for its own zone if
+// asked *directly*. The system's configured resolver (which might be a
+// VPN's DNS, an upstream ISP resolver, or anything else `/etc/resolv.conf`/
+// scutil points at) has no idea any of these zones exist. Confirmed on a
+// real LAN: `dig -x <ip>` via the default resolver came back empty for 8
+// hosts (VMs, phones, cameras) that `dig -x <ip> @<router>` resolved
+// instantly.
+//
+// Rather than hardcode "the gateway" as the one local DNS server worth
+// asking, this scan discovers candidates the same way it discovers
+// everything else — by finding hosts with port 53 open — and grows the
+// candidate set as the scan progresses, so hosts resolved later benefit
+// from DNS servers a concurrent host task found earlier. Seeded up front
+// with the default-route gateway and the CIDR's conventional `.1`, since
+// both are free/instant and cover the common case before any host has
+// even been probed yet.
+type DnsServerRegistry = Arc<tokio::sync::RwLock<HashSet<IpAddr>>>;
+
+fn new_dns_server_registry() -> DnsServerRegistry {
+    Arc::new(tokio::sync::RwLock::new(HashSet::new()))
 }
 
-fn current_gateway() -> Option<IpAddr> {
-    GATEWAY_IP.try_with(|v| *v).unwrap_or(None)
+/// Seeds a registry with the default-route gateway and the CIDR's
+/// conventional `.1` address (a near-universal home-router convention,
+/// cheap to try even when wrong — a bad guess just times out like any
+/// other closed port).
+async fn seed_dns_server_registry(cidr: &str) -> DnsServerRegistry {
+    let registry = new_dns_server_registry();
+    let mut servers = registry.write().await;
+    if let Some(gw) = detect_default_gateway().await {
+        servers.insert(gw);
+    }
+    if let Some(dot_one) = conventional_dot_one(cidr) {
+        servers.insert(dot_one);
+    }
+    drop(servers);
+    registry
+}
+
+/// The `.1` address of `cidr`'s network (e.g. `192.168.0.1` for
+/// `192.168.0.0/24`) — the overwhelmingly common convention for a home
+/// router/gateway's own address, worth trying even before any host in the
+/// range has actually been probed. `None` for prefixes too small to have a
+/// meaningful "first host" (/31, /32).
+fn conventional_dot_one(cidr: &str) -> Option<IpAddr> {
+    let (net_str, prefix_str) = cidr.split_once('/')?;
+    let network: Ipv4Addr = net_str.parse().ok()?;
+    let prefix: u32 = prefix_str.parse().ok()?;
+    if prefix >= 31 {
+        return None;
+    }
+    let mask: u32 = u32::MAX << (32 - prefix);
+    let network_addr = u32::from(network) & mask;
+    Some(IpAddr::V4(Ipv4Addr::from(network_addr | 1)))
 }
 
 /// The system's default-route gateway (e.g. `192.168.0.1`), however this
@@ -586,23 +628,41 @@ async fn detect_default_gateway() -> Option<IpAddr> {
     { None }
 }
 
-/// Method 9 — reverse DNS against the LAN gateway directly, bypassing
-/// whatever DNS server the system resolver is actually configured to use.
-async fn reverse_dns_via_gateway(ip: String) -> Option<String> {
-    let gateway = current_gateway()?;
-    let output = tokio::time::timeout(
-        Duration::from_secs(3),
-        tokio::process::Command::new("dig")
-            .args(["+short", "+time=2", "+tries=1", "-x", &ip, &format!("@{gateway}")])
-            .output(),
-    ).await.ok()?.ok()?;
+/// Registers `ip` as a candidate local DNS server for the rest of this
+/// scan, if `open_ports` shows port 53 open on it. Called for every host
+/// as its own port scan completes — this is the "search for ... any
+/// router/DHCP-adjacent DNS server" discovery step: no vendor/brand
+/// assumptions, just "does something answer on port 53".
+async fn register_if_dns_server(ip: IpAddr, open_ports: &[OpenPort], registry: &DnsServerRegistry) {
+    if open_ports.iter().any(|p| p.port == 53) {
+        registry.write().await.insert(ip);
+    }
+}
 
-    let text = String::from_utf8_lossy(&output.stdout);
-    let name = text.lines()
-        .find(|l| !l.starts_with(';') && !l.trim().is_empty())?
-        .trim()
-        .trim_end_matches('.');
-    if !name.is_empty() { Some(name.to_string()) } else { None }
+/// Method 9 — reverse DNS against every currently-known local DNS server
+/// directly (concurrently), bypassing whatever DNS server the system
+/// resolver is actually configured to use. Takes the first hit.
+async fn reverse_dns_via_known_servers(ip: String, registry: &DnsServerRegistry) -> Option<String> {
+    let servers: Vec<IpAddr> = registry.read().await.iter().copied().collect();
+    let queries = servers.into_iter().map(|server| {
+        let ip = ip.clone();
+        async move {
+            let output = tokio::time::timeout(
+                Duration::from_secs(3),
+                tokio::process::Command::new("dig")
+                    .args(["+short", "+time=2", "+tries=1", "-x", &ip, &format!("@{server}")])
+                    .output(),
+            ).await.ok()?.ok()?;
+            let text = String::from_utf8_lossy(&output.stdout);
+            let name = text.lines()
+                .find(|l| !l.starts_with(';') && !l.trim().is_empty())?
+                .trim()
+                .trim_end_matches('.')
+                .to_string();
+            if name.is_empty() { None } else { Some(name) }
+        }
+    });
+    futures::future::join_all(queries).await.into_iter().flatten().next()
 }
 
 /// The local interface whose directly-connected subnet matches `cidr`
@@ -775,7 +835,7 @@ fn parse_ping_ttl(text: &str) -> Option<u8> {
 /// Aggressively resolve a hostname for an IP using all available methods in parallel.
 /// open_ports is used to attempt TLS certificate hostname extraction.
 /// Returns the first non-None result from 8 concurrent methods.
-async fn resolve_hostname_aggressive(ip: IpAddr, open_ports: Vec<OpenPort>) -> Option<String> {
+async fn resolve_hostname_aggressive(ip: IpAddr, open_ports: Vec<OpenPort>, dns_servers: &DnsServerRegistry) -> Option<String> {
     let ip_str = ip.to_string();
 
     // Check for any open TLS ports we can grab a cert from
@@ -792,7 +852,7 @@ async fn resolve_hostname_aggressive(ip: IpAddr, open_ports: Vec<OpenPort>) -> O
         }
     };
 
-    let (r_dns, r_hosts, r_nslookup, r_netbios, r_arp, r_dig, r_host_cmd, r_tls, r_gateway) = tokio::join!(
+    let (r_dns, r_hosts, r_nslookup, r_netbios, r_arp, r_dig, r_host_cmd, r_tls, r_local_dns) = tokio::join!(
         reverse_dns_getnameinfo(ip),
         lookup_hosts_file(ip_str.clone()),
         nslookup_reverse(ip_str.clone()),
@@ -801,10 +861,10 @@ async fn resolve_hostname_aggressive(ip: IpAddr, open_ports: Vec<OpenPort>) -> O
         dig_reverse(ip_str.clone()),
         host_reverse(ip_str.clone()),
         tls_fut,
-        reverse_dns_via_gateway(ip_str.clone()),
+        reverse_dns_via_known_servers(ip_str.clone(), dns_servers),
     );
 
-    r_dns.or(r_hosts).or(r_nslookup).or(r_netbios).or(r_arp).or(r_dig).or(r_host_cmd).or(r_tls).or(r_gateway)
+    r_dns.or(r_hosts).or(r_nslookup).or(r_netbios).or(r_arp).or(r_dig).or(r_host_cmd).or(r_tls).or(r_local_dns)
 }
 
 /// Method 1 — getnameinfo with timeout: PTR + mDNS via the system resolver.
@@ -1592,7 +1652,12 @@ pub async fn network_scan_start(
                 let response_time = start.elapsed().as_secs_f64() * 1000.0;
 
                 if !open_ports.is_empty() {
-                    let (hostname, mac_address) = tokio::join!(resolve_hostname_aggressive(ip, open_ports.clone()), resolve_arp_mac(ip));
+                    // Legacy path: no per-scan DNS-server discovery (that
+                    // needs to grow across concurrent hosts, which this
+                    // command's simpler per-host task shape doesn't share) —
+                    // an empty, un-seeded registry just skips method 9.
+                    let no_dns_servers = new_dns_server_registry();
+                    let (hostname, mac_address) = tokio::join!(resolve_hostname_aggressive(ip, open_ports.clone(), &no_dns_servers), resolve_arp_mac(ip));
                     let mac_vendor = if let Some(ref mac) = mac_address {
                         lookup_mac_vendor(mac).await
                     } else {
@@ -1674,6 +1739,11 @@ pub async fn network_explore_start(
     };
     let mut ports: Vec<u16> = services.iter().map(|s| s.port()).collect();
     ports.extend(&target.extra_ports);
+    // Always probed regardless of service filter selection: this is what
+    // feeds the local-DNS-server discovery behind hostname method 9 (see
+    // `register_if_dns_server`) — without it, no host's port 53 ever gets
+    // checked, so the registry could only ever hold the gateway/.1 guesses.
+    ports.push(53);
     ports.sort_unstable();
     ports.dedup();
 
@@ -1717,9 +1787,9 @@ pub async fn network_explore_start(
             }
         });
 
-        // See the `GATEWAY_IP` note above `reverse_dns_via_gateway`: detected
-        // once per scan, not per host.
-        let gateway = detect_default_gateway().await;
+        // See the note above `DnsServerRegistry`: seeded once per scan, then
+        // grown as hosts with port 53 open are found during it.
+        let dns_registry = seed_dns_server_registry(&target.cidr).await;
 
         for addr in addresses {
             let ip = IpAddr::V4(addr);
@@ -1731,8 +1801,9 @@ pub async fn network_explore_start(
             let ports = Arc::clone(&ports);
             let cancelled = Arc::clone(&cancel_flag);
             let bound_if = bound_if.clone();
+            let dns_registry = Arc::clone(&dns_registry);
 
-            tasks.spawn(BOUND_INTERFACE.scope(bound_if, GATEWAY_IP.scope(gateway, async move {
+            tasks.spawn(BOUND_INTERFACE.scope(bound_if, async move {
                 let _permit = sem.acquire_owned().await.unwrap();
                 if cancelled.load(Ordering::Relaxed) {
                     return;
@@ -1747,6 +1818,7 @@ pub async fn network_explore_start(
                 );
                 let open_ports: Vec<OpenPort> = port_results.into_iter().flatten().collect();
                 let found = !open_ports.is_empty() || ping_alive;
+                register_if_dns_server(ip, &open_ports, &dns_registry).await;
 
                 // Progress/"scanned" advances here, at the fast port-scan/ping
                 // pass, not after the slower enrichment below — so the
@@ -1805,7 +1877,7 @@ pub async fn network_explore_start(
                 let open_ports: Vec<OpenPort> = futures::future::join_all(enrich_futures).await;
                 let response_time = start.elapsed().as_secs_f64() * 1000.0;
 
-                let (hostname, mac_address) = tokio::join!(resolve_hostname_aggressive(ip, open_ports.clone()), resolve_arp_mac(ip));
+                let (hostname, mac_address) = tokio::join!(resolve_hostname_aggressive(ip, open_ports.clone(), &dns_registry), resolve_arp_mac(ip));
                 let mac_vendor = if let Some(ref mac) = mac_address {
                     lookup_mac_vendor(mac).await
                 } else {
@@ -1829,7 +1901,7 @@ pub async fn network_explore_start(
                     scan_id,
                     result,
                 });
-            })));
+            }));
         }
 
         while tasks.join_next().await.is_some() {}
@@ -1853,7 +1925,10 @@ pub fn network_explore_stop(scan_id: String, state: tauri::State<'_, NetworkStat
 pub struct ExploreDump {
     pub cidr: String,
     pub bound_interface: Option<String>,
-    pub gateway: Option<IpAddr>,
+    /// Every local DNS server used for hostname method 9, by the end of the
+    /// scan — the default gateway and the CIDR's `.1` guess if either
+    /// answered, plus any host discovered along the way with port 53 open.
+    pub dns_servers_used: Vec<IpAddr>,
     pub ports_scanned: Vec<u16>,
     pub host_count: usize,
     pub results: Vec<ExploreResult>,
@@ -1880,7 +1955,7 @@ pub async fn run_explore_and_dump(
     let addresses = parse_cidr(cidr)?;
     let timeout = Duration::from_millis(timeout_ms);
     let bound_if = interface_for_cidr(cidr);
-    let gateway = detect_default_gateway().await;
+    let dns_registry = seed_dns_server_registry(cidr).await;
 
     let mut ports: Vec<u16> = services
         .unwrap_or(DEFAULT_EXPLORE_SERVICES)
@@ -1888,6 +1963,7 @@ pub async fn run_explore_and_dump(
         .map(|s| s.port())
         .collect();
     ports.extend(extra_ports);
+    ports.push(53); // feeds local-DNS-server discovery; see register_if_dns_server
     ports.sort_unstable();
     ports.dedup();
     let ports = Arc::new(ports);
@@ -1897,6 +1973,7 @@ pub async fn run_explore_and_dump(
         let ip = IpAddr::V4(addr);
         let ports = Arc::clone(&ports);
         let sem = Arc::clone(&semaphore);
+        let dns_registry = Arc::clone(&dns_registry);
         async move {
             let _permit = sem.acquire_owned().await.unwrap();
             let port_futures: Vec<_> = ports.iter().map(|&p| check_port(ip, p, timeout)).collect();
@@ -1908,10 +1985,11 @@ pub async fn run_explore_and_dump(
             if open_ports.is_empty() && !ping_alive {
                 return None;
             }
+            register_if_dns_server(ip, &open_ports, &dns_registry).await;
             let enrich_futures: Vec<_> = open_ports.into_iter().map(|p| enrich_port(ip, p, timeout)).collect();
             let open_ports: Vec<OpenPort> = futures::future::join_all(enrich_futures).await;
             let (hostname, mac_address) = tokio::join!(
-                resolve_hostname_aggressive(ip, open_ports.clone()),
+                resolve_hostname_aggressive(ip, open_ports.clone(), &dns_registry),
                 resolve_arp_mac(ip),
             );
             let mac_vendor = if let Some(ref mac) = mac_address { lookup_mac_vendor(mac).await } else { None };
@@ -1935,7 +2013,7 @@ pub async fn run_explore_and_dump(
 
     let (mdns_records, host_results) = tokio::join!(
         mdns_discover(MDNS_DISCOVER_WINDOW),
-        BOUND_INTERFACE.scope(bound_if.clone(), GATEWAY_IP.scope(gateway, futures::future::join_all(host_futs))),
+        BOUND_INTERFACE.scope(bound_if.clone(), futures::future::join_all(host_futs)),
     );
     let mdns_by_ip: HashMap<String, Vec<MdnsRecord>> =
         mdns_records.into_iter().map(|(ip, recs)| (ip.to_string(), recs)).collect();
@@ -1958,10 +2036,11 @@ pub async fn run_explore_and_dump(
         .collect();
 
     let host_count = results.len();
+    let dns_servers_used: Vec<IpAddr> = dns_registry.read().await.iter().copied().collect();
     let dump = ExploreDump {
         cidr: cidr.to_string(),
         bound_interface: bound_if,
-        gateway,
+        dns_servers_used,
         ports_scanned: (*ports).clone(),
         host_count,
         results,
@@ -4226,6 +4305,33 @@ mod tests {
             not_after: None,
         };
         assert_eq!(pick_hostname_from_cert(real_cn).as_deref(), Some("TPRI-DEVICE"));
+    }
+
+    #[test]
+    fn test_conventional_dot_one() {
+        assert_eq!(conventional_dot_one("192.168.0.0/24"), Some(IpAddr::V4(Ipv4Addr::new(192, 168, 0, 1))));
+        assert_eq!(conventional_dot_one("10.20.30.0/24"), Some(IpAddr::V4(Ipv4Addr::new(10, 20, 30, 1))));
+        // Non-zero host bits in the CIDR's network part still resolve off
+        // the masked network address, not the literal input.
+        assert_eq!(conventional_dot_one("192.168.0.5/24"), Some(IpAddr::V4(Ipv4Addr::new(192, 168, 0, 1))));
+        // Too small a prefix to have a meaningful "first host".
+        assert_eq!(conventional_dot_one("192.168.0.5/31"), None);
+        assert_eq!(conventional_dot_one("192.168.0.5/32"), None);
+        assert_eq!(conventional_dot_one("not-a-cidr"), None);
+    }
+
+    #[tokio::test]
+    async fn test_dns_server_registry_grows_from_discovered_hosts() {
+        let registry = new_dns_server_registry();
+        let ip = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5));
+        let with_dns = vec![OpenPort { port: 53, service_name: "dns".to_string(), protocol: "tcp".to_string(), ..Default::default() }];
+        let without_dns = vec![OpenPort { port: 22, service_name: "ssh".to_string(), protocol: "tcp".to_string(), ..Default::default() }];
+
+        register_if_dns_server(ip, &without_dns, &registry).await;
+        assert!(registry.read().await.is_empty(), "no port 53 open — must not register");
+
+        register_if_dns_server(ip, &with_dns, &registry).await;
+        assert!(registry.read().await.contains(&ip), "port 53 open — must register as a candidate DNS server");
     }
 
     #[test]
