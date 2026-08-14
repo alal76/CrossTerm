@@ -525,6 +525,86 @@ fn current_bound_interface() -> Option<String> {
     BOUND_INTERFACE.try_with(|v| v.clone()).unwrap_or(None)
 }
 
+// ── Gateway-direct reverse DNS ──────────────────────────────────────────
+// Home routers commonly run a tiny local DNS zone populated from DHCP
+// client hostnames (e.g. "jellyfin2.home", "device-70.home") but only
+// answer PTR queries for it if asked *directly* — the system's configured
+// resolver (which might be a VPN's DNS, an upstream ISP resolver, or
+// anything else `/etc/resolv.conf`/scutil points at) has no idea that zone
+// exists and returns nothing. Confirmed on a real LAN: `dig -x <ip>` via
+// the default resolver came back empty for 8 hosts (VMs, phones, cameras)
+// that `dig -x <ip> @<gateway>` resolved instantly. Detected and cached
+// once per scan, same pattern as `BOUND_INTERFACE`.
+tokio::task_local! {
+    static GATEWAY_IP: Option<IpAddr>;
+}
+
+fn current_gateway() -> Option<IpAddr> {
+    GATEWAY_IP.try_with(|v| *v).unwrap_or(None)
+}
+
+/// The system's default-route gateway (e.g. `192.168.0.1`), however this
+/// scan's own outbound traffic actually gets there — independent of and
+/// complementary to `interface_for_cidr`, which only identifies a subnet
+/// this machine is *directly attached to*.
+async fn detect_default_gateway() -> Option<IpAddr> {
+    #[cfg(target_os = "macos")]
+    {
+        let output = tokio::process::Command::new("route").args(["-n", "get", "default"]).output().await.ok()?;
+        let text = String::from_utf8_lossy(&output.stdout);
+        text.lines()
+            .find_map(|l| l.trim().strip_prefix("gateway:"))
+            .and_then(|g| g.trim().parse().ok())
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let output = tokio::process::Command::new("ip").args(["route", "show", "default"]).output().await.ok()?;
+        let text = String::from_utf8_lossy(&output.stdout);
+        // "default via 192.168.0.1 dev eth0 ..."
+        let mut tokens = text.split_whitespace();
+        while let Some(tok) = tokens.next() {
+            if tok == "via" {
+                return tokens.next().and_then(|g| g.parse().ok());
+            }
+        }
+        None
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let output = tokio::process::Command::new("route").args(["print", "0.0.0.0"]).output().await.ok()?;
+        let text = String::from_utf8_lossy(&output.stdout);
+        text.lines().find_map(|line| {
+            let cols: Vec<&str> = line.split_whitespace().collect();
+            if cols.len() >= 3 && cols[0] == "0.0.0.0" && cols[1] == "0.0.0.0" {
+                cols[2].parse().ok()
+            } else {
+                None
+            }
+        })
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    { None }
+}
+
+/// Method 9 — reverse DNS against the LAN gateway directly, bypassing
+/// whatever DNS server the system resolver is actually configured to use.
+async fn reverse_dns_via_gateway(ip: String) -> Option<String> {
+    let gateway = current_gateway()?;
+    let output = tokio::time::timeout(
+        Duration::from_secs(3),
+        tokio::process::Command::new("dig")
+            .args(["+short", "+time=2", "+tries=1", "-x", &ip, &format!("@{gateway}")])
+            .output(),
+    ).await.ok()?.ok()?;
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    let name = text.lines()
+        .find(|l| !l.starts_with(';') && !l.trim().is_empty())?
+        .trim()
+        .trim_end_matches('.');
+    if !name.is_empty() { Some(name.to_string()) } else { None }
+}
+
 /// The local interface whose directly-connected subnet matches `cidr`
 /// exactly (e.g. "en0" for "192.168.0.0/24" when that's this machine's own
 /// LAN segment). `None` when no local interface owns this subnet (routing
@@ -712,7 +792,7 @@ async fn resolve_hostname_aggressive(ip: IpAddr, open_ports: Vec<OpenPort>) -> O
         }
     };
 
-    let (r_dns, r_hosts, r_nslookup, r_netbios, r_arp, r_dig, r_host_cmd, r_tls) = tokio::join!(
+    let (r_dns, r_hosts, r_nslookup, r_netbios, r_arp, r_dig, r_host_cmd, r_tls, r_gateway) = tokio::join!(
         reverse_dns_getnameinfo(ip),
         lookup_hosts_file(ip_str.clone()),
         nslookup_reverse(ip_str.clone()),
@@ -721,9 +801,10 @@ async fn resolve_hostname_aggressive(ip: IpAddr, open_ports: Vec<OpenPort>) -> O
         dig_reverse(ip_str.clone()),
         host_reverse(ip_str.clone()),
         tls_fut,
+        reverse_dns_via_gateway(ip_str.clone()),
     );
 
-    r_dns.or(r_hosts).or(r_nslookup).or(r_netbios).or(r_arp).or(r_dig).or(r_host_cmd).or(r_tls)
+    r_dns.or(r_hosts).or(r_nslookup).or(r_netbios).or(r_arp).or(r_dig).or(r_host_cmd).or(r_tls).or(r_gateway)
 }
 
 /// Method 1 — getnameinfo with timeout: PTR + mDNS via the system resolver.
@@ -1636,6 +1717,10 @@ pub async fn network_explore_start(
             }
         });
 
+        // See the `GATEWAY_IP` note above `reverse_dns_via_gateway`: detected
+        // once per scan, not per host.
+        let gateway = detect_default_gateway().await;
+
         for addr in addresses {
             let ip = IpAddr::V4(addr);
             let app = app.clone();
@@ -1647,7 +1732,7 @@ pub async fn network_explore_start(
             let cancelled = Arc::clone(&cancel_flag);
             let bound_if = bound_if.clone();
 
-            tasks.spawn(BOUND_INTERFACE.scope(bound_if, async move {
+            tasks.spawn(BOUND_INTERFACE.scope(bound_if, GATEWAY_IP.scope(gateway, async move {
                 let _permit = sem.acquire_owned().await.unwrap();
                 if cancelled.load(Ordering::Relaxed) {
                     return;
@@ -1744,7 +1829,7 @@ pub async fn network_explore_start(
                     scan_id,
                     result,
                 });
-            }));
+            })));
         }
 
         while tasks.join_next().await.is_some() {}
@@ -1768,6 +1853,7 @@ pub fn network_explore_stop(scan_id: String, state: tauri::State<'_, NetworkStat
 pub struct ExploreDump {
     pub cidr: String,
     pub bound_interface: Option<String>,
+    pub gateway: Option<IpAddr>,
     pub ports_scanned: Vec<u16>,
     pub host_count: usize,
     pub results: Vec<ExploreResult>,
@@ -1794,6 +1880,7 @@ pub async fn run_explore_and_dump(
     let addresses = parse_cidr(cidr)?;
     let timeout = Duration::from_millis(timeout_ms);
     let bound_if = interface_for_cidr(cidr);
+    let gateway = detect_default_gateway().await;
 
     let mut ports: Vec<u16> = services
         .unwrap_or(DEFAULT_EXPLORE_SERVICES)
@@ -1848,7 +1935,7 @@ pub async fn run_explore_and_dump(
 
     let (mdns_records, host_results) = tokio::join!(
         mdns_discover(MDNS_DISCOVER_WINDOW),
-        BOUND_INTERFACE.scope(bound_if.clone(), futures::future::join_all(host_futs)),
+        BOUND_INTERFACE.scope(bound_if.clone(), GATEWAY_IP.scope(gateway, futures::future::join_all(host_futs))),
     );
     let mdns_by_ip: HashMap<String, Vec<MdnsRecord>> =
         mdns_records.into_iter().map(|(ip, recs)| (ip.to_string(), recs)).collect();
@@ -1874,6 +1961,7 @@ pub async fn run_explore_and_dump(
     let dump = ExploreDump {
         cidr: cidr.to_string(),
         bound_interface: bound_if,
+        gateway,
         ports_scanned: (*ports).clone(),
         host_count,
         results,
