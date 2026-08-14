@@ -86,6 +86,11 @@ vi.mock("@/components/Netconf/NetconfConsole", () => ({
     <div data-testid={`netconf-console-${sessionId}`}>NetconfConsole Mock</div>
   ),
 }));
+vi.mock("@/components/Mosh/MoshTerminalTab", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`mosh-terminal-tab-${sessionId}`}>MoshTerminalTab Mock</div>
+  ),
+}));
 
 // Mock components that use localStorage directly (tested separately)
 vi.mock("@/components/Help/WhatsNewPanel", () => ({
@@ -383,6 +388,17 @@ describe("App", () => {
       render(<App />);
 
       expect(screen.getByTestId(`netconf-console-${tab.sessionId}`)).toBeInTheDocument();
+      expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
+    });
+
+    it("routes a Mosh tab to MoshTerminalTab, not the generic local-shell fallback", () => {
+      const session = baseSession({ type: SessionType.Mosh, connection: { host: "192.168.0.20", port: 22 } });
+      const tab = baseTab({ sessionType: SessionType.Mosh });
+      useSessionStore.setState({ sessions: [session], openTabs: [tab], activeTabId: tab.id });
+
+      render(<App />);
+
+      expect(screen.getByTestId(`mosh-terminal-tab-${tab.sessionId}`)).toBeInTheDocument();
       expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
     });
   });

@@ -303,6 +303,8 @@ pub fn run() {
             cloud::gcp::cloud_gcp_log_tail,
             // Mosh
             mosh::mosh_connect,
+            mosh::mosh_write,
+            mosh::mosh_resize,
             mosh::mosh_disconnect,
             mosh::mosh_list,
             // WinRM

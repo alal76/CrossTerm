@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildRdpConfig, buildVncConfig, buildWsTermConfig, buildRedfishConfig, buildWebDavConfig, buildMqttConfig, buildSmbConfig, buildNetconfConfig } from "@/utils/sessionConfig";
+import { buildRdpConfig, buildVncConfig, buildWsTermConfig, buildRedfishConfig, buildWebDavConfig, buildMqttConfig, buildSmbConfig, buildNetconfConfig, buildMoshConfig } from "@/utils/sessionConfig";
 import type { Session } from "@/types";
 import { SessionType } from "@/types";
 
@@ -211,5 +211,32 @@ describe("buildNetconfConfig", () => {
     expect(config.password).toBeUndefined();
     expect(config.private_key).toBeUndefined();
     expect(config.capabilities).toEqual([]);
+  });
+});
+
+describe("buildMoshConfig", () => {
+  it("maps host/port/username and mosh-specific options from protocolOptions", () => {
+    const config = buildMoshConfig(
+      baseSession({
+        connection: {
+          host: "192.168.0.20",
+          port: 22,
+          protocolOptions: { username: "alal", identity_file: "/home/alal/.ssh/id_ed25519", udp_port_range: "60001:60010", ssh_options: "-o StrictHostKeyChecking=no" },
+        },
+      })
+    );
+    expect(config.host).toBe("192.168.0.20");
+    expect(config.port).toBe(22);
+    expect(config.username).toBe("alal");
+    expect(config.identity_file).toBe("/home/alal/.ssh/id_ed25519");
+    expect(config.udp_port_range).toBe("60001:60010");
+    expect(config.ssh_options).toBe("-o StrictHostKeyChecking=no");
+  });
+
+  it("defaults username to an empty string and leaves optional fields undefined without protocolOptions", () => {
+    const config = buildMoshConfig(baseSession({ connection: { host: "192.168.0.20", port: 22 } }));
+    expect(config.username).toBe("");
+    expect(config.identity_file).toBeUndefined();
+    expect(config.udp_port_range).toBeUndefined();
   });
 });

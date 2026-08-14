@@ -17,6 +17,7 @@ import {
   MqttTabPane,
   SmbTabPane,
   NetconfTabPane,
+  MoshTabPane,
 } from "@/components/Terminal/ProtocolTabPanes";
 
 // ── Resize Handle ──
@@ -99,6 +100,7 @@ const SESSION_TAB_PANES: Partial<Record<SessionType, typeof RdpTabPane>> = {
   [SessionType.MqttClient]: MqttTabPane,
   [SessionType.Smb]: SmbTabPane,
   [SessionType.NetConf]: NetconfTabPane,
+  [SessionType.Mosh]: MoshTabPane,
 };
 
 function renderPaneContent(tab: { sessionId: string; sessionType: SessionType }, session: Session | undefined, isActive: boolean) {

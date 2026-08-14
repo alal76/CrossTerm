@@ -56,6 +56,7 @@ import {
   MqttTabPane,
   SmbTabPane,
   NetconfTabPane,
+  MoshTabPane,
 } from "@/components/Terminal/ProtocolTabPanes";
 import SplitPaneContainer from "@/components/Terminal/SplitPaneContainer";
 import CommandPalette from "@/components/Shared/CommandPalette";
@@ -1224,6 +1225,14 @@ function SessionCanvas() {
           return (
             <div key={tab.id} className={clsx("absolute inset-0 overflow-hidden", isActive ? "z-10" : "z-0 hidden")}>
               <NetconfTabPane sessionId={tab.sessionId} session={session} />
+            </div>
+          );
+        }
+
+        if (tab.sessionType === SessionType.Mosh && session) {
+          return (
+            <div key={tab.id} className={clsx("absolute inset-0", isActive ? "z-10" : "z-0 hidden")}>
+              <MoshTabPane sessionId={tab.sessionId} session={session} />
             </div>
           );
         }

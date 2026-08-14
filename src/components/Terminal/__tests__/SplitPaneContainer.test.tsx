@@ -66,6 +66,11 @@ vi.mock("@/components/Netconf/NetconfConsole", () => ({
     <div data-testid={`netconf-console-${sessionId}`}>NetconfConsole Mock</div>
   ),
 }));
+vi.mock("@/components/Mosh/MoshTerminalTab", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`mosh-terminal-tab-${sessionId}`}>MoshTerminalTab Mock</div>
+  ),
+}));
 
 function baseSession(overrides: Partial<Session> = {}): Session {
   return {
@@ -211,5 +216,15 @@ describe("SplitPaneContainer session type routing", () => {
     render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
 
     expect(screen.getByTestId(`netconf-console-${tab.sessionId}`)).toBeInTheDocument();
+  });
+
+  it("routes a Mosh leaf pane to MoshTerminalTab", () => {
+    const session = baseSession({ type: SessionType.Mosh, connection: { host: "192.168.0.20", port: 22 } });
+    const tab = baseTab({ sessionType: SessionType.Mosh });
+    useSessionStore.setState({ sessions: [session], openTabs: [tab] });
+
+    render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
+
+    expect(screen.getByTestId(`mosh-terminal-tab-${tab.sessionId}`)).toBeInTheDocument();
   });
 });

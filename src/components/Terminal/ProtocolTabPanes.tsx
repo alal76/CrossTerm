@@ -18,6 +18,7 @@ import WebDavBrowser from "@/components/WebDav/WebDavBrowser";
 import MqttClient from "@/components/Mqtt/MqttClient";
 import SmbBrowser from "@/components/Smb/SmbBrowser";
 import NetconfConsole from "@/components/Netconf/NetconfConsole";
+import MoshTerminalTab from "@/components/Mosh/MoshTerminalTab";
 import {
   buildRdpConfig,
   buildVncConfig,
@@ -27,6 +28,7 @@ import {
   buildMqttConfig,
   buildSmbConfig,
   buildNetconfConfig,
+  buildMoshConfig,
 } from "@/utils/sessionConfig";
 import type { Session } from "@/types";
 
@@ -73,4 +75,9 @@ export function SmbTabPane({ sessionId, session }: PaneProps) {
 export function NetconfTabPane({ sessionId, session }: PaneProps) {
   const config = useMemo(() => buildNetconfConfig(session), [session]);
   return <NetconfConsole sessionId={sessionId} config={config} />;
+}
+
+export function MoshTabPane({ sessionId, session }: PaneProps) {
+  const config = useMemo(() => buildMoshConfig(session), [session]);
+  return <MoshTerminalTab sessionId={sessionId} config={config} />;
 }

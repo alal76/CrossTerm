@@ -8,7 +8,7 @@
 // specific fields yet — domain, NLA, codec, etc. — so those fall back to
 // sensible defaults here until the editor grows per-type fields).
 
-import type { Session, RdpConfig, VncConfig, WsTermConfig, RedfishConfig, WebDavConfig, MqttConfig, SmbConfig, NetconfConfig } from '@/types';
+import type { Session, RdpConfig, VncConfig, WsTermConfig, RedfishConfig, WebDavConfig, MqttConfig, SmbConfig, NetconfConfig, MoshConfig } from '@/types';
 
 export function buildRdpConfig(session: Session): RdpConfig {
   const opts = session.connection.protocolOptions;
@@ -118,5 +118,17 @@ export function buildNetconfConfig(session: Session): NetconfConfig {
     private_key: opts?.['private_key'] as string | undefined,
     private_key_passphrase: opts?.['private_key_passphrase'] as string | undefined,
     capabilities: [],
+  };
+}
+
+export function buildMoshConfig(session: Session): MoshConfig {
+  const opts = session.connection.protocolOptions;
+  return {
+    host: session.connection.host,
+    port: session.connection.port,
+    username: (opts?.['username'] as string) ?? '',
+    identity_file: opts?.['identity_file'] as string | undefined,
+    udp_port_range: opts?.['udp_port_range'] as string | undefined,
+    ssh_options: opts?.['ssh_options'] as string | undefined,
   };
 }

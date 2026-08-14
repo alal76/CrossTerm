@@ -1326,3 +1326,25 @@ export interface NetconfRpcResult {
   ok: boolean;
   error?: string;
 }
+
+// --- Mosh ---
+
+export interface MoshConfig {
+  host: string;
+  port: number;
+  username: string;
+  identity_file?: string;
+  udp_port_range?: string;
+  ssh_options?: string;
+  cols?: number;
+  rows?: number;
+}
+
+export interface MoshOutputEvent {
+  id: string;
+  data: string;
+}
+
+export interface MoshExitEvent {
+  id: string;
+}
