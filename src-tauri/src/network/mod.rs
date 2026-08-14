@@ -961,11 +961,19 @@ async fn host_reverse(ip: String) -> Option<String> {
 
 /// Method 8 — TLS cert CN/SAN: extract hostname from X.509 cert on any open TLS port.
 /// Works even when DNS has no PTR record (HTTPS, WinRM-TLS, K8s API, gRPC-TLS, MQTT-TLS...).
-/// Derive a hostname from a TLS certificate: prefer the first SAN DNS entry
-/// (more authoritative than CN), fall back to the subject CN.
 async fn extract_tls_cert_hostname(ip: IpAddr, port: u16) -> Option<String> {
     let cert = probe_tls_cert(ip, port, Duration::from_secs(5)).await?;
-    cert.san.into_iter().find(|n| !n.starts_with('*')).or(cert.subject_cn)
+    pick_hostname_from_cert(cert)
+}
+
+/// Derive a hostname from a TLS certificate: prefer the first non-wildcard
+/// SAN DNS entry (more authoritative than CN), fall back to the subject CN
+/// — unless that's *also* a bare wildcard (`CN=*`, common on self-signed
+/// certs like Proxmox/Heimdall's default cert), which isn't a hostname for
+/// anything and must not be returned as if it were one.
+fn pick_hostname_from_cert(cert: TlsCertInfo) -> Option<String> {
+    cert.san.into_iter().find(|n| !n.starts_with('*'))
+        .or(cert.subject_cn.filter(|cn| !cn.starts_with('*')))
 }
 
 // ── TLS certificate inspection ─────────────────────────────────────────────
@@ -4081,6 +4089,55 @@ mod tests {
         let mac = parse_arp_mac_output(line).unwrap();
         let clean: String = mac.chars().filter(|c| c.is_ascii_hexdigit()).collect();
         assert_eq!(&clean[0..6], "0617B6");
+    }
+
+    #[test]
+    fn test_pick_hostname_from_cert_rejects_bare_wildcard_cn() {
+        // Real cert captured from this LAN (a Proxmox host running Heimdall
+        // behind nginx, self-signed): subject_cn "*", no SAN at all. Every
+        // other cert-derived field (org, issuer, expiry) is still useful,
+        // but "*" is not a hostname and must not be surfaced as this host's
+        // name — it previously was, verbatim, showing up as the literal
+        // string "*" in the Hostname column.
+        let wildcard_only = TlsCertInfo {
+            subject_cn: Some("*".to_string()),
+            subject_org: Some("Linuxserver.io".to_string()),
+            issuer_org: Some("Linuxserver.io".to_string()),
+            san: vec![],
+            not_after: Some("Jan 20 07:43:08 2036 +00:00".to_string()),
+        };
+        assert_eq!(pick_hostname_from_cert(wildcard_only), None);
+
+        // A wildcard CN with no usable SAN entries either (all wildcards) —
+        // still None, not the wildcard.
+        let all_wildcard_san = TlsCertInfo {
+            subject_cn: Some("*".to_string()),
+            subject_org: None,
+            issuer_org: None,
+            san: vec!["*.example.com".to_string()],
+            not_after: None,
+        };
+        assert_eq!(pick_hostname_from_cert(all_wildcard_san), None);
+
+        // A real SAN entry alongside a wildcard CN: the SAN wins, as before.
+        let real_san = TlsCertInfo {
+            subject_cn: Some("*".to_string()),
+            subject_org: None,
+            issuer_org: None,
+            san: vec!["*.example.com".to_string(), "nas.local".to_string()],
+            not_after: None,
+        };
+        assert_eq!(pick_hostname_from_cert(real_san).as_deref(), Some("nas.local"));
+
+        // A real (non-wildcard) CN with no SAN at all is still legitimate.
+        let real_cn = TlsCertInfo {
+            subject_cn: Some("TPRI-DEVICE".to_string()),
+            subject_org: Some("TPRI".to_string()),
+            issuer_org: Some("TPRI".to_string()),
+            san: vec![],
+            not_after: None,
+        };
+        assert_eq!(pick_hostname_from_cert(real_cn).as_deref(), Some("TPRI-DEVICE"));
     }
 
     #[test]
