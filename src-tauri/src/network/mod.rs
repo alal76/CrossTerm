@@ -37,6 +37,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 use thiserror::Error;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpStream, UdpSocket};
 use tokio::sync::Semaphore;
 use uuid::Uuid;
@@ -95,11 +96,34 @@ pub struct ScanResult {
     pub response_time_ms: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct OpenPort {
     pub port: u16,
     pub service_name: String,
     pub protocol: String,
+    /// Raw first-line banner for server-speaks-first protocols (SSH/FTP/SMTP/POP3/IMAP/MySQL/VNC).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub banner: Option<String>,
+    /// Parsed product+version summary, e.g. "nginx 1.28.1", "OpenSSH 10.0p2 (Debian)".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// `<title>` extracted from an HTTP(S)-shaped response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http_title: Option<String>,
+    /// TLS certificate detail, present for any port where a TLS handshake succeeded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls: Option<TlsCertInfo>,
+}
+
+/// Certificate detail captured from a native TLS handshake (subject/issuer/SAN/validity).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TlsCertInfo {
+    pub subject_cn: Option<String>,
+    pub subject_org: Option<String>,
+    pub issuer_org: Option<String>,
+    pub san: Vec<String>,
+    /// RFC3339 "not after" (expiry) timestamp, if parseable.
+    pub not_after: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -210,6 +234,7 @@ pub enum ServiceFilter {
     DockerApi,
     DockerApiTls,
     WsTerminal,
+    Rtsp,
     Custom(u16),
 }
 
@@ -238,6 +263,7 @@ impl ServiceFilter {
             ServiceFilter::DockerApi => 2375,
             ServiceFilter::DockerApiTls => 2376,
             ServiceFilter::WsTerminal => 7681,
+            ServiceFilter::Rtsp => 554,
             ServiceFilter::Custom(p) => *p,
         }
     }
@@ -265,6 +291,27 @@ pub struct ExploreResult {
     pub response_time_ms: f64,
     /// Quick-connect session type derived from the highest-priority open port.
     pub suggested_session_type: Option<String>,
+    /// ICMP TTL from the ping reply, used as a fallback OS-family signal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttl: Option<u8>,
+    /// mDNS/Bonjour service records observed for this IP.
+    #[serde(default)]
+    pub mdns: Vec<MdnsRecord>,
+    /// Human-readable notes explaining the hostname/OS/vendor findings above.
+    #[serde(default)]
+    pub evidence: Vec<String>,
+}
+
+/// A single mDNS/Bonjour service instance advertised by a host.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MdnsRecord {
+    /// e.g. "_home-assistant._tcp.local."
+    pub service_type: String,
+    /// e.g. "Home"
+    pub instance_name: String,
+    pub hostname: Option<String>,
+    #[serde(default)]
+    pub txt: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -279,6 +326,15 @@ pub struct ExploreProgress {
 pub struct ExploreHostFound {
     pub scan_id: String,
     pub result: ExploreResult,
+}
+
+/// Emitted once the concurrent mDNS/Bonjour browse for a scan completes,
+/// since records may resolve after some hosts have already been reported.
+/// The frontend merges these into already-rendered rows by IP.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExploreMdnsUpdate {
+    pub scan_id: String,
+    pub records: HashMap<String, Vec<MdnsRecord>>,
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────
@@ -365,6 +421,7 @@ fn guess_service(port: u16) -> String {
         143 => "imap".to_string(),
         443 => "https".to_string(),
         445 => "smb".to_string(),
+        554 => "rtsp".to_string(),
         830 => "netconf".to_string(),
         993 => "imaps".to_string(),
         995 => "pop3s".to_string(),
@@ -436,15 +493,18 @@ async fn check_port(ip: IpAddr, port: u16, timeout: Duration) -> Option<OpenPort
             port,
             service_name: guess_service(port),
             protocol: "tcp".to_string(),
+            ..Default::default()
         }),
         _ => None,
     }
 }
 
 /// Probe a host using the system `ping` command (ICMP echo).
-/// Returns true if the host responds within the timeout.
+/// Returns `(alive, ttl)` — `ttl` is parsed from the reply when present and
+/// is used as a low-cost, no-privileges-required OS-family signal (64 ~
+/// Linux/macOS/BSD, 128 ~ Windows, 255 ~ network gear/embedded Linux).
 /// Uses the OS `ping` binary so it works without raw-socket privileges.
-async fn ping_host(ip: IpAddr, timeout: Duration) -> bool {
+async fn ping_host(ip: IpAddr, timeout: Duration) -> (bool, Option<u8>) {
     let ip_str = ip.to_string();
 
     // Platform-specific argv for a single-shot ping.
@@ -470,11 +530,26 @@ async fn ping_host(ip: IpAddr, timeout: Duration) -> bool {
         timeout + Duration::from_millis(500),
         tokio::process::Command::new("ping")
             .args(&args)
-            .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
-            .status(),
+            .output(),
     ).await;
-    matches!(result, Ok(Ok(status)) if status.success())
+
+    match result {
+        Ok(Ok(output)) if output.status.success() => {
+            let text = String::from_utf8_lossy(&output.stdout);
+            (true, parse_ping_ttl(&text))
+        }
+        _ => (false, None),
+    }
+}
+
+/// Extract the ICMP TTL from `ping` output text (matches `ttl=NN` or `TTL=NN`).
+fn parse_ping_ttl(text: &str) -> Option<u8> {
+    let lower = text.to_ascii_lowercase();
+    let pos = lower.find("ttl=")?;
+    let rest = &text[pos + 4..];
+    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    digits.parse::<u8>().ok()
 }
 
 /// Aggressively resolve a hostname for an IP using all available methods in parallel.
@@ -716,54 +791,366 @@ async fn host_reverse(ip: String) -> Option<String> {
 
 /// Method 8 — TLS cert CN/SAN: extract hostname from X.509 cert on any open TLS port.
 /// Works even when DNS has no PTR record (HTTPS, WinRM-TLS, K8s API, gRPC-TLS, MQTT-TLS...).
+/// Derive a hostname from a TLS certificate: prefer the first SAN DNS entry
+/// (more authoritative than CN), fall back to the subject CN.
 async fn extract_tls_cert_hostname(ip: IpAddr, port: u16) -> Option<String> {
-    let addr = format!("{}:{}", ip, port);
-    let script = format!(
-        "echo Q | openssl s_client -connect {addr} 2>/dev/null | openssl x509 -noout -subject -ext subjectAltName 2>/dev/null"
+    let cert = probe_tls_cert(ip, port, Duration::from_secs(5)).await?;
+    cert.san.into_iter().find(|n| !n.starts_with('*')).or(cert.subject_cn)
+}
+
+// ── TLS certificate inspection ─────────────────────────────────────────────
+// Native rustls handshake + x509-parser, replacing a previous `sh -c
+// "openssl s_client | openssl x509"` shell-out that silently did nothing on
+// Windows (no `sh`/`openssl` CLI guaranteed). We deliberately accept any
+// certificate here — including self-signed/expired ones — because the goal
+// is to *inspect* what a device presents, not to validate trust.
+
+/// Cert verifier that accepts everything. Same pattern already used for
+/// permissive TLS in `mqtt::MqttNoCertVerifier` / `websocket_term::NoCertVerifier`.
+#[derive(Debug)]
+struct AcceptAllCertVerifier;
+
+impl rustls::client::danger::ServerCertVerifier for AcceptAllCertVerifier {
+    fn verify_server_cert(&self, _: &rustls::pki_types::CertificateDer, _: &[rustls::pki_types::CertificateDer], _: &rustls::pki_types::ServerName, _: &[u8], _: rustls::pki_types::UnixTime) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> { Ok(rustls::client::danger::ServerCertVerified::assertion()) }
+    fn verify_tls12_signature(&self, _: &[u8], _: &rustls::pki_types::CertificateDer, _: &rustls::DigitallySignedStruct) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> { Ok(rustls::client::danger::HandshakeSignatureValid::assertion()) }
+    fn verify_tls13_signature(&self, _: &[u8], _: &rustls::pki_types::CertificateDer, _: &rustls::DigitallySignedStruct) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> { Ok(rustls::client::danger::HandshakeSignatureValid::assertion()) }
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> { rustls::crypto::ring::default_provider().signature_verification_algorithms.supported_schemes() }
+}
+
+fn tls_client_config() -> Arc<rustls::ClientConfig> {
+    static CONFIG: std::sync::OnceLock<Arc<rustls::ClientConfig>> = std::sync::OnceLock::new();
+    CONFIG.get_or_init(|| {
+        // Idempotent: no-ops (returns Err, ignored) if a provider is already installed.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        Arc::new(
+            rustls::ClientConfig::builder()
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(AcceptAllCertVerifier))
+                .with_no_client_auth(),
+        )
+    }).clone()
+}
+
+/// Connect + TLS handshake against `ip:port`, returning the decrypted stream.
+async fn tls_connect(ip: IpAddr, port: u16, timeout: Duration) -> Option<tokio_rustls::client::TlsStream<TcpStream>> {
+    let addr = SocketAddr::new(ip, port);
+    let tcp = tokio::time::timeout(timeout, TcpStream::connect(addr)).await.ok()?.ok()?;
+    let connector = tokio_rustls::TlsConnector::from(tls_client_config());
+    let server_name = rustls::pki_types::ServerName::try_from(ip).ok()?;
+    tokio::time::timeout(Duration::from_secs(4), connector.connect(server_name, tcp)).await.ok()?.ok()
+}
+
+/// Handshake against a TLS port and parse the peer's leaf certificate.
+async fn probe_tls_cert(ip: IpAddr, port: u16, timeout: Duration) -> Option<TlsCertInfo> {
+    let tls_stream = tls_connect(ip, port, timeout).await?;
+    let (_, conn) = tls_stream.get_ref();
+    let der = conn.peer_certificates()?.first()?.clone();
+    parse_cert_der(&der)
+}
+
+fn parse_cert_der(der: &rustls::pki_types::CertificateDer<'_>) -> Option<TlsCertInfo> {
+    let (_, cert) = x509_parser::parse_x509_certificate(der.as_ref()).ok()?;
+
+    let subject_cn = cert.subject().iter_common_name().next().and_then(|a| a.as_str().ok()).map(String::from);
+    let subject_org = cert.subject().iter_organization().next().and_then(|a| a.as_str().ok()).map(String::from);
+    let issuer_org = cert.issuer().iter_organization().next().and_then(|a| a.as_str().ok()).map(String::from);
+
+    let san: Vec<String> = cert
+        .subject_alternative_name()
+        .ok()
+        .flatten()
+        .map(|ext| {
+            ext.value
+                .general_names
+                .iter()
+                .filter_map(|gn| match gn {
+                    x509_parser::extensions::GeneralName::DNSName(s) => Some(s.to_string()),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let not_after = Some(cert.validity().not_after.to_string());
+
+    Some(TlsCertInfo { subject_cn, subject_org, issuer_org, san, not_after })
+}
+
+// ── Port enrichment (banner grabbing / lightweight version detection) ─────
+// Ports where the server sends an identification banner immediately on
+// connect, before the client sends anything.
+const BANNER_FIRST_PORTS: &[u16] = &[21, 22, 25, 110, 143, 3306, 5900];
+/// Plaintext-HTTP ports probed with a GET.
+const HTTP_PORTS: &[u16] = &[80, 8080];
+/// TLS ports: certificate is always captured; an HTTP GET is also attempted
+/// since many admin UIs/REST APIs live on 443/8443/6443/etc.
+const TLS_PROBE_PORTS: &[u16] = &[443, 5986, 6443, 8443, 8883, 50051];
+
+/// Connect and read whatever the server sends first, without sending
+/// anything ourselves. Covers SSH/FTP/SMTP/POP3/IMAP/MySQL/VNC, which are
+/// all "server speaks first" protocols.
+async fn grab_banner(ip: IpAddr, port: u16, timeout: Duration) -> Option<String> {
+    let addr = SocketAddr::new(ip, port);
+    let mut stream = tokio::time::timeout(timeout, TcpStream::connect(addr)).await.ok()?.ok()?;
+
+    let mut buf = [0u8; 256];
+    let n = tokio::time::timeout(Duration::from_millis(1500), stream.read(&mut buf)).await.ok()?.ok()?;
+    if n == 0 {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&buf[..n]);
+    let first_line = text.lines().next()?.trim();
+    if first_line.is_empty() { None } else { Some(first_line.to_string()) }
+}
+
+/// Shorten a raw banner into a "product version" summary where the shape is
+/// recognized (currently: SSH identification strings); otherwise pass through.
+fn summarize_banner(banner: &str) -> String {
+    banner
+        .strip_prefix("SSH-2.0-")
+        .or_else(|| banner.strip_prefix("SSH-1.99-"))
+        .unwrap_or(banner)
+        .replace('_', " ")
+}
+
+fn extract_html_title(raw: &str) -> Option<String> {
+    let lower = raw.to_ascii_lowercase();
+    let start = lower.find("<title>")? + "<title>".len();
+    let end = lower[start..].find("</title>")? + start;
+    let title = raw[start..end].trim();
+    if title.is_empty() { None } else { Some(title.to_string()) }
+}
+
+async fn read_response_bounded<S: tokio::io::AsyncRead + Unpin>(stream: &mut S) -> Option<String> {
+    let mut buf = vec![0u8; 8192];
+    let n = tokio::time::timeout(Duration::from_millis(2500), stream.read(&mut buf)).await.ok()?.ok()?;
+    if n == 0 { return None; }
+    Some(String::from_utf8_lossy(&buf[..n]).into_owned())
+}
+
+/// Send a minimal HTTP GET and parse the `Server:` header + `<title>`.
+/// When `tls` is true the request goes over a TLS handshake (used for ports
+/// where we already know a cert is present, e.g. 443/8443/6443).
+async fn probe_http(ip: IpAddr, port: u16, tls: bool, timeout: Duration) -> Option<(Option<String>, Option<String>)> {
+    let request = format!(
+        "GET / HTTP/1.0\r\nHost: {ip}\r\nUser-Agent: CrossTerm-NetworkExplorer\r\nConnection: close\r\n\r\n"
     );
-    let output = tokio::time::timeout(
-        Duration::from_secs(5),
-        tokio::process::Command::new("sh").args(["-c", &script]).output(),
-    ).await.ok()?.ok()?;
 
-    let text = String::from_utf8_lossy(&output.stdout);
+    let raw = if tls {
+        let mut stream = tls_connect(ip, port, timeout).await?;
+        stream.write_all(request.as_bytes()).await.ok()?;
+        read_response_bounded(&mut stream).await?
+    } else {
+        let addr = SocketAddr::new(ip, port);
+        let mut stream = tokio::time::timeout(timeout, TcpStream::connect(addr)).await.ok()?.ok()?;
+        stream.write_all(request.as_bytes()).await.ok()?;
+        read_response_bounded(&mut stream).await?
+    };
 
-    // Prefer SAN DNS entries (more authoritative than CN)
-    for line in text.lines() {
-        if line.contains("DNS:") {
-            for seg in line.split(',') {
-                if let Some(name) = seg.trim().strip_prefix("DNS:") {
-                    let name = name.trim().trim_end_matches('.');
-                    if !name.is_empty() && !name.starts_with('*') {
-                        return Some(name.to_string());
-                    }
+    if !raw.starts_with("HTTP/") {
+        return None;
+    }
+
+    let server = raw
+        .lines()
+        .find(|l| l.to_ascii_lowercase().starts_with("server:"))
+        .map(|l| l.splitn(2, ':').nth(1).unwrap_or("").trim().to_string());
+    let title = extract_html_title(&raw);
+
+    Some((server, title))
+}
+
+/// RTSP OPTIONS probe — the `Public:` methods line is a reliable IP-camera signal.
+async fn probe_rtsp(ip: IpAddr, port: u16, timeout: Duration) -> Option<String> {
+    let addr = SocketAddr::new(ip, port);
+    let mut stream = tokio::time::timeout(timeout, TcpStream::connect(addr)).await.ok()?.ok()?;
+    let request = format!("OPTIONS rtsp://{ip} RTSP/1.0\r\nCSeq: 1\r\n\r\n");
+    stream.write_all(request.as_bytes()).await.ok()?;
+
+    let mut buf = vec![0u8; 1024];
+    let n = tokio::time::timeout(Duration::from_millis(2000), stream.read(&mut buf)).await.ok()?.ok()?;
+    if n == 0 { return None; }
+    let text = String::from_utf8_lossy(&buf[..n]);
+    text.lines()
+        .find(|l| l.to_ascii_lowercase().starts_with("public:"))
+        .or_else(|| text.lines().next())
+        .map(|l| l.trim().to_string())
+}
+
+/// Enrich a single open port with a banner/version/title/TLS-cert summary
+/// where the protocol allows it cheaply. Best-effort: probe failures just
+/// leave the enrichment fields as `None` — the port still shows as open.
+async fn enrich_port(ip: IpAddr, mut open_port: OpenPort, timeout: Duration) -> OpenPort {
+    let port = open_port.port;
+    let probe_timeout = timeout.min(Duration::from_millis(2000));
+
+    if port == 554 {
+        open_port.version = probe_rtsp(ip, port, probe_timeout).await;
+        return open_port;
+    }
+
+    if TLS_PROBE_PORTS.contains(&port) {
+        if let Some(cert) = probe_tls_cert(ip, port, probe_timeout).await {
+            open_port.version = cert.subject_org.clone().or_else(|| cert.subject_cn.clone());
+            open_port.tls = Some(cert);
+        }
+        if let Some((server, title)) = probe_http(ip, port, true, probe_timeout).await {
+            if server.is_some() {
+                open_port.version = server;
+            }
+            open_port.http_title = title;
+        }
+        return open_port;
+    }
+
+    if HTTP_PORTS.contains(&port) {
+        if let Some((server, title)) = probe_http(ip, port, false, probe_timeout).await {
+            open_port.version = server;
+            open_port.http_title = title;
+        }
+        return open_port;
+    }
+
+    if BANNER_FIRST_PORTS.contains(&port) {
+        if let Some(banner) = grab_banner(ip, port, probe_timeout).await {
+            open_port.version = Some(summarize_banner(&banner));
+            open_port.banner = Some(banner);
+        }
+    }
+
+    open_port
+}
+
+// ── mDNS / Bonjour discovery ────────────────────────────────────────────
+// Service types curated from what actually proved useful identifying real
+// LAN devices (smart-home hubs, cast/cameras/speakers, file shares, dev
+// tooling) rather than an exhaustive registry dump.
+const MDNS_SERVICE_TYPES: &[&str] = &[
+    "_http._tcp.local.",
+    "_https._tcp.local.",
+    "_ssh._tcp.local.",
+    "_sftp-ssh._tcp.local.",
+    "_smb._tcp.local.",
+    "_workstation._tcp.local.",
+    "_airplay._tcp.local.",
+    "_raop._tcp.local.",
+    "_googlecast._tcp.local.",
+    "_spotify-connect._tcp.local.",
+    "_home-assistant._tcp.local.",
+    "_matter._tcp.local.",
+    "_hap._tcp.local.",
+    "_ipp._tcp.local.",
+    "_printer._tcp.local.",
+    "_device-info._tcp.local.",
+    "_companion-link._tcp.local.",
+    "_mqtt._tcp.local.",
+    "_esphomebuilder._tcp.local.",
+    "_dcp._tcp.local.",
+    "_rfb._tcp.local.",
+];
+
+/// Browse the curated mDNS service-type list for `duration`, returning
+/// discovered service instances keyed by every IPv4 address they resolved
+/// to. Best-effort: any daemon/browse failure just yields an empty map.
+async fn mdns_discover(duration: Duration) -> HashMap<Ipv4Addr, Vec<MdnsRecord>> {
+    use futures::StreamExt;
+
+    let mdns = match mdns_sd::ServiceDaemon::new() {
+        Ok(d) => d,
+        Err(_) => return HashMap::new(),
+    };
+
+    let merged = futures::stream::select_all(MDNS_SERVICE_TYPES.iter().filter_map(|svc| {
+        mdns.browse(svc).ok().map(|rx| {
+            Box::pin(rx.into_stream())
+                as std::pin::Pin<Box<dyn futures::Stream<Item = mdns_sd::ServiceEvent> + Send>>
+        })
+    }));
+    tokio::pin!(merged);
+
+    let mut records: HashMap<Ipv4Addr, Vec<MdnsRecord>> = HashMap::new();
+    let _ = tokio::time::timeout(duration, async {
+        while let Some(event) = merged.next().await {
+            if let mdns_sd::ServiceEvent::ServiceResolved(info) = event {
+                let service_type = info.ty_domain.clone();
+                let instance_name = info
+                    .fullname
+                    .split(&service_type)
+                    .next()
+                    .unwrap_or(&info.fullname)
+                    .trim_end_matches('.')
+                    .to_string();
+                let hostname = {
+                    let h = info.host.trim_end_matches('.').to_string();
+                    if h.is_empty() { None } else { Some(h) }
+                };
+                let txt: HashMap<String, String> = info
+                    .txt_properties
+                    .iter()
+                    .map(|p| (p.key().to_string(), p.val_str().to_string()))
+                    .collect();
+                let addrs: Vec<Ipv4Addr> = info
+                    .addresses
+                    .iter()
+                    .filter_map(|a| match a.to_ip_addr() {
+                        IpAddr::V4(v4) => Some(v4),
+                        IpAddr::V6(_) => None,
+                    })
+                    .collect();
+
+                let record = MdnsRecord { service_type, instance_name, hostname, txt };
+                for addr in addrs {
+                    records.entry(addr).or_default().push(record.clone());
                 }
             }
         }
-    }
+    }).await;
 
-    // Fall back to CN from subject line
-    for line in text.lines() {
-        if let Some(cn_pos) = line.find("CN") {
-            let after = &line[cn_pos + 2..];
-            let cn = after.trim_start_matches(|c: char| c == '=' || c == ' ');
-            let cn = cn.split([',', '/']).next()?.trim().trim_end_matches('.');
-            // Skip empty, single-char, or space-containing CN values
-            if cn.len() > 1 && !cn.contains(' ') {
-                return Some(cn.to_string());
-            }
-        }
-    }
-    None
+    let _ = mdns.shutdown();
+    records
 }
 
+/// Bundled IEEE OUI prefix -> vendor table (see `resources/oui-prefixes.txt`
+/// for provenance/format), parsed once on first use.
+static OUI_DATABASE: std::sync::OnceLock<HashMap<String, String>> = std::sync::OnceLock::new();
 
+fn oui_database() -> &'static HashMap<String, String> {
+    OUI_DATABASE.get_or_init(|| {
+        const RAW: &str = include_str!("../../resources/oui-prefixes.txt");
+        let mut map = HashMap::new();
+        for line in RAW.lines() {
+            if line.starts_with('#') || line.trim().is_empty() {
+                continue;
+            }
+            if let Some((prefix, vendor)) = line.split_once('\t') {
+                map.insert(prefix.to_string(), vendor.to_string());
+            }
+        }
+        map
+    })
+}
+
+/// Look up a MAC address's vendor: the bundled offline IEEE OUI database
+/// first (instant, no network, no rate limit, no leaking LAN device info to
+/// a third party), falling back to the `api.macvendors.com` API only for
+/// prefixes the bundled snapshot doesn't cover.
 async fn lookup_mac_vendor(mac: &str) -> Option<String> {
     let clean: String = mac.chars().filter(|c| c.is_ascii_hexdigit()).collect();
     if clean.len() < 6 {
         return None;
     }
-    let oui = format!("{}-{}-{}", &clean[0..2], &clean[2..4], &clean[4..6]);
+    let prefix = clean[0..6].to_ascii_uppercase();
+
+    if let Some(vendor) = oui_database().get(&prefix) {
+        return Some(vendor.clone());
+    }
+
+    lookup_mac_vendor_online(&prefix).await
+}
+
+/// Fallback online lookup for OUIs missing from the bundled snapshot.
+async fn lookup_mac_vendor_online(prefix: &str) -> Option<String> {
+    let oui = format!("{}-{}-{}", &prefix[0..2], &prefix[2..4], &prefix[4..6]);
     let url = format!("https://api.macvendors.com/{}", oui);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
@@ -782,16 +1169,89 @@ async fn lookup_mac_vendor(mac: &str) -> Option<String> {
 }
 
 /// Guess OS from open ports heuristic.
-fn guess_os(open_ports: &[OpenPort]) -> Option<String> {
+/// OS-name literals we look for verbatim in any banner/version/title string
+/// — the strongest signal, since it's the device naming itself.
+const OS_NAME_HINTS: &[&str] = &[
+    "Ubuntu", "Debian", "CentOS", "Fedora", "Red Hat", "FreeBSD", "OpenBSD",
+    "OpenWrt", "Windows", "Android", "Raspbian",
+];
+
+/// Vendor keywords in a TLS cert's subject/issuer org — implies an embedded
+/// Linux appliance of a recognizable kind, even with no OS string anywhere.
+const VENDOR_HINTS: &[&str] = &[
+    "XIAOMI", "D-LINK", "SAMSUNG", "ROBOROCK", "PROXMOX", "APPLE", "SONOS",
+    "UBIQUITI", "SYNOLOGY", "TP-LINK", "NETGEAR", "AMAZON", "GOOGLE",
+];
+
+/// Guess the OS/device family from every signal gathered for a host, and
+/// return the human-readable evidence trail alongside it (each check that
+/// matched appends one short note explaining why).
+fn guess_os(open_ports: &[OpenPort], ttl: Option<u8>) -> (Option<String>, Vec<String>) {
+    let mut evidence = Vec::new();
+
+    // 1. OS name found verbatim in a banner/version/title string.
+    for port in open_ports {
+        for text in [&port.banner, &port.version, &port.http_title].into_iter().flatten() {
+            for hint in OS_NAME_HINTS {
+                if text.contains(hint) {
+                    evidence.push(format!("port {}: \"{}\"", port.port, text));
+                    return (Some(hint.to_string()), evidence);
+                }
+            }
+        }
+    }
+
+    // 2. Vendor keyword in a TLS certificate's subject/issuer org.
+    for port in open_ports {
+        if let Some(tls) = &port.tls {
+            for org in [&tls.subject_org, &tls.issuer_org].into_iter().flatten() {
+                let upper = org.to_ascii_uppercase();
+                for hint in VENDOR_HINTS {
+                    if upper.contains(hint) {
+                        evidence.push(format!("port {} TLS cert org: {}", port.port, org));
+                        return (Some(format!("Embedded Linux ({} device)", to_title_case(hint))), evidence);
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Port-based heuristic (unchanged from the original implementation).
     let ports: Vec<u16> = open_ports.iter().map(|p| p.port).collect();
     if ports.contains(&3389) {
-        Some("Windows".to_string())
-    } else if ports.contains(&22) {
-        Some("Linux/Unix".to_string())
-    } else if ports.contains(&445) && !ports.contains(&22) {
-        Some("Windows".to_string())
-    } else {
-        None
+        evidence.push("port 3389 (RDP) open".to_string());
+        return (Some("Windows".to_string()), evidence);
+    }
+    if ports.contains(&22) {
+        evidence.push("port 22 (SSH) open".to_string());
+        return (Some("Linux/Unix".to_string()), evidence);
+    }
+    if ports.contains(&445) {
+        evidence.push("port 445 (SMB) open, no SSH".to_string());
+        return (Some("Windows".to_string()), evidence);
+    }
+
+    // 4. ICMP TTL as a last-resort fallback/corroboration.
+    if let Some(ttl) = ttl {
+        let guess = match ttl {
+            0..=64 => Some("Linux/macOS/BSD-like (TTL 64)"),
+            65..=128 => Some("Windows-like (TTL 128)"),
+            _ => Some("Network device/embedded (TTL 255)"),
+        };
+        if let Some(g) = guess {
+            evidence.push(format!("ping TTL {}", ttl));
+            return (Some(g.to_string()), evidence);
+        }
+    }
+
+    (None, evidence)
+}
+
+fn to_title_case(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + &c.as_str().to_ascii_lowercase(),
+        None => String::new(),
     }
 }
 
@@ -811,6 +1271,8 @@ pub struct NetworkState {
     /// Interfaces currently in (pseudo-)monitor mode (tracked for macOS)
     #[allow(dead_code)]
     pub monitor_interfaces: Mutex<HashSet<String>>,
+    /// Cancellation flags for in-progress `network_explore_start` scans, keyed by scan_id.
+    pub explore_cancel_flags: Mutex<HashMap<String, Arc<AtomicBool>>>,
 }
 
 impl NetworkState {
@@ -824,6 +1286,7 @@ impl NetworkState {
             aircrack_processes: Mutex::new(HashMap::new()),
             aircrack_audit_log: Mutex::new(Vec::new()),
             monitor_interfaces: Mutex::new(HashSet::new()),
+            explore_cancel_flags: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -878,7 +1341,7 @@ pub async fn network_scan_start(
                     } else {
                         None
                     };
-                    let os_guess = guess_os(&open_ports);
+                    let os_guess = guess_os(&open_ports, None).0;
                     let result = ScanResult {
                         ip: ip.to_string(),
                         hostname,
@@ -929,9 +1392,15 @@ const DEFAULT_EXPLORE_SERVICES: &[ServiceFilter] = &[
     ServiceFilter::WsTerminal,
 ];
 
+/// How long the concurrent mDNS/Bonjour browse runs for each explore scan.
+/// A typical CIDR sweep at `MAX_CONCURRENT = 25` takes comfortably longer
+/// than this, so it costs nothing extra in wall-clock time.
+const MDNS_DISCOVER_WINDOW: Duration = Duration::from_secs(4);
+
 #[tauri::command]
 pub async fn network_explore_start(
     target: ExploreTarget,
+    state: tauri::State<'_, NetworkState>,
     app: AppHandle,
 ) -> Result<String, NetworkError> {
     let scan_id = Uuid::new_v4().to_string();
@@ -956,6 +1425,8 @@ pub async fn network_explore_start(
     }
 
     let scan_id_clone = scan_id.clone();
+    let cancel_flag = Arc::new(AtomicBool::new(false));
+    state.explore_cancel_flags.lock().unwrap().insert(scan_id.clone(), Arc::clone(&cancel_flag));
 
     tokio::spawn(async move {
         const MAX_CONCURRENT: usize = 25;
@@ -965,6 +1436,23 @@ pub async fn network_explore_start(
         let ports = Arc::new(ports);
         let mut tasks = tokio::task::JoinSet::new();
 
+        // mDNS/Bonjour discovery runs concurrently with the per-host CIDR
+        // sweep below; its results arrive later via a separate event since
+        // by-IP results may already have been emitted before it completes.
+        let mdns_app = app.clone();
+        let mdns_scan_id = scan_id_clone.clone();
+        let mdns_task = tokio::spawn(async move {
+            let records = mdns_discover(MDNS_DISCOVER_WINDOW).await;
+            if !records.is_empty() {
+                let by_ip: HashMap<String, Vec<MdnsRecord>> =
+                    records.into_iter().map(|(ip, recs)| (ip.to_string(), recs)).collect();
+                let _ = mdns_app.emit("network:explore_mdns_update", ExploreMdnsUpdate {
+                    scan_id: mdns_scan_id,
+                    records: by_ip,
+                });
+            }
+        });
+
         for addr in addresses {
             let ip = IpAddr::V4(addr);
             let app = app.clone();
@@ -973,29 +1461,41 @@ pub async fn network_explore_start(
             let counter = Arc::clone(&hosts_scanned);
             let found_counter = Arc::clone(&hosts_found);
             let ports = Arc::clone(&ports);
+            let cancelled = Arc::clone(&cancel_flag);
 
             tasks.spawn(async move {
                 let _permit = sem.acquire_owned().await.unwrap();
+                if cancelled.load(Ordering::Relaxed) {
+                    return;
+                }
                 let start = Instant::now();
 
                 // Run TCP port checks and ICMP ping concurrently.
                 let port_futures: Vec<_> = ports.iter().map(|&p| check_port(ip, p, timeout)).collect();
-                let (port_results, ping_alive) = tokio::join!(
+                let (port_results, (ping_alive, ttl)) = tokio::join!(
                     futures::future::join_all(port_futures),
                     ping_host(ip, timeout),
                 );
                 let open_ports: Vec<OpenPort> = port_results.into_iter().flatten().collect();
-                let response_time = start.elapsed().as_secs_f64() * 1000.0;
 
                 // Surface a host if any TCP port is open OR if it answered ping.
                 if !open_ports.is_empty() || ping_alive {
+                    // Enrich every open port with a banner/version/TLS-cert/title
+                    // where the protocol allows it cheaply, concurrently.
+                    let enrich_futures: Vec<_> = open_ports
+                        .into_iter()
+                        .map(|p| enrich_port(ip, p, timeout))
+                        .collect();
+                    let open_ports: Vec<OpenPort> = futures::future::join_all(enrich_futures).await;
+                    let response_time = start.elapsed().as_secs_f64() * 1000.0;
+
                     let (hostname, mac_address) = tokio::join!(resolve_hostname_aggressive(ip, open_ports.clone()), resolve_arp_mac(ip));
                     let mac_vendor = if let Some(ref mac) = mac_address {
                         lookup_mac_vendor(mac).await
                     } else {
                         None
                     };
-                    let os_guess = guess_os(&open_ports);
+                    let (os_guess, evidence) = guess_os(&open_ports, ttl);
                     let suggested_session_type = suggest_session_type(&open_ports);
                     let result = ExploreResult {
                         ip: ip.to_string(),
@@ -1006,6 +1506,9 @@ pub async fn network_explore_start(
                         os_guess,
                         response_time_ms: response_time,
                         suggested_session_type,
+                        ttl,
+                        mdns: Vec::new(),
+                        evidence,
                     };
                     found_counter.fetch_add(1, Ordering::Relaxed);
                     let _ = app.emit("network:explore_host_found", ExploreHostFound {
@@ -1025,9 +1528,19 @@ pub async fn network_explore_start(
         }
 
         while tasks.join_next().await.is_some() {}
+        let _ = mdns_task.await;
     });
 
     Ok(scan_id)
+}
+
+/// Cancel an in-progress `network_explore_start` scan. Hosts not yet started
+/// are skipped; hosts already mid-probe finish their current step.
+#[tauri::command]
+pub fn network_explore_stop(scan_id: String, state: tauri::State<'_, NetworkState>) {
+    if let Some(flag) = state.explore_cancel_flags.lock().unwrap().get(&scan_id) {
+        flag.store(true, Ordering::Relaxed);
+    }
 }
 
 #[tauri::command]
@@ -2940,16 +3453,18 @@ mod tests {
             return;
         }
         let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
-        let alive = ping_host(ip, Duration::from_millis(2000)).await;
+        let (alive, ttl) = ping_host(ip, Duration::from_millis(2000)).await;
         assert!(alive, "expected loopback to respond to ping");
+        assert!(ttl.is_some(), "expected a TTL to be parsed from the loopback reply");
     }
 
     #[tokio::test]
     async fn test_ping_unreachable() {
         // 192.0.2.0/24 is TEST-NET-1, reserved for documentation; should not respond.
         let ip = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
-        let alive = ping_host(ip, Duration::from_millis(500)).await;
+        let (alive, ttl) = ping_host(ip, Duration::from_millis(500)).await;
         assert!(!alive, "TEST-NET-1 host must not respond to ping");
+        assert!(ttl.is_none());
     }
 
     fn which_ping() -> Option<std::path::PathBuf> {
@@ -3089,33 +3604,33 @@ mod tests {
     fn test_suggest_session_type() {
         // SSH takes priority
         let ports = vec![
-            OpenPort { port: 22, service_name: "ssh".to_string(), protocol: "tcp".to_string() },
-            OpenPort { port: 3389, service_name: "rdp".to_string(), protocol: "tcp".to_string() },
+            OpenPort { port: 22, service_name: "ssh".to_string(), protocol: "tcp".to_string(), ..Default::default() },
+            OpenPort { port: 3389, service_name: "rdp".to_string(), protocol: "tcp".to_string(), ..Default::default() },
         ];
         assert_eq!(suggest_session_type(&ports), Some("ssh".to_string()));
 
         // RDP when no SSH
         let ports_rdp = vec![
-            OpenPort { port: 3389, service_name: "rdp".to_string(), protocol: "tcp".to_string() },
-            OpenPort { port: 80, service_name: "http".to_string(), protocol: "tcp".to_string() },
+            OpenPort { port: 3389, service_name: "rdp".to_string(), protocol: "tcp".to_string(), ..Default::default() },
+            OpenPort { port: 80, service_name: "http".to_string(), protocol: "tcp".to_string(), ..Default::default() },
         ];
         assert_eq!(suggest_session_type(&ports_rdp), Some("rdp".to_string()));
 
         // VNC
         let ports_vnc = vec![
-            OpenPort { port: 5900, service_name: "vnc".to_string(), protocol: "tcp".to_string() },
+            OpenPort { port: 5900, service_name: "vnc".to_string(), protocol: "tcp".to_string(), ..Default::default() },
         ];
         assert_eq!(suggest_session_type(&ports_vnc), Some("vnc".to_string()));
 
         // Telnet
         let ports_telnet = vec![
-            OpenPort { port: 23, service_name: "telnet".to_string(), protocol: "tcp".to_string() },
+            OpenPort { port: 23, service_name: "telnet".to_string(), protocol: "tcp".to_string(), ..Default::default() },
         ];
         assert_eq!(suggest_session_type(&ports_telnet), Some("telnet".to_string()));
 
         // No connectable service
         let ports_web = vec![
-            OpenPort { port: 80, service_name: "http".to_string(), protocol: "tcp".to_string() },
+            OpenPort { port: 80, service_name: "http".to_string(), protocol: "tcp".to_string(), ..Default::default() },
         ];
         assert_eq!(suggest_session_type(&ports_web), None);
 

@@ -390,6 +390,7 @@ pub fn run() {
             network::network_scan_results,
             network::network_scan_save_as_sessions,
             network::network_explore_start,
+            network::network_explore_stop,
             network::network_wol_send,
             network::network_tunnel_create,
             network::network_tunnel_remove,

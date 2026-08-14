@@ -85,6 +85,11 @@ libc = "0.2"
 if-addrs = "0.13"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 
+# Network discovery (mDNS/Bonjour + TLS certificate inspection for Network Explorer)
+mdns-sd = "0.21.0"
+x509-parser = "0.18.1"
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+
 # New protocol support
 bytes = "1"
 http = "1"

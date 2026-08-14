@@ -722,6 +722,8 @@
     "explore": "Netzwerk erkunden",
     "scan": "Scannen",
     "scanning": "Wird gescannt…",
+    "stop": "Stopp",
+    "export": "Exportieren",
     "cidrPlaceholder": "CIDR-Bereich eingeben (z. B. 192.168.1.0/24)",
     "ip": "IP-Adresse",
     "hostname": "Hostname",

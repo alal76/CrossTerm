@@ -1,7 +1,9 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { save } from '@tauri-apps/plugin-dialog';
+import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { clsx } from 'clsx';
 import {
   Search,
@@ -14,6 +16,7 @@ import {
   Server,
   ChevronDown,
   ChevronUp,
+  ChevronRight,
   Filter,
   Wifi,
   ShieldAlert,
@@ -24,8 +27,13 @@ import {
   ArrowUp,
   ArrowDown,
   ArrowUpDown,
+  Square,
+  Download,
+  Lock,
+  Radio,
+  Info,
 } from 'lucide-react';
-import type { ExploreResult, ExploreProgress, ExploreHostFound, ServiceFilter, Session } from '@/types';
+import type { ExploreResult, ExploreProgress, ExploreHostFound, ExploreMdnsUpdate, ServiceFilter, Session } from '@/types';
 import { SessionType } from '@/types';
 import { useSessionStore } from '@/stores/sessionStore';
 import { useToast } from '@/components/Shared/Toast';
@@ -70,6 +78,7 @@ const WELL_KNOWN_SERVICES: { id: ServiceFilter; label: string; port: number }[] 
   { id: 'kube_api', label: 'Kubernetes API (6443)', port: 6443 },
   { id: 'docker_api', label: 'Docker API (2375)', port: 2375 },
   { id: 'ws_terminal', label: 'WS Terminal / ttyd (7681)', port: 7681 },
+  { id: 'rtsp', label: 'RTSP (554)', port: 554 },
 ];
 
 const SESSION_ICON: Record<string, string> = {
@@ -103,6 +112,7 @@ const SERVICE_PORT_COLORS: Record<string, string> = {
   telnet: 'bg-orange-500/20 text-orange-400',
   ftp: 'bg-cyan-500/20 text-cyan-400',
   smb: 'bg-red-500/20 text-red-400',
+  rtsp: 'bg-pink-500/20 text-pink-400',
 };
 
 const SERVICE_DEFAULT_PORTS: Record<string, number> = {
@@ -165,6 +175,7 @@ export default function NetworkExplorer() {
   const [saveCount, setSaveCount] = useState<number | null>(null);
   const [connectionHistory, setConnectionHistory] = useState<ConnectionAttempt[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [expandedIp, setExpandedIp] = useState<string | null>(null);
 
   // Set of currently active scan IDs (one per CIDR)
   const activeScanIdsRef = useRef<Set<string>>(new Set());
@@ -204,9 +215,23 @@ export default function NetworkExplorer() {
       }
     );
 
+    // mDNS/Bonjour results arrive after the concurrent browse window closes,
+    // which may be after some (or all) hosts have already been reported —
+    // merge into whichever rows match by IP rather than gating on scan_id.
+    const unlistenMdns = listen<ExploreMdnsUpdate>(
+      'network:explore_mdns_update',
+      (event) => {
+        const { records } = event.payload;
+        setResults((prev) =>
+          prev.map((r) => (records[r.ip] ? { ...r, mdns: records[r.ip] } : r))
+        );
+      }
+    );
+
     return () => {
       unlistenHost.then((fn) => fn());
       unlistenProgress.then((fn) => fn());
+      unlistenMdns.then((fn) => fn());
     };
   }, []);
 
@@ -237,6 +262,7 @@ export default function NetworkExplorer() {
     setResults([]);
     setScanning(true);
     setProgressMap(new Map());
+    setExpandedIp(null);
     activeScanIdsRef.current = new Set();
 
     const services: ServiceFilter[] = Array.from(selectedServices) as ServiceFilter[];
@@ -261,6 +287,31 @@ export default function NetworkExplorer() {
       setScanning(false);
     }
   }, [cidr, selectedServices, extraPortsInput]);
+
+  const handleStop = useCallback(async () => {
+    const ids = Array.from(activeScanIdsRef.current);
+    activeScanIdsRef.current = new Set();
+    setScanning(false);
+    await Promise.allSettled(
+      ids.map((scanId) => invoke('network_explore_stop', { scanId }))
+    );
+  }, []);
+
+  const handleExport = useCallback(async () => {
+    if (results.length === 0) return;
+    try {
+      const dest = await save({
+        title: 'Export Network Scan',
+        defaultPath: 'crossterm-network-scan.json',
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+      });
+      if (!dest) return;
+      await writeTextFile(dest, JSON.stringify(results, null, 2));
+      toast('success', `Exported ${results.length} host${results.length === 1 ? '' : 's'} to ${dest}`);
+    } catch {
+      /* ignore user cancellations */
+    }
+  }, [results, toast]);
 
   const handleConnect = useCallback(async (result: ExploreResult) => {
     const svcType = result.suggested_session_type;
@@ -502,6 +553,16 @@ export default function NetworkExplorer() {
               {scanning ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
               {scanning ? t('network.scanning') : t('network.explore')}
             </button>
+            {scanning && (
+              <button
+                data-testid="scan-stop-btn"
+                onClick={handleStop}
+                className="flex items-center gap-1.5 rounded-md border border-border-default px-3 py-1.5 text-sm font-medium text-text-secondary hover:text-status-disconnected hover:border-status-disconnected transition-colors shrink-0"
+              >
+                <Square size={12} />
+                {t('network.stop')}
+              </button>
+            )}
           </div>
 
           {/* Service filter toggles */}
@@ -660,53 +721,144 @@ export default function NetworkExplorer() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredResults.map((result) => (
-                    <tr key={result.ip} className="border-b border-border-subtle last:border-0 hover:bg-surface-secondary">
-                      <td className="px-3 py-2 text-text-primary font-mono text-xs">{result.ip}</td>
-                      <td className="px-3 py-2 text-text-secondary">{result.hostname ?? '—'}</td>
-                      <td className="px-3 py-2 text-text-secondary font-mono text-xs">{result.mac_address ?? '—'}</td>
-                      <td className="px-3 py-2 text-text-secondary text-xs">{result.mac_vendor ?? '—'}</td>
-                      <td className="px-3 py-2 text-text-secondary">{result.os_guess ?? '—'}</td>
-                      <td className="px-3 py-2">
-                        <div className="flex flex-wrap gap-1">
-                          {result.open_ports.map((p) => (
-                            <span
-                              key={p.port}
-                              className={clsx(
-                                'rounded bg-surface-elevated px-1.5 py-0.5 text-xs text-text-secondary',
-                                SERVICE_PORT_COLORS[p.service_name] ?? ''
-                              )}
-                            >
-                              {p.port}/{p.service_name}
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2 text-text-secondary">{result.response_time_ms.toFixed(0)}ms</td>
-                      <td className="px-3 py-2 text-text-secondary">
-                        {result.suggested_session_type
-                          ? SESSION_ICON[result.suggested_session_type] ?? result.suggested_session_type
-                          : '—'}
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        {result.suggested_session_type && SESSION_TYPE_MAP[result.suggested_session_type] && (
+                  {filteredResults.map((result) => {
+                    const hasDetail =
+                      result.open_ports.some((p) => p.banner || p.version || p.http_title || p.tls) ||
+                      result.mdns.length > 0 ||
+                      result.evidence.length > 0;
+                    const isExpanded = expandedIp === result.ip;
+                    return (
+                    <Fragment key={result.ip}>
+                      <tr className="border-b border-border-subtle last:border-0 hover:bg-surface-secondary">
+                        <td className="px-3 py-2 text-text-primary font-mono text-xs">
                           <button
-                            onClick={() => handleConnect(result)}
-                            className="flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-accent-primary hover:bg-surface-elevated transition-colors"
+                            onClick={() => hasDetail && setExpandedIp(isExpanded ? null : result.ip)}
+                            disabled={!hasDetail}
+                            className={clsx(
+                              'flex items-center gap-1',
+                              hasDetail ? 'cursor-pointer hover:text-accent-primary' : 'cursor-default'
+                            )}
                           >
-                            <PlugZap size={12} />
-                            {t('network.connect')}
+                            {hasDetail ? (
+                              isExpanded ? <ChevronDown size={11} className="shrink-0" /> : <ChevronRight size={11} className="shrink-0" />
+                            ) : (
+                              <span className="w-[11px] shrink-0" />
+                            )}
+                            {result.ip}
                           </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="px-3 py-2 text-text-secondary">{result.hostname ?? '—'}</td>
+                        <td className="px-3 py-2 text-text-secondary font-mono text-xs">{result.mac_address ?? '—'}</td>
+                        <td className="px-3 py-2 text-text-secondary text-xs">{result.mac_vendor ?? '—'}</td>
+                        <td className="px-3 py-2 text-text-secondary">{result.os_guess ?? '—'}</td>
+                        <td className="px-3 py-2">
+                          <div className="flex flex-wrap gap-1">
+                            {result.open_ports.map((p) => (
+                              <span
+                                key={p.port}
+                                title={p.version ?? undefined}
+                                className={clsx(
+                                  'rounded bg-surface-elevated px-1.5 py-0.5 text-xs text-text-secondary max-w-[16rem] truncate inline-block align-bottom',
+                                  SERVICE_PORT_COLORS[p.service_name] ?? ''
+                                )}
+                              >
+                                {p.port}/{p.service_name}
+                                {p.version ? ` · ${p.version}` : ''}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 text-text-secondary">{result.response_time_ms.toFixed(0)}ms</td>
+                        <td className="px-3 py-2 text-text-secondary">
+                          {result.suggested_session_type
+                            ? SESSION_ICON[result.suggested_session_type] ?? result.suggested_session_type
+                            : '—'}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          {result.suggested_session_type && SESSION_TYPE_MAP[result.suggested_session_type] && (
+                            <button
+                              onClick={() => handleConnect(result)}
+                              className="flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-accent-primary hover:bg-surface-elevated transition-colors"
+                            >
+                              <PlugZap size={12} />
+                              {t('network.connect')}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                      {isExpanded && (
+                        <tr className="border-b border-border-subtle bg-surface-sunken">
+                          <td colSpan={9} className="px-6 py-3">
+                            <div className="flex flex-col gap-3 text-xs">
+                              {result.open_ports.some((p) => p.banner || p.version || p.http_title || p.tls) && (
+                                <div className="flex flex-col gap-2">
+                                  {result.open_ports
+                                    .filter((p) => p.banner || p.version || p.http_title || p.tls)
+                                    .map((p) => (
+                                      <div key={p.port} className="flex flex-col gap-0.5 rounded border border-border-subtle bg-surface-primary p-2">
+                                        <span className="font-mono font-medium text-text-primary">
+                                          {p.port}/{p.protocol} — {p.service_name}
+                                        </span>
+                                        {p.banner && (
+                                          <span className="font-mono text-text-secondary break-all">banner: {p.banner}</span>
+                                        )}
+                                        {p.version && !p.banner && (
+                                          <span className="text-text-secondary">{p.version}</span>
+                                        )}
+                                        {p.http_title && (
+                                          <span className="text-text-secondary">title: "{p.http_title}"</span>
+                                        )}
+                                        {p.tls && (
+                                          <div className="mt-1 flex flex-col gap-0.5 border-l-2 border-border-subtle pl-2 text-text-secondary">
+                                            <span className="flex items-center gap-1 text-text-primary">
+                                              <Lock size={10} /> TLS certificate
+                                            </span>
+                                            {p.tls.subject_cn && <span>subject CN: {p.tls.subject_cn}</span>}
+                                            {p.tls.subject_org && <span>subject org: {p.tls.subject_org}</span>}
+                                            {p.tls.issuer_org && <span>issuer org: {p.tls.issuer_org}</span>}
+                                            {p.tls.san.length > 0 && <span>SAN: {p.tls.san.join(', ')}</span>}
+                                            {p.tls.not_after && <span>expires: {p.tls.not_after}</span>}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                </div>
+                              )}
+                              {result.mdns.length > 0 && (
+                                <div className="flex flex-col gap-1">
+                                  <span className="flex items-center gap-1 font-medium text-text-primary">
+                                    <Radio size={11} /> mDNS / Bonjour
+                                  </span>
+                                  {result.mdns.map((m, i) => (
+                                    <span key={i} className="font-mono text-text-secondary">
+                                      {m.service_type} — "{m.instance_name}"
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              {result.evidence.length > 0 && (
+                                <div className="flex flex-col gap-1">
+                                  <span className="flex items-center gap-1 font-medium text-text-primary">
+                                    <Info size={11} /> Evidence
+                                  </span>
+                                  {result.evidence.map((e, i) => (
+                                    <span key={i} className="text-text-secondary">• {e}</span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           )}
 
-          {/* Save all */}
+          {/* Save all / export */}
           {results.length > 0 && !scanning && (
             <div className="flex items-center gap-3">
               <button
@@ -715,6 +867,13 @@ export default function NetworkExplorer() {
               >
                 <Save size={12} />
                 {t('network.saveAsSessions')}
+              </button>
+              <button
+                onClick={handleExport}
+                className="flex items-center gap-2 rounded-md bg-surface-elevated px-3 py-1.5 text-xs text-text-primary hover:bg-surface-secondary transition-colors"
+              >
+                <Download size={12} />
+                {t('network.export')}
               </button>
               {saveCount !== null && (
                 <span className="text-xs text-text-secondary">

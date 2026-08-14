@@ -507,6 +507,23 @@ export interface OpenPort {
   port: number;
   service_name: string;
   protocol: string;
+  /** Raw first-line banner for server-speaks-first protocols (SSH/FTP/SMTP/POP3/IMAP/MySQL/VNC). */
+  banner?: string;
+  /** Parsed product+version summary, e.g. "nginx 1.28.1". */
+  version?: string;
+  /** `<title>` extracted from an HTTP(S)-shaped response. */
+  http_title?: string;
+  /** TLS certificate detail, present for any port where a TLS handshake succeeded. */
+  tls?: TlsCertInfo;
+}
+
+export interface TlsCertInfo {
+  subject_cn?: string;
+  subject_org?: string;
+  issuer_org?: string;
+  san: string[];
+  /** RFC3339 "not after" (expiry) timestamp, if parseable. */
+  not_after?: string;
 }
 
 export interface TunnelRule {
@@ -557,6 +574,7 @@ export type ServiceFilter =
   | 'docker_api'
   | 'docker_api_tls'
   | 'ws_terminal'
+  | 'rtsp'
   | { custom: number };
 
 export interface ExploreTarget {
@@ -575,6 +593,22 @@ export interface ExploreResult {
   os_guess?: string;
   response_time_ms: number;
   suggested_session_type?: string;
+  /** ICMP TTL from the ping reply, used as a fallback OS-family signal. */
+  ttl?: number;
+  /** mDNS/Bonjour service records observed for this IP. */
+  mdns: MdnsRecord[];
+  /** Human-readable notes explaining the hostname/OS/vendor findings above. */
+  evidence: string[];
+}
+
+/** A single mDNS/Bonjour service instance advertised by a host. */
+export interface MdnsRecord {
+  /** e.g. "_home-assistant._tcp.local." */
+  service_type: string;
+  /** e.g. "Home" */
+  instance_name: string;
+  hostname?: string;
+  txt: Record<string, string>;
 }
 
 export interface ExploreProgress {
@@ -587,6 +621,13 @@ export interface ExploreProgress {
 export interface ExploreHostFound {
   scan_id: string;
   result: ExploreResult;
+}
+
+/** Emitted once the concurrent mDNS/Bonjour browse for a scan completes;
+ * merge into already-rendered rows by IP. */
+export interface ExploreMdnsUpdate {
+  scan_id: string;
+  records: Record<string, MdnsRecord[]>;
 }
 
 // --- WiFi Scan Types ---
