@@ -61,6 +61,11 @@ vi.mock("@/components/Smb/SmbBrowser", () => ({
     <div data-testid={`smb-browser-${sessionId}`}>SmbBrowser Mock</div>
   ),
 }));
+vi.mock("@/components/Netconf/NetconfConsole", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`netconf-console-${sessionId}`}>NetconfConsole Mock</div>
+  ),
+}));
 
 function baseSession(overrides: Partial<Session> = {}): Session {
   return {
@@ -196,5 +201,15 @@ describe("SplitPaneContainer session type routing", () => {
     render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
 
     expect(screen.getByTestId(`smb-browser-${tab.sessionId}`)).toBeInTheDocument();
+  });
+
+  it("routes a NETCONF leaf pane to NetconfConsole", () => {
+    const session = baseSession({ type: SessionType.NetConf, connection: { host: "192.168.0.40", port: 830 } });
+    const tab = baseTab({ sessionType: SessionType.NetConf });
+    useSessionStore.setState({ sessions: [session], openTabs: [tab] });
+
+    render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
+
+    expect(screen.getByTestId(`netconf-console-${tab.sessionId}`)).toBeInTheDocument();
   });
 });

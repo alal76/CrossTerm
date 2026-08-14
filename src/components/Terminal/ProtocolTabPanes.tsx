@@ -17,6 +17,7 @@ import RedfishExplorer from "@/components/Redfish/RedfishExplorer";
 import WebDavBrowser from "@/components/WebDav/WebDavBrowser";
 import MqttClient from "@/components/Mqtt/MqttClient";
 import SmbBrowser from "@/components/Smb/SmbBrowser";
+import NetconfConsole from "@/components/Netconf/NetconfConsole";
 import {
   buildRdpConfig,
   buildVncConfig,
@@ -25,6 +26,7 @@ import {
   buildWebDavConfig,
   buildMqttConfig,
   buildSmbConfig,
+  buildNetconfConfig,
 } from "@/utils/sessionConfig";
 import type { Session } from "@/types";
 
@@ -66,4 +68,9 @@ export function MqttTabPane({ sessionId, session }: PaneProps) {
 export function SmbTabPane({ sessionId, session }: PaneProps) {
   const config = useMemo(() => buildSmbConfig(session), [session]);
   return <SmbBrowser sessionId={sessionId} config={config} />;
+}
+
+export function NetconfTabPane({ sessionId, session }: PaneProps) {
+  const config = useMemo(() => buildNetconfConfig(session), [session]);
+  return <NetconfConsole sessionId={sessionId} config={config} />;
 }

@@ -8,7 +8,7 @@
 // specific fields yet — domain, NLA, codec, etc. — so those fall back to
 // sensible defaults here until the editor grows per-type fields).
 
-import type { Session, RdpConfig, VncConfig, WsTermConfig, RedfishConfig, WebDavConfig, MqttConfig, SmbConfig } from '@/types';
+import type { Session, RdpConfig, VncConfig, WsTermConfig, RedfishConfig, WebDavConfig, MqttConfig, SmbConfig, NetconfConfig } from '@/types';
 
 export function buildRdpConfig(session: Session): RdpConfig {
   const opts = session.connection.protocolOptions;
@@ -105,5 +105,18 @@ export function buildSmbConfig(session: Session): SmbConfig {
     password: opts?.['password'] as string | undefined,
     domain: opts?.['domain'] as string | undefined,
     share: (opts?.['share'] as string) ?? '',
+  };
+}
+
+export function buildNetconfConfig(session: Session): NetconfConfig {
+  const opts = session.connection.protocolOptions;
+  return {
+    host: session.connection.host,
+    port: session.connection.port,
+    username: (opts?.['username'] as string) ?? '',
+    password: opts?.['password'] as string | undefined,
+    private_key: opts?.['private_key'] as string | undefined,
+    private_key_passphrase: opts?.['private_key_passphrase'] as string | undefined,
+    capabilities: [],
   };
 }

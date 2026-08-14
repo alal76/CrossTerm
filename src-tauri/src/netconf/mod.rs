@@ -2,9 +2,12 @@
 /// Opens an SSH connection with the "netconf" subsystem, performs the
 /// <hello> capability exchange, and exposes get-config / edit-config / RPC.
 use russh::client::{self, Handle};
+use russh::keys::key::PublicKey;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::io::{BufRead, BufReader};
 use std::sync::{Arc, Mutex};
+use tauri::{AppHandle, Emitter};
 use thiserror::Error;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
@@ -17,6 +20,10 @@ pub enum NetconfError {
     Ssh(String),
     #[error("NETCONF error: {0}")]
     Protocol(String),
+    #[error("Host key for {0} has changed — refusing to connect. If this is expected, forget the old key first.")]
+    HostKeyChanged(String),
+    #[error("No credentials supplied — provide a password or a private key")]
+    NoCredentials,
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -27,6 +34,12 @@ impl Serialize for NetconfError {
     }
 }
 
+impl From<russh::Error> for NetconfError {
+    fn from(e: russh::Error) -> Self {
+        NetconfError::Ssh(e.to_string())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetconfConfig {
     pub host: String,
@@ -34,7 +47,11 @@ pub struct NetconfConfig {
     pub port: u16,
     pub username: String,
     pub password: Option<String>,
-    pub private_key_ref: Option<String>,
+    /// PEM-encoded private key data (mirrors SshAuth::PrivateKey — the
+    /// frontend resolves any credential reference to raw key material
+    /// before invoking this command, same as it does for SSH).
+    pub private_key: Option<String>,
+    pub private_key_passphrase: Option<String>,
     /// List of requested YANG capability URIs (empty = accept server list)
     pub capabilities: Vec<String>,
 }
@@ -55,18 +72,83 @@ pub struct NetconfRpcResult {
     pub error: Option<String>,
 }
 
-// Minimal no-auth SSH client handler
-struct SshHandler;
+#[derive(Clone, Serialize)]
+struct NetconfHostKeyNewEvent {
+    host: String,
+    port: u16,
+    algorithm: String,
+    fingerprint: String,
+}
+
+/// Shares SSH's known_hosts store — a host's key identity doesn't depend
+/// on which SSH subsystem (shell vs. netconf) is being used to reach it.
+fn known_hosts_file_path() -> std::path::PathBuf {
+    dirs::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("CrossTerm")
+        .join("known_hosts")
+}
+
+struct SshHandler {
+    app_handle: AppHandle,
+    host: String,
+    port: u16,
+}
 
 #[async_trait::async_trait]
 impl client::Handler for SshHandler {
-    type Error = russh::Error;
+    type Error = NetconfError;
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &russh_keys::key::PublicKey,
+        server_public_key: &PublicKey,
     ) -> Result<bool, Self::Error> {
-        Ok(true) // TODO: TOFU verification
+        let fingerprint = server_public_key.fingerprint();
+        let algorithm = server_public_key.name().to_string();
+        let host_key = format!("{}:{}", self.host, self.port);
+
+        let known_hosts_path = known_hosts_file_path();
+
+        if known_hosts_path.exists() {
+            let file = std::fs::File::open(&known_hosts_path)?;
+            let reader = BufReader::new(file);
+            for line in reader.lines() {
+                let line = line?.trim().to_string();
+                if line.is_empty() || line.starts_with('#') {
+                    continue;
+                }
+                let parts: Vec<&str> = line.splitn(3, ' ').collect();
+                if parts.len() == 3 && parts[0] == host_key {
+                    if parts[2] == fingerprint {
+                        return Ok(true);
+                    }
+                    return Err(NetconfError::HostKeyChanged(host_key));
+                }
+            }
+        }
+
+        // Not found — TOFU: accept and record it for next time.
+        if let Some(parent) = known_hosts_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&known_hosts_path)?;
+        writeln!(file, "{} {} {}", host_key, algorithm, fingerprint)?;
+
+        let _ = self.app_handle.emit(
+            "netconf:host_key_new",
+            NetconfHostKeyNewEvent {
+                host: self.host.clone(),
+                port: self.port,
+                algorithm,
+                fingerprint,
+            },
+        );
+
+        Ok(true)
     }
 }
 
@@ -115,21 +197,38 @@ fn extract_capabilities(hello_xml: &str) -> Vec<String> {
 
 #[tauri::command]
 pub async fn netconf_connect(
+    app_handle: AppHandle,
     config: NetconfConfig,
     state: tauri::State<'_, NetconfState>,
 ) -> Result<String, NetconfError> {
     let ssh_config = Arc::new(russh::client::Config::default());
+    let handler = SshHandler {
+        app_handle,
+        host: config.host.clone(),
+        port: config.port,
+    };
     let mut session = russh::client::connect(
         ssh_config,
         (config.host.as_str(), config.port),
-        SshHandler,
-    ).await.map_err(|e| NetconfError::Ssh(e.to_string()))?;
+        handler,
+    ).await?;
 
-    if let Some(pw) = &config.password {
-        session.authenticate_password(&config.username, pw.clone())
-            .await.map_err(|e| NetconfError::Ssh(e.to_string()))?;
+    // Private key takes priority when both are supplied, matching SSH's
+    // own auth-method preference.
+    let authenticated = if let Some(key_data) = &config.private_key {
+        let key_pair = if let Some(pass) = &config.private_key_passphrase {
+            russh_keys::decode_secret_key(key_data, Some(pass.as_str()))
+        } else {
+            russh_keys::decode_secret_key(key_data, None)
+        }.map_err(|e| NetconfError::Ssh(format!("Invalid private key: {e}")))?;
+        session.authenticate_publickey(&config.username, Arc::new(key_pair)).await?
+    } else if let Some(pw) = &config.password {
+        session.authenticate_password(&config.username, pw.clone()).await?
     } else {
-        return Err(NetconfError::Ssh("Key auth not yet wired for NETCONF".into()));
+        return Err(NetconfError::NoCredentials);
+    };
+    if !authenticated {
+        return Err(NetconfError::Ssh("Authentication rejected".into()));
     }
 
     let mut channel = session.channel_open_session()
@@ -247,4 +346,52 @@ pub fn netconf_disconnect(id: String, state: tauri::State<'_, NetconfState>) -> 
 #[tauri::command]
 pub fn netconf_list(state: tauri::State<'_, NetconfState>) -> Vec<NetconfSession> {
     state.sessions.lock().unwrap().values().cloned().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_hello_defaults_to_base_1_0_when_no_capabilities_requested() {
+        let hello = build_hello(&[]);
+        assert!(hello.contains("urn:ietf:params:netconf:base:1.0"));
+        assert!(hello.ends_with("]]>]]>"));
+    }
+
+    #[test]
+    fn test_build_hello_includes_each_requested_capability() {
+        let hello = build_hello(&["urn:ietf:params:netconf:capability:candidate:1.0".to_string()]);
+        assert!(hello.contains("<capability>urn:ietf:params:netconf:capability:candidate:1.0</capability>"));
+    }
+
+    #[test]
+    fn test_extract_session_id() {
+        let xml = "<hello><session-id>42</session-id></hello>]]>]]>";
+        assert_eq!(extract_session_id(xml), 42);
+    }
+
+    #[test]
+    fn test_extract_session_id_missing_defaults_to_zero() {
+        assert_eq!(extract_session_id("<hello></hello>]]>]]>"), 0);
+    }
+
+    #[test]
+    fn test_extract_capabilities() {
+        let xml = "<hello><capabilities>\
+<capability>urn:ietf:params:netconf:base:1.1</capability>\
+<capability>urn:ietf:params:netconf:capability:candidate:1.0</capability>\
+</capabilities></hello>]]>]]>";
+        let caps = extract_capabilities(xml);
+        assert_eq!(caps, vec![
+            "urn:ietf:params:netconf:base:1.1".to_string(),
+            "urn:ietf:params:netconf:capability:candidate:1.0".to_string(),
+        ]);
+    }
+
+    #[test]
+    fn test_known_hosts_file_path() {
+        let path = known_hosts_file_path();
+        assert!(path.ends_with("CrossTerm/known_hosts"));
+    }
 }

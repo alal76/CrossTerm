@@ -81,6 +81,11 @@ vi.mock("@/components/Smb/SmbBrowser", () => ({
     <div data-testid={`smb-browser-${sessionId}`}>SmbBrowser Mock</div>
   ),
 }));
+vi.mock("@/components/Netconf/NetconfConsole", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`netconf-console-${sessionId}`}>NetconfConsole Mock</div>
+  ),
+}));
 
 // Mock components that use localStorage directly (tested separately)
 vi.mock("@/components/Help/WhatsNewPanel", () => ({
@@ -367,6 +372,17 @@ describe("App", () => {
       render(<App />);
 
       expect(screen.getByTestId(`smb-browser-${tab.sessionId}`)).toBeInTheDocument();
+      expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
+    });
+
+    it("routes a NETCONF tab to NetconfConsole, not the generic local-shell fallback", () => {
+      const session = baseSession({ type: SessionType.NetConf, connection: { host: "192.168.0.40", port: 830 } });
+      const tab = baseTab({ sessionType: SessionType.NetConf });
+      useSessionStore.setState({ sessions: [session], openTabs: [tab], activeTabId: tab.id });
+
+      render(<App />);
+
+      expect(screen.getByTestId(`netconf-console-${tab.sessionId}`)).toBeInTheDocument();
       expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
     });
   });

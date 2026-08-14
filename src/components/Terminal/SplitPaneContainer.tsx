@@ -16,6 +16,7 @@ import {
   WebDavTabPane,
   MqttTabPane,
   SmbTabPane,
+  NetconfTabPane,
 } from "@/components/Terminal/ProtocolTabPanes";
 
 // ── Resize Handle ──
@@ -79,6 +80,27 @@ function ResizeHandle({
 
 // ── Leaf Renderer ──
 
+// Self-contained viewers that own their own connect form and don't need a
+// session's config passed in (Telnet/Serial).
+const NO_PROPS_PANES: Partial<Record<SessionType, () => React.JSX.Element>> = {
+  [SessionType.Telnet]: TelnetTerminal,
+  [SessionType.Serial]: SerialTerminal,
+};
+
+// Protocol viewers that all take the same {sessionId, session} shape via
+// the ProtocolTabPanes wrappers — keeping them in a lookup table (rather
+// than a growing if-chain) keeps this dispatch flat as more protocols land.
+const SESSION_TAB_PANES: Partial<Record<SessionType, typeof RdpTabPane>> = {
+  [SessionType.RDP]: RdpTabPane,
+  [SessionType.VNC]: VncTabPane,
+  [SessionType.WebSocketTerminal]: WsTermTabPane,
+  [SessionType.Redfish]: RedfishTabPane,
+  [SessionType.WebDav]: WebDavTabPane,
+  [SessionType.MqttClient]: MqttTabPane,
+  [SessionType.Smb]: SmbTabPane,
+  [SessionType.NetConf]: NetconfTabPane,
+};
+
 function renderPaneContent(tab: { sessionId: string; sessionType: SessionType }, session: Session | undefined, isActive: boolean) {
   if (tab.sessionType === SessionType.SSH && session) {
     const pw = (session.connection.protocolOptions?.["password"] as string) ?? "";
@@ -94,33 +116,13 @@ function renderPaneContent(tab: { sessionId: string; sessionType: SessionType },
       />
     );
   }
-  if (tab.sessionType === SessionType.RDP && session) {
-    return <RdpTabPane sessionId={tab.sessionId} session={session} />;
-  }
-  if (tab.sessionType === SessionType.VNC && session) {
-    return <VncTabPane sessionId={tab.sessionId} session={session} />;
-  }
-  if (tab.sessionType === SessionType.Telnet) {
-    return <TelnetTerminal />;
-  }
-  if (tab.sessionType === SessionType.Serial) {
-    return <SerialTerminal />;
-  }
-  if (tab.sessionType === SessionType.WebSocketTerminal && session) {
-    return <WsTermTabPane sessionId={tab.sessionId} session={session} />;
-  }
-  if (tab.sessionType === SessionType.Redfish && session) {
-    return <RedfishTabPane sessionId={tab.sessionId} session={session} />;
-  }
-  if (tab.sessionType === SessionType.WebDav && session) {
-    return <WebDavTabPane sessionId={tab.sessionId} session={session} />;
-  }
-  if (tab.sessionType === SessionType.MqttClient && session) {
-    return <MqttTabPane sessionId={tab.sessionId} session={session} />;
-  }
-  if (tab.sessionType === SessionType.Smb && session) {
-    return <SmbTabPane sessionId={tab.sessionId} session={session} />;
-  }
+
+  const NoPropsPane = NO_PROPS_PANES[tab.sessionType];
+  if (NoPropsPane) return <NoPropsPane />;
+
+  const TabPane = SESSION_TAB_PANES[tab.sessionType];
+  if (TabPane && session) return <TabPane sessionId={tab.sessionId} session={session} />;
+
   return <TerminalTab sessionId={tab.sessionId} isActive={isActive} />;
 }
 

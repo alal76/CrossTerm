@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildRdpConfig, buildVncConfig, buildWsTermConfig, buildRedfishConfig, buildWebDavConfig, buildMqttConfig, buildSmbConfig } from "@/utils/sessionConfig";
+import { buildRdpConfig, buildVncConfig, buildWsTermConfig, buildRedfishConfig, buildWebDavConfig, buildMqttConfig, buildSmbConfig, buildNetconfConfig } from "@/utils/sessionConfig";
 import type { Session } from "@/types";
 import { SessionType } from "@/types";
 
@@ -183,5 +183,33 @@ describe("buildSmbConfig", () => {
     expect(config.share).toBe("");
     expect(config.username).toBeUndefined();
     expect(config.domain).toBeUndefined();
+  });
+});
+
+describe("buildNetconfConfig", () => {
+  it("maps host/port/username and credentials from protocolOptions", () => {
+    const config = buildNetconfConfig(
+      baseSession({
+        connection: {
+          host: "192.168.0.40",
+          port: 830,
+          protocolOptions: { username: "admin", password: "hunter2", private_key: "PEM", private_key_passphrase: "pass" },
+        },
+      })
+    );
+    expect(config.host).toBe("192.168.0.40");
+    expect(config.port).toBe(830);
+    expect(config.username).toBe("admin");
+    expect(config.password).toBe("hunter2");
+    expect(config.private_key).toBe("PEM");
+    expect(config.private_key_passphrase).toBe("pass");
+  });
+
+  it("defaults username to an empty string and leaves credentials undefined without protocolOptions", () => {
+    const config = buildNetconfConfig(baseSession({ connection: { host: "192.168.0.40", port: 830 } }));
+    expect(config.username).toBe("");
+    expect(config.password).toBeUndefined();
+    expect(config.private_key).toBeUndefined();
+    expect(config.capabilities).toEqual([]);
   });
 });

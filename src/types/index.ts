@@ -1300,3 +1300,29 @@ export interface SmbEntry {
   size: number;
   modified?: string;
 }
+
+// --- NETCONF ---
+
+export interface NetconfConfig {
+  host: string;
+  port: number;
+  username: string;
+  password?: string;
+  private_key?: string;
+  private_key_passphrase?: string;
+  capabilities: string[];
+}
+
+export interface NetconfSessionInfo {
+  id: string;
+  host: string;
+  server_capabilities: string[];
+  session_id: number;
+}
+
+export interface NetconfRpcResult {
+  message_id: string;
+  xml: string;
+  ok: boolean;
+  error?: string;
+}
