@@ -460,7 +460,9 @@ fn guess_service(port: u16) -> String {
         8080 => "http-alt".to_string(),
         8443 => "https-alt".to_string(),
         8883 => "mqtt-tls".to_string(),
+        8096 => "jellyfin".to_string(),
         27017 => "mongodb".to_string(),
+        32400 => "plex".to_string(),
         50051 => "grpc".to_string(),
         _ => format!("port-{}", port),
     }
@@ -1292,6 +1294,55 @@ async fn probe_rtsp(ip: IpAddr, port: u16, timeout: Duration) -> Option<String> 
         .map(|l| l.trim().to_string())
 }
 
+/// Issue a minimal unauthenticated HTTP GET for `path` and return the raw
+/// response body (headers stripped) if the server answered 2xx-shaped.
+async fn http_get_body(ip: IpAddr, port: u16, path: &str, timeout: Duration) -> Option<String> {
+    let request = format!(
+        "GET {path} HTTP/1.0\r\nHost: {ip}\r\nUser-Agent: CrossTerm-NetworkExplorer\r\nConnection: close\r\n\r\n"
+    );
+    let mut stream = connect_bound(ip, port, timeout).await.ok()?;
+    stream.write_all(request.as_bytes()).await.ok()?;
+    let raw = read_response_bounded(&mut stream).await?;
+    if !raw.starts_with("HTTP/") {
+        return None;
+    }
+    let (_headers, body) = raw.split_once("\r\n\r\n")?;
+    Some(body.to_string())
+}
+
+const JELLYFIN_PORT: u16 = 8096;
+const PLEX_PORT: u16 = 32400;
+
+/// Jellyfin's unauthenticated public-info endpoint — identifies the server
+/// by its actual configured name (e.g. "nl.jellyfin"), not just "a media
+/// server is here". Confirmed live: this is exactly what surfaced the
+/// Jellyfin-hosting Proxmox VM by name during a real scan.
+async fn probe_jellyfin(ip: IpAddr, port: u16, timeout: Duration) -> Option<String> {
+    let body = http_get_body(ip, port, "/System/Info/Public", timeout).await?;
+    let json: serde_json::Value = serde_json::from_str(&body).ok()?;
+    let name = json.get("ServerName")?.as_str()?;
+    if name.is_empty() { None } else { Some(format!("Jellyfin: {name}")) }
+}
+
+/// Plex's unauthenticated identity endpoint — confirms a Plex Media Server
+/// is present (via `machineIdentifier`) and, on installs that expose it
+/// without auth, its configured friendly name.
+async fn probe_plex(ip: IpAddr, port: u16, timeout: Duration) -> Option<String> {
+    let body = http_get_body(ip, port, "/identity", timeout).await?;
+    if !body.contains("machineIdentifier") {
+        return None;
+    }
+    let name = body
+        .split("friendlyName=\"")
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .filter(|n| !n.is_empty());
+    match name {
+        Some(n) => Some(format!("Plex: {n}")),
+        None => Some("Plex Media Server".to_string()),
+    }
+}
+
 /// Enrich a single open port with a banner/version/title/TLS-cert summary
 /// where the protocol allows it cheaply. Best-effort: probe failures just
 /// leave the enrichment fields as `None` — the port still shows as open.
@@ -1301,6 +1352,16 @@ async fn enrich_port(ip: IpAddr, mut open_port: OpenPort, timeout: Duration) -> 
 
     if port == 554 {
         open_port.version = probe_rtsp(ip, port, probe_timeout).await;
+        return open_port;
+    }
+
+    if port == JELLYFIN_PORT {
+        open_port.version = probe_jellyfin(ip, port, probe_timeout).await;
+        return open_port;
+    }
+
+    if port == PLEX_PORT {
+        open_port.version = probe_plex(ip, port, probe_timeout).await;
         return open_port;
     }
 
@@ -1739,11 +1800,15 @@ pub async fn network_explore_start(
     };
     let mut ports: Vec<u16> = services.iter().map(|s| s.port()).collect();
     ports.extend(&target.extra_ports);
-    // Always probed regardless of service filter selection: this is what
-    // feeds the local-DNS-server discovery behind hostname method 9 (see
+    // Always probed regardless of service filter selection: 53 feeds the
+    // local-DNS-server discovery behind hostname method 9 (see
     // `register_if_dns_server`) — without it, no host's port 53 ever gets
     // checked, so the registry could only ever hold the gateway/.1 guesses.
+    // 8096/32400 are Jellyfin/Plex's default ports — cheap to always check
+    // and the only way to name the media-server VMs this pass was built for.
     ports.push(53);
+    ports.push(JELLYFIN_PORT);
+    ports.push(PLEX_PORT);
     ports.sort_unstable();
     ports.dedup();
 
@@ -1964,6 +2029,8 @@ pub async fn run_explore_and_dump(
         .collect();
     ports.extend(extra_ports);
     ports.push(53); // feeds local-DNS-server discovery; see register_if_dns_server
+    ports.push(JELLYFIN_PORT);
+    ports.push(PLEX_PORT);
     ports.sort_unstable();
     ports.dedup();
     let ports = Arc::new(ports);
@@ -2862,6 +2929,87 @@ pub async fn network_local_subnets() -> Vec<LocalSubnet> {
     subnets.sort_by(|a, b| a.cidr.cmp(&b.cidr));
     subnets.dedup_by(|a, b| a.cidr == b.cidr);
     subnets
+}
+
+// ── Tailscale peer discovery ────────────────────────────────────────────
+// Tailscale peers live in the 100.64.0.0/10 CGNAT range — a different
+// address space from the LAN a Network Explorer scan targets, and
+// port-scanning that whole /10 to find them isn't remotely feasible (it's
+// ~4 million addresses, sparsely and randomly assigned). But Tailscale
+// already knows exactly who's on the tailnet, by name, with zero probing
+// needed: `tailscale status --json` is authoritative. This is why a normal
+// LAN scan never surfaces a device's tailnet identity — it was never asked.
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TailscalePeer {
+    pub ip: String,
+    pub hostname: String,
+    pub os: Option<String>,
+    pub online: bool,
+    pub is_self: bool,
+}
+
+fn find_tailscale_binary() -> Option<std::path::PathBuf> {
+    if let Ok(path) = which::which("tailscale") {
+        return Some(path);
+    }
+    let candidates: &[&str] = if cfg!(target_os = "macos") {
+        &["/Applications/Tailscale.app/Contents/MacOS/Tailscale", "/usr/local/bin/tailscale", "/opt/homebrew/bin/tailscale"]
+    } else if cfg!(target_os = "windows") {
+        &["C:\\Program Files\\Tailscale\\tailscale.exe"]
+    } else {
+        &["/usr/bin/tailscale", "/usr/local/bin/tailscale"]
+    };
+    candidates.iter().map(std::path::PathBuf::from).find(|p| p.exists())
+}
+
+fn extract_tailscale_peer(v: &serde_json::Value, is_self: bool) -> Option<TailscalePeer> {
+    let ip = v.get("TailscaleIPs")?.as_array()?.iter().find_map(|a| {
+        let s = a.as_str()?;
+        (s.parse::<Ipv4Addr>().is_ok()).then(|| s.to_string())
+    })?;
+    let dns_name = v.get("DNSName").and_then(|d| d.as_str()).unwrap_or("").trim_end_matches('.');
+    let host_name = v.get("HostName").and_then(|d| d.as_str()).unwrap_or("");
+    let hostname = if !dns_name.is_empty() { dns_name.to_string() } else { host_name.to_string() };
+    if hostname.is_empty() {
+        return None;
+    }
+    let os = v.get("OS").and_then(|o| o.as_str()).map(str::to_string);
+    let online = v.get("Online").and_then(|o| o.as_bool()).unwrap_or(is_self);
+    Some(TailscalePeer { ip, hostname, os, online, is_self })
+}
+
+/// Parses `tailscale status --json` output (Self + Peer map) into a flat,
+/// sorted peer list. Pure/testable separately from the subprocess spawn.
+fn parse_tailscale_status(json: &serde_json::Value) -> Vec<TailscalePeer> {
+    let mut peers = Vec::new();
+    if let Some(self_node) = json.get("Self") {
+        peers.extend(extract_tailscale_peer(self_node, true));
+    }
+    if let Some(peer_map) = json.get("Peer").and_then(|p| p.as_object()) {
+        for v in peer_map.values() {
+            peers.extend(extract_tailscale_peer(v, false));
+        }
+    }
+    peers.sort_by(|a, b| a.hostname.cmp(&b.hostname));
+    peers
+}
+
+#[tauri::command]
+pub async fn network_tailscale_peers() -> Result<Vec<TailscalePeer>, NetworkError> {
+    let binary = find_tailscale_binary()
+        .ok_or_else(|| NetworkError::Io("Tailscale CLI not found".to_string()))?;
+    let output = tokio::process::Command::new(&binary)
+        .args(["status", "--json"])
+        .output()
+        .await
+        .map_err(|e| NetworkError::Io(e.to_string()))?;
+    if !output.status.success() {
+        return Err(NetworkError::Io("`tailscale status` failed — is Tailscale running and logged in?".to_string()));
+    }
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|e| NetworkError::Io(format!("failed to parse tailscale status: {e}")))?;
+    Ok(parse_tailscale_status(&json))
 }
 
 #[tauri::command]
@@ -4226,6 +4374,152 @@ mod tests {
 
         let result = probe_rtsp(addr.ip(), addr.port(), Duration::from_millis(500)).await;
         assert_eq!(result.as_deref(), Some("Public: OPTIONS, DESCRIBE, SETUP, PLAY"));
+    }
+
+    #[tokio::test]
+    async fn test_probe_jellyfin_extracts_server_name() {
+        // Real response body captured from a Jellyfin instance on this LAN.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let mut buf = [0u8; 512];
+                let _ = stream.read(&mut buf).await;
+                let body = r#"{"LocalAddress":"http://192.168.0.4:8096","ServerName":"nl.jellyfin","Version":"10.11.11","ProductName":"Jellyfin Server","OperatingSystem":"","Id":"3ce59f3011384575941b9f52868bd68f","StartupWizardCompleted":true}"#;
+                let response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}", body.len(), body);
+                let _ = stream.write_all(response.as_bytes()).await;
+            }
+        });
+
+        let result = probe_jellyfin(addr.ip(), addr.port(), Duration::from_millis(500)).await;
+        assert_eq!(result.as_deref(), Some("Jellyfin: nl.jellyfin"));
+    }
+
+    #[tokio::test]
+    async fn test_probe_plex_falls_back_to_generic_label_without_friendly_name() {
+        // Real response body captured from a Plex instance on this LAN —
+        // note the absence of a friendlyName attribute, which many
+        // real-world installs don't expose unauthenticated.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let mut buf = [0u8; 512];
+                let _ = stream.read(&mut buf).await;
+                let body = r#"<?xml version="1.0" encoding="UTF-8"?><MediaContainer size="0" apiVersion="1.1.1" claimed="1" machineIdentifier="c71ee46d7d03a1d22474bacc2f03d2f599828e48" version="1.42.2.10156-f737b826c"></MediaContainer>"#;
+                let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/xml\r\nContent-Length: {}\r\n\r\n{}", body.len(), body);
+                let _ = stream.write_all(response.as_bytes()).await;
+            }
+        });
+
+        let result = probe_plex(addr.ip(), addr.port(), Duration::from_millis(500)).await;
+        assert_eq!(result.as_deref(), Some("Plex Media Server"));
+    }
+
+    #[tokio::test]
+    async fn test_probe_plex_extracts_friendly_name_when_present() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let mut buf = [0u8; 512];
+                let _ = stream.read(&mut buf).await;
+                let body = r#"<MediaContainer friendlyName="Living Room Plex" machineIdentifier="abc123"></MediaContainer>"#;
+                let response = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}", body.len(), body);
+                let _ = stream.write_all(response.as_bytes()).await;
+            }
+        });
+
+        let result = probe_plex(addr.ip(), addr.port(), Duration::from_millis(500)).await;
+        assert_eq!(result.as_deref(), Some("Plex: Living Room Plex"));
+    }
+
+    #[tokio::test]
+    async fn test_probe_plex_rejects_non_plex_response() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let mut buf = [0u8; 512];
+                let _ = stream.read(&mut buf).await;
+                let body = "<html><body>Not Plex</body></html>";
+                let response = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}", body.len(), body);
+                let _ = stream.write_all(response.as_bytes()).await;
+            }
+        });
+
+        let result = probe_plex(addr.ip(), addr.port(), Duration::from_millis(500)).await;
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_parse_tailscale_status_extracts_self_and_peers() {
+        // Trimmed real `tailscale status --json` shape captured on this
+        // machine's tailnet.
+        let json: serde_json::Value = serde_json::from_str(r#"{
+            "Self": {
+                "HostName": "Abhishek's MacBook Pro (4)",
+                "DNSName": "abhisheks-macbook-pro-4.tailc76fbd.ts.net.",
+                "OS": "macOS",
+                "TailscaleIPs": ["100.108.219.100", "fd7a:115c:a1e0::b232:db64"],
+                "Online": true
+            },
+            "Peer": {
+                "peerkey1": {
+                    "HostName": "newserver",
+                    "DNSName": "newserver.tailc76fbd.ts.net.",
+                    "OS": "linux",
+                    "TailscaleIPs": ["100.100.111.101", "fd7a:115c:a1e0::bb32:6f65"],
+                    "Online": true
+                },
+                "peerkey2": {
+                    "HostName": "Redmi Pad Pro 5G",
+                    "DNSName": "redmi-pad-pro-5g.tailc76fbd.ts.net.",
+                    "OS": "android",
+                    "TailscaleIPs": ["100.79.163.121", "fd7a:115c:a1e0::a301:a37a"],
+                    "Online": false
+                }
+            }
+        }"#).unwrap();
+
+        let peers = parse_tailscale_status(&json);
+        assert_eq!(peers.len(), 3);
+
+        let self_peer = peers.iter().find(|p| p.is_self).unwrap();
+        assert_eq!(self_peer.ip, "100.108.219.100");
+        assert_eq!(self_peer.hostname, "abhisheks-macbook-pro-4.tailc76fbd.ts.net");
+        assert_eq!(self_peer.os.as_deref(), Some("macOS"));
+        assert!(self_peer.online);
+
+        let newserver = peers.iter().find(|p| p.hostname.starts_with("newserver")).unwrap();
+        assert_eq!(newserver.ip, "100.100.111.101");
+        assert!(newserver.online);
+        assert!(!newserver.is_self);
+
+        let redmi = peers.iter().find(|p| p.hostname.contains("redmi")).unwrap();
+        assert!(!redmi.online);
+    }
+
+    #[test]
+    fn test_parse_tailscale_status_skips_peers_with_no_ipv4() {
+        // IPv6-only entries (or malformed ones) shouldn't produce a peer
+        // with an empty/garbage IP.
+        let json: serde_json::Value = serde_json::from_str(r#"{
+            "Peer": {
+                "k1": { "HostName": "v6only", "TailscaleIPs": ["fd7a:115c:a1e0::1"] }
+            }
+        }"#).unwrap();
+        assert_eq!(parse_tailscale_status(&json).len(), 0);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn debug_live_tailscale_peers() {
+        let peers = network_tailscale_peers().await.unwrap();
+        for p in &peers {
+            eprintln!("{} {} os={:?} online={} self={}", p.ip, p.hostname, p.os, p.online, p.is_self);
+        }
+        assert!(!peers.is_empty());
     }
 
     #[test]

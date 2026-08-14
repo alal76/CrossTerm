@@ -386,6 +386,7 @@ pub fn run() {
             ftp::ftp_rename,
             // Network
             network::network_local_subnets,
+            network::network_tailscale_peers,
             network::network_scan_start,
             network::network_scan_results,
             network::network_scan_save_as_sessions,
