@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildRdpConfig, buildVncConfig } from "@/utils/sessionConfig";
+import { buildRdpConfig, buildVncConfig, buildWsTermConfig, buildRedfishConfig, buildWebDavConfig, buildMqttConfig } from "@/utils/sessionConfig";
 import type { Session } from "@/types";
 import { SessionType } from "@/types";
 
@@ -79,5 +79,86 @@ describe("buildVncConfig", () => {
     const config = buildVncConfig(baseSession());
     expect(config.vnc_auth).toBe(true);
     expect(config.vencrypt).toBe(false);
+  });
+});
+
+describe("buildWsTermConfig", () => {
+  it("builds a ws:// URL from host/port by default", () => {
+    const config = buildWsTermConfig(baseSession({ connection: { host: "192.168.0.5", port: 7681 } }));
+    expect(config.url).toBe("ws://192.168.0.5:7681");
+    expect(config.verify_tls).toBe(false);
+  });
+
+  it("uses wss:// when protocolOptions.secure is set", () => {
+    const config = buildWsTermConfig(baseSession({ connection: { host: "192.168.0.5", port: 7681, protocolOptions: { secure: true } } }));
+    expect(config.url).toBe("wss://192.168.0.5:7681");
+  });
+
+  it("prefers an explicit protocolOptions.url over the derived one", () => {
+    const config = buildWsTermConfig(baseSession({ connection: { host: "192.168.0.5", port: 7681, protocolOptions: { url: "wss://example.com/term" } } }));
+    expect(config.url).toBe("wss://example.com/term");
+  });
+
+  it("pulls the bearer token from protocolOptions", () => {
+    const config = buildWsTermConfig(baseSession({ connection: { host: "h", port: 1, protocolOptions: { token: "abc123" } } }));
+    expect(config.token).toBe("abc123");
+  });
+});
+
+describe("buildRedfishConfig", () => {
+  it("maps host/port and defaults use_tls true, verify_tls false", () => {
+    const config = buildRedfishConfig(baseSession({ connection: { host: "192.168.0.99", port: 443 } }));
+    expect(config.host).toBe("192.168.0.99");
+    expect(config.port).toBe(443);
+    expect(config.use_tls).toBe(true);
+    expect(config.verify_tls).toBe(false);
+  });
+
+  it("defaults username/password to empty strings without protocolOptions", () => {
+    const config = buildRedfishConfig(baseSession());
+    expect(config.username).toBe("");
+    expect(config.password).toBe("");
+  });
+});
+
+describe("buildWebDavConfig", () => {
+  it("builds an http:// URL from host/port by default", () => {
+    const config = buildWebDavConfig(baseSession({ connection: { host: "192.168.0.8", port: 80 } }));
+    expect(config.url).toBe("http://192.168.0.8:80");
+  });
+
+  it("uses https:// when protocolOptions.secure is set", () => {
+    const config = buildWebDavConfig(baseSession({ connection: { host: "192.168.0.8", port: 443, protocolOptions: { secure: true } } }));
+    expect(config.url).toBe("https://192.168.0.8:443");
+  });
+
+  it("prefers an explicit protocolOptions.url over the derived one", () => {
+    const config = buildWebDavConfig(baseSession({ connection: { host: "h", port: 1, protocolOptions: { url: "https://dav.example.com/remote.php/dav" } } }));
+    expect(config.url).toBe("https://dav.example.com/remote.php/dav");
+  });
+});
+
+describe("buildMqttConfig", () => {
+  it("maps host/port and defaults keep_alive/clean_session", () => {
+    const config = buildMqttConfig(baseSession({ connection: { host: "192.168.0.8", port: 1883 } }));
+    expect(config.host).toBe("192.168.0.8");
+    expect(config.port).toBe(1883);
+    expect(config.keep_alive_secs).toBe(30);
+    expect(config.clean_session).toBe(true);
+  });
+
+  it("infers use_tls from the conventional TLS port 8883", () => {
+    expect(buildMqttConfig(baseSession({ connection: { host: "h", port: 8883 } })).use_tls).toBe(true);
+    expect(buildMqttConfig(baseSession({ connection: { host: "h", port: 1883 } })).use_tls).toBe(false);
+  });
+
+  it("generates a unique client_id when none is provided, else uses protocolOptions.client_id", () => {
+    const generated1 = buildMqttConfig(baseSession({ connection: { host: "h", port: 1883 } }));
+    const generated2 = buildMqttConfig(baseSession({ connection: { host: "h", port: 1883 } }));
+    expect(generated1.client_id).toMatch(/^crossterm-/);
+    expect(generated1.client_id).not.toBe(generated2.client_id);
+
+    const explicit = buildMqttConfig(baseSession({ connection: { host: "h", port: 1883, protocolOptions: { client_id: "my-client" } } }));
+    expect(explicit.client_id).toBe("my-client");
   });
 });

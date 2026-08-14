@@ -36,6 +36,26 @@ vi.mock("@/components/Telnet/TelnetTerminal", () => ({
 vi.mock("@/components/Serial/SerialTerminal", () => ({
   default: () => <div data-testid="serial-terminal">SerialTerminal Mock</div>,
 }));
+vi.mock("@/components/Terminal/WebSocketTerminalTab", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`wsterm-tab-${sessionId}`}>WebSocketTerminalTab Mock</div>
+  ),
+}));
+vi.mock("@/components/Redfish/RedfishExplorer", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`redfish-explorer-${sessionId}`}>RedfishExplorer Mock</div>
+  ),
+}));
+vi.mock("@/components/WebDav/WebDavBrowser", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`webdav-browser-${sessionId}`}>WebDavBrowser Mock</div>
+  ),
+}));
+vi.mock("@/components/Mqtt/MqttClient", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`mqtt-client-${sessionId}`}>MqttClient Mock</div>
+  ),
+}));
 
 function baseSession(overrides: Partial<Session> = {}): Session {
   return {
@@ -121,5 +141,45 @@ describe("SplitPaneContainer session type routing", () => {
     render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
 
     expect(screen.getByTestId(`terminal-tab-${tab.sessionId}`)).toBeInTheDocument();
+  });
+
+  it("routes a WebSocket Terminal leaf pane to WebSocketTerminalTab", () => {
+    const session = baseSession({ type: SessionType.WebSocketTerminal, connection: { host: "192.168.0.11", port: 7681 } });
+    const tab = baseTab({ sessionType: SessionType.WebSocketTerminal });
+    useSessionStore.setState({ sessions: [session], openTabs: [tab] });
+
+    render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
+
+    expect(screen.getByTestId(`wsterm-tab-${tab.sessionId}`)).toBeInTheDocument();
+  });
+
+  it("routes a Redfish leaf pane to RedfishExplorer", () => {
+    const session = baseSession({ type: SessionType.Redfish, connection: { host: "192.168.0.11", port: 443 } });
+    const tab = baseTab({ sessionType: SessionType.Redfish });
+    useSessionStore.setState({ sessions: [session], openTabs: [tab] });
+
+    render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
+
+    expect(screen.getByTestId(`redfish-explorer-${tab.sessionId}`)).toBeInTheDocument();
+  });
+
+  it("routes a WebDAV leaf pane to WebDavBrowser", () => {
+    const session = baseSession({ type: SessionType.WebDav, connection: { host: "192.168.0.11", port: 80 } });
+    const tab = baseTab({ sessionType: SessionType.WebDav });
+    useSessionStore.setState({ sessions: [session], openTabs: [tab] });
+
+    render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
+
+    expect(screen.getByTestId(`webdav-browser-${tab.sessionId}`)).toBeInTheDocument();
+  });
+
+  it("routes an MQTT leaf pane to MqttClient", () => {
+    const session = baseSession({ type: SessionType.MqttClient, connection: { host: "192.168.0.11", port: 1883 } });
+    const tab = baseTab({ sessionType: SessionType.MqttClient });
+    useSessionStore.setState({ sessions: [session], openTabs: [tab] });
+
+    render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
+
+    expect(screen.getByTestId(`mqtt-client-${tab.sessionId}`)).toBeInTheDocument();
   });
 });

@@ -6,11 +6,16 @@ import { SplitDirection, SessionType } from "@/types";
 import type { SplitPane, SplitPaneLeaf, SplitPaneContainer as SplitPaneContainerType, Session } from "@/types";
 import TerminalTab from "@/components/Terminal/TerminalTab";
 import SshTerminalTab from "@/components/Terminal/SshTerminalTab";
-import RdpViewer from "@/components/RdpViewer/RdpViewer";
-import VncViewer from "@/components/VncViewer/VncViewer";
 import TelnetTerminal from "@/components/Telnet/TelnetTerminal";
 import SerialTerminal from "@/components/Serial/SerialTerminal";
-import { buildRdpConfig, buildVncConfig } from "@/utils/sessionConfig";
+import {
+  RdpTabPane,
+  VncTabPane,
+  WsTermTabPane,
+  RedfishTabPane,
+  WebDavTabPane,
+  MqttTabPane,
+} from "@/components/Terminal/ProtocolTabPanes";
 
 // ── Resize Handle ──
 
@@ -89,16 +94,28 @@ function renderPaneContent(tab: { sessionId: string; sessionType: SessionType },
     );
   }
   if (tab.sessionType === SessionType.RDP && session) {
-    return <RdpViewer sessionId={tab.sessionId} config={buildRdpConfig(session)} />;
+    return <RdpTabPane sessionId={tab.sessionId} session={session} />;
   }
   if (tab.sessionType === SessionType.VNC && session) {
-    return <VncViewer sessionId={tab.sessionId} config={buildVncConfig(session)} />;
+    return <VncTabPane sessionId={tab.sessionId} session={session} />;
   }
   if (tab.sessionType === SessionType.Telnet) {
     return <TelnetTerminal />;
   }
   if (tab.sessionType === SessionType.Serial) {
     return <SerialTerminal />;
+  }
+  if (tab.sessionType === SessionType.WebSocketTerminal && session) {
+    return <WsTermTabPane sessionId={tab.sessionId} session={session} />;
+  }
+  if (tab.sessionType === SessionType.Redfish && session) {
+    return <RedfishTabPane sessionId={tab.sessionId} session={session} />;
+  }
+  if (tab.sessionType === SessionType.WebDav && session) {
+    return <WebDavTabPane sessionId={tab.sessionId} session={session} />;
+  }
+  if (tab.sessionType === SessionType.MqttClient && session) {
+    return <MqttTabPane sessionId={tab.sessionId} session={session} />;
   }
   return <TerminalTab sessionId={tab.sessionId} isActive={isActive} />;
 }

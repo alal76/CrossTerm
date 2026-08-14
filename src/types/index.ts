@@ -1197,3 +1197,86 @@ export interface MultiSelectRange {
   anchorId: string;
   cursorId: string;
 }
+
+// --- WebSocket Terminal (ttyd/wetty/gotty) ---
+
+export interface WsTermConfig {
+  url: string;
+  token?: string;
+  verify_tls: boolean;
+}
+
+export interface WsTermData {
+  session_id: string;
+  data: string;
+}
+
+export interface WsTermDisconnected {
+  session_id: string;
+  reason: string;
+}
+
+// --- Redfish (DMTF BMC REST API) ---
+
+export interface RedfishConfig {
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+  use_tls: boolean;
+  verify_tls: boolean;
+}
+
+export interface RedfishSystem {
+  id: string;
+  name: string;
+  manufacturer?: string;
+  model?: string;
+  serial?: string;
+  power_state?: string;
+}
+
+export type RedfishPowerAction = "On" | "ForceOff" | "GracefulShutdown" | "GracefulRestart" | "ForceRestart" | "Nmi";
+
+// --- WebDAV ---
+
+export interface WebDavConfig {
+  url: string;
+  username?: string;
+  password?: string;
+  verify_tls: boolean;
+}
+
+export type WebDavEntryType = "file" | "collection";
+
+export interface WebDavEntry {
+  href: string;
+  name: string;
+  entry_type: WebDavEntryType;
+  content_length?: number;
+  last_modified?: string;
+  content_type?: string;
+}
+
+// --- MQTT ---
+
+export type MqttQos = "AtMostOnce" | "AtLeastOnce" | "ExactlyOnce";
+
+export interface MqttConfig {
+  host: string;
+  port: number;
+  client_id: string;
+  username?: string;
+  password?: string;
+  keep_alive_secs: number;
+  use_tls: boolean;
+  clean_session: boolean;
+}
+
+export interface MqttMessage {
+  session_id: string;
+  topic: string;
+  payload: string;
+  qos: number;
+  retain: boolean;
+}

@@ -44,6 +44,12 @@ pub struct WsTermData {
     pub data: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WsTermDisconnected {
+    pub session_id: String,
+    pub reason: String,
+}
+
 pub struct WsTermState {
     sessions: Mutex<HashMap<String, WsTermSession>>,
     // Write-half senders keyed by session id
@@ -109,18 +115,37 @@ pub async fn wsterm_connect(
     let app_clone = app.clone();
     let id_clone2 = id.clone();
     tokio::spawn(async move {
-        while let Some(Ok(msg)) = read.next().await {
-            let text = match msg {
-                Message::Text(t) => t.to_string(),
-                Message::Binary(b) => String::from_utf8_lossy(&b).into_owned(),
-                Message::Close(_) => break,
-                _ => continue,
-            };
-            let _ = app_clone.emit("wsterm:data", WsTermData {
-                session_id: id_clone2.clone(),
-                data: text,
-            });
+        let mut close_reason = "connection closed".to_string();
+        loop {
+            match read.next().await {
+                Some(Ok(msg)) => {
+                    let text = match msg {
+                        Message::Text(t) => t.to_string(),
+                        Message::Binary(b) => String::from_utf8_lossy(&b).into_owned(),
+                        Message::Close(frame) => {
+                            if let Some(f) = frame {
+                                close_reason = format!("{}: {}", f.code, f.reason);
+                            }
+                            break;
+                        }
+                        _ => continue,
+                    };
+                    let _ = app_clone.emit("wsterm:data", WsTermData {
+                        session_id: id_clone2.clone(),
+                        data: text,
+                    });
+                }
+                Some(Err(e)) => {
+                    close_reason = e.to_string();
+                    break;
+                }
+                None => break,
+            }
         }
+        let _ = app_clone.emit("wsterm:disconnected", WsTermDisconnected {
+            session_id: id_clone2.clone(),
+            reason: close_reason,
+        });
     });
 
     let session = WsTermSession { id: id.clone(), url: url_str };

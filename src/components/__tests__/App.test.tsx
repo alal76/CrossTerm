@@ -54,6 +54,29 @@ vi.mock("@/components/Serial/SerialTerminal", () => ({
   default: () => <div data-testid="serial-terminal">SerialTerminal Mock</div>,
 }));
 
+// Phase 1: websocket_term/redfish/webdav/mqtt viewers — mocked the same way,
+// via the ProtocolTabPanes wrappers they're routed through.
+vi.mock("@/components/Terminal/WebSocketTerminalTab", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`wsterm-tab-${sessionId}`}>WebSocketTerminalTab Mock</div>
+  ),
+}));
+vi.mock("@/components/Redfish/RedfishExplorer", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`redfish-explorer-${sessionId}`}>RedfishExplorer Mock</div>
+  ),
+}));
+vi.mock("@/components/WebDav/WebDavBrowser", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`webdav-browser-${sessionId}`}>WebDavBrowser Mock</div>
+  ),
+}));
+vi.mock("@/components/Mqtt/MqttClient", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`mqtt-client-${sessionId}`}>MqttClient Mock</div>
+  ),
+}));
+
 // Mock components that use localStorage directly (tested separately)
 vi.mock("@/components/Help/WhatsNewPanel", () => ({
   default: () => null,
@@ -285,6 +308,50 @@ describe("App", () => {
       render(<App />);
 
       expect(screen.getByTestId(`terminal-tab-${tab.sessionId}`)).toBeInTheDocument();
+    });
+
+    it("routes a WebSocket Terminal tab to WebSocketTerminalTab, not the generic local-shell fallback", () => {
+      const session = baseSession({ type: SessionType.WebSocketTerminal, connection: { host: "192.168.0.11", port: 7681 } });
+      const tab = baseTab({ sessionType: SessionType.WebSocketTerminal });
+      useSessionStore.setState({ sessions: [session], openTabs: [tab], activeTabId: tab.id });
+
+      render(<App />);
+
+      expect(screen.getByTestId(`wsterm-tab-${tab.sessionId}`)).toBeInTheDocument();
+      expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
+    });
+
+    it("routes a Redfish tab to RedfishExplorer, not the generic local-shell fallback", () => {
+      const session = baseSession({ type: SessionType.Redfish, connection: { host: "192.168.0.11", port: 443 } });
+      const tab = baseTab({ sessionType: SessionType.Redfish });
+      useSessionStore.setState({ sessions: [session], openTabs: [tab], activeTabId: tab.id });
+
+      render(<App />);
+
+      expect(screen.getByTestId(`redfish-explorer-${tab.sessionId}`)).toBeInTheDocument();
+      expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
+    });
+
+    it("routes a WebDAV tab to WebDavBrowser, not the generic local-shell fallback", () => {
+      const session = baseSession({ type: SessionType.WebDav, connection: { host: "192.168.0.11", port: 80 } });
+      const tab = baseTab({ sessionType: SessionType.WebDav });
+      useSessionStore.setState({ sessions: [session], openTabs: [tab], activeTabId: tab.id });
+
+      render(<App />);
+
+      expect(screen.getByTestId(`webdav-browser-${tab.sessionId}`)).toBeInTheDocument();
+      expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
+    });
+
+    it("routes an MQTT tab to MqttClient, not the generic local-shell fallback", () => {
+      const session = baseSession({ type: SessionType.MqttClient, connection: { host: "192.168.0.11", port: 1883 } });
+      const tab = baseTab({ sessionType: SessionType.MqttClient });
+      useSessionStore.setState({ sessions: [session], openTabs: [tab], activeTabId: tab.id });
+
+      render(<App />);
+
+      expect(screen.getByTestId(`mqtt-client-${tab.sessionId}`)).toBeInTheDocument();
+      expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
     });
   });
 });

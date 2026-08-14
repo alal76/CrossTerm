@@ -45,11 +45,16 @@ import type { Session } from "@/types";
 import { useBreakpoint } from "@/hooks/useBreakpoint";
 import TerminalTab from "@/components/Terminal/TerminalTab";
 import SshTerminalTab from "@/components/Terminal/SshTerminalTab";
-import RdpViewer from "@/components/RdpViewer/RdpViewer";
-import VncViewer from "@/components/VncViewer/VncViewer";
 import TelnetTerminal from "@/components/Telnet/TelnetTerminal";
 import SerialTerminal from "@/components/Serial/SerialTerminal";
-import { buildRdpConfig, buildVncConfig } from "@/utils/sessionConfig";
+import {
+  RdpTabPane,
+  VncTabPane,
+  WsTermTabPane,
+  RedfishTabPane,
+  WebDavTabPane,
+  MqttTabPane,
+} from "@/components/Terminal/ProtocolTabPanes";
 import SplitPaneContainer from "@/components/Terminal/SplitPaneContainer";
 import CommandPalette from "@/components/Shared/CommandPalette";
 import QuickConnect from "@/components/Shared/QuickConnect";
@@ -1144,7 +1149,7 @@ function SessionCanvas() {
         if (tab.sessionType === SessionType.RDP && session) {
           return (
             <div key={tab.id} className={clsx("absolute inset-0", isActive ? "z-10" : "z-0 hidden")}>
-              <RdpViewer sessionId={tab.sessionId} config={buildRdpConfig(session)} />
+              <RdpTabPane sessionId={tab.sessionId} session={session} />
             </div>
           );
         }
@@ -1152,7 +1157,7 @@ function SessionCanvas() {
         if (tab.sessionType === SessionType.VNC && session) {
           return (
             <div key={tab.id} className={clsx("absolute inset-0", isActive ? "z-10" : "z-0 hidden")}>
-              <VncViewer sessionId={tab.sessionId} config={buildVncConfig(session)} />
+              <VncTabPane sessionId={tab.sessionId} session={session} />
             </div>
           );
         }
@@ -1169,6 +1174,38 @@ function SessionCanvas() {
           return (
             <div key={tab.id} className={clsx("absolute inset-0", isActive ? "z-10" : "z-0 hidden")}>
               <SerialTerminal />
+            </div>
+          );
+        }
+
+        if (tab.sessionType === SessionType.WebSocketTerminal && session) {
+          return (
+            <div key={tab.id} className={clsx("absolute inset-0", isActive ? "z-10" : "z-0 hidden")}>
+              <WsTermTabPane sessionId={tab.sessionId} session={session} />
+            </div>
+          );
+        }
+
+        if (tab.sessionType === SessionType.Redfish && session) {
+          return (
+            <div key={tab.id} className={clsx("absolute inset-0 overflow-auto", isActive ? "z-10" : "z-0 hidden")}>
+              <RedfishTabPane sessionId={tab.sessionId} session={session} />
+            </div>
+          );
+        }
+
+        if (tab.sessionType === SessionType.WebDav && session) {
+          return (
+            <div key={tab.id} className={clsx("absolute inset-0 overflow-auto", isActive ? "z-10" : "z-0 hidden")}>
+              <WebDavTabPane sessionId={tab.sessionId} session={session} />
+            </div>
+          );
+        }
+
+        if (tab.sessionType === SessionType.MqttClient && session) {
+          return (
+            <div key={tab.id} className={clsx("absolute inset-0 overflow-hidden", isActive ? "z-10" : "z-0 hidden")}>
+              <MqttTabPane sessionId={tab.sessionId} session={session} />
             </div>
           );
         }
