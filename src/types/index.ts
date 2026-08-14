@@ -1348,3 +1348,23 @@ export interface MoshOutputEvent {
 export interface MoshExitEvent {
   id: string;
 }
+
+// --- WinRM ---
+
+export type WinRmAuth = "basic" | "ntlm" | "kerberos";
+
+export interface WinRmConfig {
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+  use_tls: boolean;
+  auth: WinRmAuth;
+  verify_tls: boolean;
+}
+
+export interface WinRmCommandResult {
+  stdout: string;
+  stderr: string;
+  exit_code: number;
+}

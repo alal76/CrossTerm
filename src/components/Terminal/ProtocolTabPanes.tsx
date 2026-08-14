@@ -19,6 +19,7 @@ import MqttClient from "@/components/Mqtt/MqttClient";
 import SmbBrowser from "@/components/Smb/SmbBrowser";
 import NetconfConsole from "@/components/Netconf/NetconfConsole";
 import MoshTerminalTab from "@/components/Mosh/MoshTerminalTab";
+import WinRmConsole from "@/components/WinRm/WinRmConsole";
 import {
   buildRdpConfig,
   buildVncConfig,
@@ -29,6 +30,7 @@ import {
   buildSmbConfig,
   buildNetconfConfig,
   buildMoshConfig,
+  buildWinRmConfig,
 } from "@/utils/sessionConfig";
 import type { Session } from "@/types";
 
@@ -80,4 +82,9 @@ export function NetconfTabPane({ sessionId, session }: PaneProps) {
 export function MoshTabPane({ sessionId, session }: PaneProps) {
   const config = useMemo(() => buildMoshConfig(session), [session]);
   return <MoshTerminalTab sessionId={sessionId} config={config} />;
+}
+
+export function WinRmTabPane({ sessionId, session }: PaneProps) {
+  const config = useMemo(() => buildWinRmConfig(session), [session]);
+  return <WinRmConsole sessionId={sessionId} config={config} />;
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildRdpConfig, buildVncConfig, buildWsTermConfig, buildRedfishConfig, buildWebDavConfig, buildMqttConfig, buildSmbConfig, buildNetconfConfig, buildMoshConfig } from "@/utils/sessionConfig";
+import { buildRdpConfig, buildVncConfig, buildWsTermConfig, buildRedfishConfig, buildWebDavConfig, buildMqttConfig, buildSmbConfig, buildNetconfConfig, buildMoshConfig, buildWinRmConfig } from "@/utils/sessionConfig";
 import type { Session } from "@/types";
 import { SessionType } from "@/types";
 
@@ -238,5 +238,31 @@ describe("buildMoshConfig", () => {
     expect(config.username).toBe("");
     expect(config.identity_file).toBeUndefined();
     expect(config.udp_port_range).toBeUndefined();
+  });
+});
+
+describe("buildWinRmConfig", () => {
+  it("maps host/port/credentials and infers use_tls from the conventional TLS port 5986", () => {
+    const config = buildWinRmConfig(
+      baseSession({ connection: { host: "10.0.0.5", port: 5986, protocolOptions: { username: "Administrator", password: "hunter2" } } })
+    );
+    expect(config.host).toBe("10.0.0.5");
+    expect(config.port).toBe(5986);
+    expect(config.username).toBe("Administrator");
+    expect(config.password).toBe("hunter2");
+    expect(config.use_tls).toBe(true);
+  });
+
+  it("defaults auth to ntlm and use_tls to false on the plaintext port", () => {
+    const config = buildWinRmConfig(baseSession({ connection: { host: "10.0.0.5", port: 5985 } }));
+    expect(config.auth).toBe("ntlm");
+    expect(config.use_tls).toBe(false);
+    expect(config.username).toBe("");
+    expect(config.password).toBe("");
+  });
+
+  it("honors an explicit auth override from protocolOptions", () => {
+    const config = buildWinRmConfig(baseSession({ connection: { host: "10.0.0.5", port: 5985, protocolOptions: { auth: "basic" } } }));
+    expect(config.auth).toBe("basic");
   });
 });

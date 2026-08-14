@@ -91,6 +91,11 @@ vi.mock("@/components/Mosh/MoshTerminalTab", () => ({
     <div data-testid={`mosh-terminal-tab-${sessionId}`}>MoshTerminalTab Mock</div>
   ),
 }));
+vi.mock("@/components/WinRm/WinRmConsole", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`winrm-console-${sessionId}`}>WinRmConsole Mock</div>
+  ),
+}));
 
 // Mock components that use localStorage directly (tested separately)
 vi.mock("@/components/Help/WhatsNewPanel", () => ({
@@ -399,6 +404,17 @@ describe("App", () => {
       render(<App />);
 
       expect(screen.getByTestId(`mosh-terminal-tab-${tab.sessionId}`)).toBeInTheDocument();
+      expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
+    });
+
+    it("routes a WinRM tab to WinRmConsole, not the generic local-shell fallback", () => {
+      const session = baseSession({ type: SessionType.WinRM, connection: { host: "10.0.0.5", port: 5985 } });
+      const tab = baseTab({ sessionType: SessionType.WinRM });
+      useSessionStore.setState({ sessions: [session], openTabs: [tab], activeTabId: tab.id });
+
+      render(<App />);
+
+      expect(screen.getByTestId(`winrm-console-${tab.sessionId}`)).toBeInTheDocument();
       expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
     });
   });

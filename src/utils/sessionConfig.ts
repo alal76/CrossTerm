@@ -8,7 +8,7 @@
 // specific fields yet — domain, NLA, codec, etc. — so those fall back to
 // sensible defaults here until the editor grows per-type fields).
 
-import type { Session, RdpConfig, VncConfig, WsTermConfig, RedfishConfig, WebDavConfig, MqttConfig, SmbConfig, NetconfConfig, MoshConfig } from '@/types';
+import type { Session, RdpConfig, VncConfig, WsTermConfig, RedfishConfig, WebDavConfig, MqttConfig, SmbConfig, NetconfConfig, MoshConfig, WinRmConfig, WinRmAuth } from '@/types';
 
 export function buildRdpConfig(session: Session): RdpConfig {
   const opts = session.connection.protocolOptions;
@@ -130,5 +130,18 @@ export function buildMoshConfig(session: Session): MoshConfig {
     identity_file: opts?.['identity_file'] as string | undefined,
     udp_port_range: opts?.['udp_port_range'] as string | undefined,
     ssh_options: opts?.['ssh_options'] as string | undefined,
+  };
+}
+
+export function buildWinRmConfig(session: Session): WinRmConfig {
+  const opts = session.connection.protocolOptions;
+  return {
+    host: session.connection.host,
+    port: session.connection.port,
+    username: (opts?.['username'] as string) ?? '',
+    password: (opts?.['password'] as string) ?? '',
+    use_tls: session.connection.port === 5986,
+    auth: (opts?.['auth'] as WinRmAuth) ?? 'ntlm',
+    verify_tls: false,
   };
 }

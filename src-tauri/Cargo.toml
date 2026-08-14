@@ -83,6 +83,10 @@ ironrdp = { version = "0.14", features = ["connector", "session", "graphics", "p
 ironrdp-blocking = "0.8"
 rustls = { version = "0.23", default-features = false, features = ["ring", "tls12", "std"] }
 
+# WinRM (NTLM auth) — already pulled in transitively via ironrdp-connector's
+# NLA support; declared directly here so winrm can use its client NTLM API.
+sspi = "0.18"
+
 # OS Credential Store
 keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
 
