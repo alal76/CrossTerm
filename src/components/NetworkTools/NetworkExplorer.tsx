@@ -33,8 +33,18 @@ import {
   Radio,
   Info,
   Pencil,
+  Router,
+  Camera,
+  Printer,
+  HardDrive,
+  Box,
+  Smartphone,
+  Laptop,
+  Cast,
+  HelpCircle,
+  Waypoints,
 } from 'lucide-react';
-import type { ExploreResult, ExploreProgress, ExploreHostFound, ExploreMdnsUpdate, MdnsRecord, ServiceFilter, Session } from '@/types';
+import type { ExploreResult, ExploreProgress, ExploreHostFound, ExploreMdnsUpdate, MdnsRecord, ServiceFilter, Session, TailscalePeer } from '@/types';
 import { SessionType } from '@/types';
 import { useSessionStore } from '@/stores/sessionStore';
 import { useToast } from '@/components/Shared/Toast';
@@ -156,7 +166,7 @@ const SESSION_TYPE_MAP: Record<string, SessionType> = {
   websocket_terminal: SessionType.WebSocketTerminal,
 };
 
-type SortKey = 'ip' | 'hostname' | 'mac' | 'vendor' | 'os' | 'ports' | 'response' | 'session';
+type SortKey = 'ip' | 'hostname' | 'name' | 'type' | 'mac' | 'vendor' | 'os' | 'ports' | 'response' | 'session';
 
 /// String compare that always sorts missing values last, regardless of
 /// sort direction — `dir` only flips the ordering among present values.
@@ -209,6 +219,83 @@ function deriveMdnsEvidence(records: MdnsRecord[] | undefined): string[] {
   return notes;
 }
 
+// ── Device type classification ──────────────────────────────────────────
+// Best-effort, derived entirely from signals already on the row (open
+// ports, mDNS service types, hostname/vendor/OS-guess text, and version
+// strings enrich_port already populated e.g. "Jellyfin: ..."). Not
+// authoritative — a label the user can eyeball, not a claim of certainty.
+type DeviceType = 'router' | 'camera' | 'printer' | 'nas' | 'vm' | 'smart-home' | 'phone' | 'computer' | 'media' | 'unknown';
+
+const DEVICE_TYPE_META: Record<DeviceType, { label: string; icon: typeof Router }> = {
+  router: { label: 'Router/Gateway', icon: Router },
+  camera: { label: 'Camera', icon: Camera },
+  printer: { label: 'Printer', icon: Printer },
+  nas: { label: 'NAS/Server', icon: HardDrive },
+  vm: { label: 'Virtual Machine', icon: Box },
+  'smart-home': { label: 'Smart Home', icon: Radio },
+  phone: { label: 'Phone/Tablet', icon: Smartphone },
+  computer: { label: 'Computer', icon: Laptop },
+  media: { label: 'Media Player', icon: Cast },
+  unknown: { label: 'Unknown', icon: HelpCircle },
+};
+
+function classifyDeviceType(result: ExploreResult): DeviceType {
+  const ports = new Set(result.open_ports.map((p) => p.port));
+  const mdnsTypes = result.mdns.map((m) => m.service_type.toLowerCase());
+  const versions = result.open_ports.map((p) => (p.version ?? '').toLowerCase()).join(' ');
+  const hostname = (result.hostname ?? '').toLowerCase();
+  const vendor = (result.mac_vendor ?? '').toLowerCase();
+  const osGuess = (result.os_guess ?? '').toLowerCase();
+
+  if (
+    ports.has(554) ||
+    mdnsTypes.some((t) => t.includes('onvif') || t.includes('rtsp')) ||
+    /\b(cam|camera|dcs-|ipcam)\b/.test(hostname)
+  ) {
+    return 'camera';
+  }
+  if (mdnsTypes.some((t) => t.includes('_ipp') || t.includes('_printer')) || ports.has(631) || ports.has(9100)) {
+    return 'printer';
+  }
+  // Conventional home-router address, with an admin UI or a known
+  // router-vendor OUI — not foolproof (plenty of non-routers sit at .1),
+  // but a reasonable default given no stronger signal exists.
+  const isDotOne = /\.1$/.test(result.ip);
+  const routerVendors = ['sagemcom', 'technicolor', 'arris', 'netgear', 'ubiquiti', 'mikrotik', 'compal', 'huawei', 'zyxel'];
+  if (isDotOne && (routerVendors.some((v) => vendor.includes(v)) || ports.has(80) || ports.has(443))) {
+    return 'router';
+  }
+  if (
+    mdnsTypes.some((t) => t.includes('googlecast') || t.includes('home-assistant') || t.includes('matter') || t.includes('_hap') || t.includes('esphome')) ||
+    ports.has(1883) || ports.has(8883)
+  ) {
+    return 'smart-home';
+  }
+  if (mdnsTypes.some((t) => t.includes('airplay') || t.includes('raop') || t.includes('spotify-connect'))) {
+    return 'media';
+  }
+  if (vendor.includes('proxmox') || osGuess.includes('proxmox')) {
+    return 'vm';
+  }
+  if (
+    /\bnas\b|jellyfin|plex|pi\.?hole|homeassistant/.test(hostname) ||
+    vendor.includes('synology') || vendor.includes('qnap') ||
+    versions.includes('jellyfin') || versions.includes('plex')
+  ) {
+    return 'nas';
+  }
+  if (/iphone|ipad|android|pixel|galaxy|redmi/.test(hostname) || osGuess === 'ios' || osGuess === 'android') {
+    return 'phone';
+  }
+  if (
+    /macbook|imac|-pc\b|desktop|laptop/.test(hostname) ||
+    ['windows', 'macos', 'linux', 'ubuntu', 'debian'].some((s) => osGuess.includes(s))
+  ) {
+    return 'computer';
+  }
+  return 'unknown';
+}
+
 export default function NetworkExplorer() {
   const { t } = useTranslation();
   const { addSession, openTab } = useSessionStore();
@@ -228,6 +315,7 @@ export default function NetworkExplorer() {
   const [sortBy, setSortBy] = useState<SortKey>('ip');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [saveCount, setSaveCount] = useState<number | null>(null);
+  const [tailscaleLoading, setTailscaleLoading] = useState(false);
   const [connectionHistory, setConnectionHistory] = useState<ConnectionAttempt[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [expandedIp, setExpandedIp] = useState<string | null>(null);
@@ -454,6 +542,50 @@ export default function NetworkExplorer() {
     );
   }, []);
 
+  // Tailscale peers live in a different address space (100.64.0.0/10) from
+  // whatever LAN CIDR is being scanned, so they never turn up on their own —
+  // `tailscale status` already knows exactly who they are, no probing
+  // needed. Merges by IP: an already-discovered LAN host that's also on the
+  // tailnet keeps its richer scan data, just gets tagged with Tailscale
+  // provenance rather than being duplicated as a second row.
+  const handleIncludeTailscale = useCallback(async () => {
+    setTailscaleLoading(true);
+    try {
+      const peers = await invoke<TailscalePeer[]>('network_tailscale_peers');
+      setResults((prev) => {
+        const byIp = new Map(prev.map((r) => [r.ip, r]));
+        for (const peer of peers) {
+          const note = `Tailscale: ${peer.hostname}${peer.online ? '' : ' (offline)'}${peer.is_self ? ' — this device' : ''}`;
+          const existing = byIp.get(peer.ip);
+          if (existing) {
+            byIp.set(peer.ip, {
+              ...existing,
+              hostname: existing.hostname || peer.hostname,
+              os_guess: existing.os_guess || peer.os,
+              evidence: Array.from(new Set([...existing.evidence, note])),
+            });
+          } else {
+            byIp.set(peer.ip, {
+              ip: peer.ip,
+              hostname: peer.hostname,
+              open_ports: [],
+              os_guess: peer.os,
+              response_time_ms: 0,
+              mdns: [],
+              evidence: [note],
+            });
+          }
+        }
+        return Array.from(byIp.values());
+      });
+      toast('success', `Added ${peers.length} Tailscale peer${peers.length === 1 ? '' : 's'}`);
+    } catch (e) {
+      toast('error', `Couldn't reach Tailscale: ${String(e)}`);
+    } finally {
+      setTailscaleLoading(false);
+    }
+  }, [toast]);
+
   const handleExport = useCallback(async () => {
     if (results.length === 0) return;
     try {
@@ -606,6 +738,16 @@ export default function NetworkExplorer() {
       case 'hostname':
         sorted.sort((a, b) => dir * (a.hostname ?? a.ip).localeCompare(b.hostname ?? b.ip));
         break;
+      case 'name':
+        sorted.sort((a, b) => {
+          const nameA = deviceLabels[deviceLabelKey(a)] ?? a.hostname ?? a.ip;
+          const nameB = deviceLabels[deviceLabelKey(b)] ?? b.hostname ?? b.ip;
+          return dir * nameA.localeCompare(nameB);
+        });
+        break;
+      case 'type':
+        sorted.sort((a, b) => dir * DEVICE_TYPE_META[classifyDeviceType(a)].label.localeCompare(DEVICE_TYPE_META[classifyDeviceType(b)].label));
+        break;
       case 'mac':
         sorted.sort((a, b) => compareNullable(a.mac_address, b.mac_address, dir));
         break;
@@ -628,7 +770,7 @@ export default function NetworkExplorer() {
         sorted.sort((a, b) => dir * (ipToNum(a.ip) - ipToNum(b.ip)));
     }
     return sorted;
-  }, [results, filterService, searchFilter, sortBy, sortDir]);
+  }, [results, filterService, searchFilter, sortBy, sortDir, deviceLabels, deviceLabelKey]);
 
   const serviceCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -732,6 +874,16 @@ export default function NetworkExplorer() {
                 {t('network.stop')}
               </button>
             )}
+            <button
+              data-testid="tailscale-include-btn"
+              onClick={handleIncludeTailscale}
+              disabled={tailscaleLoading}
+              title="Add your Tailscale tailnet peers — a different address space this scan can't reach on its own, identified via `tailscale status` instead of probing"
+              className="flex items-center gap-1.5 rounded-md border border-border-default px-3 py-1.5 text-sm font-medium text-text-secondary hover:text-text-primary hover:border-border-focus transition-colors shrink-0 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {tailscaleLoading ? <Loader2 size={12} className="animate-spin" /> : <Waypoints size={12} />}
+              Tailscale
+            </button>
           </div>
 
           {/* Service filter toggles */}
@@ -856,14 +1008,21 @@ export default function NetworkExplorer() {
 
           {/* Results table */}
           {filteredResults.length > 0 && (
-            <div className="overflow-auto rounded-md border border-border-default">
+            // Horizontal-only overflow: vertical scrolling bubbles up to the
+            // panel's own overflow-y-auto container, which is what sticky
+            // headers below stick relative to — a nested vertical
+            // overflow here would give the `<th>`s their own (non-scrolling)
+            // containing block instead and the sticky effect would be inert.
+            <div className="overflow-x-auto rounded-md border border-border-default">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-border-subtle bg-surface-secondary">
+                  <tr>
                     {(
                       [
                         { key: 'ip' as SortKey, label: t('network.ip') },
                         { key: 'hostname' as SortKey, label: t('network.hostname') },
+                        { key: 'name' as SortKey, label: 'Name' },
+                        { key: 'type' as SortKey, label: 'Type' },
                         { key: 'mac' as SortKey, label: 'MAC Address' },
                         { key: 'vendor' as SortKey, label: 'Vendor' },
                         { key: 'os' as SortKey, label: t('network.os') },
@@ -876,7 +1035,7 @@ export default function NetworkExplorer() {
                       <th
                         key={i}
                         className={clsx(
-                          'px-3 py-2 text-left font-medium text-text-secondary select-none',
+                          'sticky top-0 z-10 border-b border-border-subtle bg-surface-secondary px-3 py-2 text-left font-medium text-text-secondary select-none',
                           col.key && 'cursor-pointer hover:text-text-primary transition-colors'
                         )}
                         onClick={col.key ? () => handleSortColumn(col.key!) : undefined}
@@ -916,6 +1075,7 @@ export default function NetworkExplorer() {
                             {result.ip}
                           </button>
                         </td>
+                        <td className="px-3 py-2 text-text-secondary">{result.hostname ?? '—'}</td>
                         <td className="px-3 py-2 text-text-secondary">
                           {editingLabelKey === deviceLabelKey(result) ? (
                             <input
@@ -955,6 +1115,17 @@ export default function NetworkExplorer() {
                               <Pencil size={10} className="shrink-0 opacity-0 group-hover:opacity-50" />
                             </button>
                           )}
+                        </td>
+                        <td className="px-3 py-2 text-text-secondary">
+                          {(() => {
+                            const { label, icon: Icon } = DEVICE_TYPE_META[classifyDeviceType(result)];
+                            return (
+                              <span className="flex items-center gap-1.5 text-xs" title={label}>
+                                <Icon size={12} className="shrink-0 text-text-disabled" />
+                                <span className="truncate">{label}</span>
+                              </span>
+                            );
+                          })()}
                         </td>
                         <td className="px-3 py-2 text-text-secondary font-mono text-xs">{result.mac_address ?? '—'}</td>
                         <td className="px-3 py-2 text-text-secondary text-xs">{result.mac_vendor ?? '—'}</td>
@@ -996,7 +1167,7 @@ export default function NetworkExplorer() {
                       </tr>
                       {isExpanded && (
                         <tr className="border-b border-border-subtle bg-surface-sunken">
-                          <td colSpan={9} className="px-6 py-3">
+                          <td colSpan={11} className="px-6 py-3">
                             <div className="flex flex-col gap-3 text-xs">
                               {result.open_ports.some((p) => p.banner || p.version || p.http_title || p.tls) && (
                                 <div className="flex flex-col gap-2">

@@ -5,7 +5,7 @@ import NetworkExplorer from '@/components/NetworkTools/NetworkExplorer';
 import { ToastProvider } from '@/components/Shared/Toast';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import type { ExploreResult } from '@/types';
+import type { ExploreResult, TailscalePeer } from '@/types';
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({
   save: vi.fn(),
@@ -264,7 +264,9 @@ describe('NetworkExplorer', () => {
       });
     });
 
-    expect(await screen.findByText('living-room-tv.local')).toBeInTheDocument();
+    // Shows in both the read-only Hostname column and the Name column
+    // (which defaults to the hostname until a custom label is set).
+    await waitFor(() => expect(screen.getAllByText('living-room-tv.local')).toHaveLength(2));
     fireEvent.click(screen.getByText('192.168.1.50'));
     expect(await screen.findByText(/_googlecast\._tcp\.local\./)).toBeInTheDocument();
   });
@@ -316,8 +318,9 @@ describe('NetworkExplorer', () => {
       });
     });
 
-    // Friendly name wins over the opaque UUID-based mDNS hostname.
-    expect(await screen.findByText('Hall clock')).toBeInTheDocument();
+    // Friendly name wins over the opaque UUID-based mDNS hostname, and
+    // shows in both the Hostname and (default-to-hostname) Name columns.
+    await waitFor(() => expect(screen.getAllByText('Hall clock')).toHaveLength(2));
     expect(screen.queryByText('453e6721-d97d-f36c-d859.local')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText('192.168.1.66'));
@@ -415,7 +418,7 @@ describe('NetworkExplorer', () => {
       handlers['network:explore_host_enriched']({ payload: { scan_id: 'scan-id-123', result: enrichedResult } });
     });
 
-    expect(await screen.findByText('nas.local')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByText('nas.local')).toHaveLength(2)); // Hostname + Name columns
     expect(screen.getByText('BC:24:11:11:22:33')).toBeInTheDocument();
     expect(screen.getByText('Proxmox Server Solutions GmbH')).toBeInTheDocument();
 
@@ -450,12 +453,14 @@ describe('NetworkExplorer', () => {
       });
     });
 
-    // Saved label overrides the resolved hostname in the table.
+    // Saved label shows in the editable Name column; the read-only
+    // Hostname column still shows the actual resolved hostname alongside it.
     expect(await screen.findByText('Homelab NAS')).toBeInTheDocument();
-    expect(screen.queryByText('homelab.local')).not.toBeInTheDocument();
+    expect(screen.getByText('homelab.local')).toBeInTheDocument();
 
-    // Click into edit mode, change it, commit with Enter.
-    fireEvent.click(screen.getByText('Homelab NAS'));
+    // Click into edit mode (the Name column's button, not the plain-text
+    // Hostname cell), change it, commit with Enter.
+    fireEvent.click(screen.getByRole('button', { name: 'Homelab NAS' }));
     const input = await screen.findByDisplayValue('Homelab NAS');
     fireEvent.change(input, { target: { value: 'Living Room NAS' } });
     fireEvent.keyDown(input, { key: 'Enter' });
@@ -487,14 +492,85 @@ describe('NetworkExplorer', () => {
         payload: { scan_id: 'scan-id-123', result: { ...mockResult, open_ports: [], mdns: [], evidence: [] } },
       });
     });
-    expect(await screen.findByText('homelab.local')).toBeInTheDocument();
+    // Shows in both the read-only Hostname column and the (default-to-
+    // hostname) Name column.
+    await waitFor(() => expect(screen.getAllByText('homelab.local')).toHaveLength(2));
 
-    fireEvent.click(screen.getByText('homelab.local'));
+    // The Name column's button is the editable one.
+    fireEvent.click(screen.getByRole('button', { name: 'homelab.local' }));
     const input = await screen.findByDisplayValue('homelab.local');
     fireEvent.change(input, { target: { value: 'discarded edit' } });
     fireEvent.keyDown(input, { key: 'Escape' });
 
-    expect(await screen.findByText('homelab.local')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByText('homelab.local')).toHaveLength(2));
     expect(mockInvoke).not.toHaveBeenCalledWith('settings_update', expect.anything());
+  });
+
+  it('classifies device type from open ports, mDNS, hostname, and vendor signals', async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'network_local_subnets') return Promise.resolve([]);
+      if (cmd === 'network_explore_start') return Promise.resolve('scan-id-123');
+      return Promise.resolve(undefined);
+    });
+    renderWithToast(<NetworkExplorer />);
+    fireEvent.change(screen.getByPlaceholderText(/192\.168/), { target: { value: '10.0.0.0/28' } });
+    fireEvent.click(screen.getByTestId('scan-start-btn'));
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith('network_explore_start', expect.anything()));
+
+    const hosts: ExploreResult[] = [
+      // Camera: RTSP port open.
+      { ...mockResult, ip: '192.168.1.20', open_ports: [{ port: 554, service_name: 'rtsp', protocol: 'tcp' }], mdns: [], evidence: [] },
+      // Router/gateway: conventional .1 with an admin HTTP port and a known router-vendor OUI.
+      { ...mockResult, ip: '192.168.1.1', mac_vendor: 'Sagemcom Broadband SAS', open_ports: [{ port: 80, service_name: 'http', protocol: 'tcp' }], mdns: [], evidence: [] },
+      // VM: Proxmox virtual-NIC vendor.
+      { ...mockResult, ip: '192.168.1.30', mac_vendor: 'Proxmox Server Solutions GmbH', open_ports: [], mdns: [], evidence: [] },
+      // NAS/server: Jellyfin identified via enrich_port's version string.
+      { ...mockResult, ip: '192.168.1.40', mac_vendor: undefined, open_ports: [{ port: 8096, service_name: 'jellyfin', protocol: 'tcp', version: 'Jellyfin: nl.jellyfin' }], mdns: [], evidence: [] },
+    ];
+    act(() => {
+      for (const result of hosts) {
+        handlers['network:explore_host_found']({ payload: { scan_id: 'scan-id-123', result } });
+      }
+    });
+
+    expect(await screen.findByText('Camera')).toBeInTheDocument();
+    expect(screen.getByText('Router/Gateway')).toBeInTheDocument();
+    expect(screen.getByText('Virtual Machine')).toBeInTheDocument();
+    expect(screen.getByText('NAS/Server')).toBeInTheDocument();
+  });
+
+  it('fetches and merges Tailscale peers, tagging an already-scanned host rather than duplicating it', async () => {
+    const peers: TailscalePeer[] = [
+      { ip: '100.100.111.101', hostname: 'newserver.tailc76fbd.ts.net', os: 'linux', online: true, is_self: false },
+      { ip: '100.79.163.121', hostname: 'redmi-pad-pro-5g.tailc76fbd.ts.net', os: 'android', online: false, is_self: false },
+    ];
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'network_local_subnets') return Promise.resolve([]);
+      if (cmd === 'network_explore_start') return Promise.resolve('scan-id-123');
+      if (cmd === 'network_tailscale_peers') return Promise.resolve(peers);
+      return Promise.resolve(undefined);
+    });
+    renderWithToast(<NetworkExplorer />);
+    fireEvent.change(screen.getByPlaceholderText(/192\.168/), { target: { value: '10.0.0.0/28' } });
+    fireEvent.click(screen.getByTestId('scan-start-btn'));
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith('network_explore_start', expect.anything()));
+
+    // A LAN host that happens to already have a resolved hostname — its
+    // Tailscale IP differs from its LAN IP, so this merge is by whatever
+    // real identity information is available, not IP matching in this case.
+    act(() => {
+      handlers['network:explore_host_found']({
+        payload: { scan_id: 'scan-id-123', result: { ...mockResult, ip: '192.168.1.11', open_ports: [], mdns: [], evidence: [] } },
+      });
+    });
+    expect(await screen.findByText('192.168.1.11')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('tailscale-include-btn'));
+
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith('network_tailscale_peers'));
+    expect(await screen.findByText('100.100.111.101')).toBeInTheDocument();
+    expect(screen.getByText('100.79.163.121')).toBeInTheDocument();
+    // Both the original LAN row and the two new Tailscale-only rows are present.
+    expect(screen.getByText('192.168.1.11')).toBeInTheDocument();
   });
 });

@@ -601,6 +601,18 @@ export interface ExploreResult {
   evidence: string[];
 }
 
+/** A Tailscale tailnet peer, from `tailscale status --json` — authoritative,
+ * no probing involved. Peers live in the 100.64.0.0/10 CGNAT range, a
+ * different address space from any LAN CIDR a Network Explorer scan
+ * targets, so they never show up there on their own. */
+export interface TailscalePeer {
+  ip: string;
+  hostname: string;
+  os?: string;
+  online: boolean;
+  is_self: boolean;
+}
+
 /** A single mDNS/Bonjour service instance advertised by a host. */
 export interface MdnsRecord {
   /** e.g. "_home-assistant._tcp.local." */
