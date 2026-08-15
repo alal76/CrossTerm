@@ -3,7 +3,7 @@
 
 **Document owner:** Product  
 **Last updated:** 2026-08-15  
-**Current version:** 1.0.0 (all v0.3–v1.2 roadmap phases complete; protocol-breadth expansion complete on `feat/protocol-breadth`, not yet merged to `main`)  
+**Current version:** 1.0.0 (all v0.3–v1.2 roadmap phases complete; protocol-breadth expansion merged to `main` 2026-08-15)  
 **Horizon:** 18 months (v0.7 → v1.2)
 
 ---
@@ -20,7 +20,7 @@ CrossTerm has an unusually deep technical foundation for a v0.2 product:
 | Security | AES-256-GCM vault, Argon2id KDF, biometric unlock, per-profile audit log, zeroize-on-drop key memory |
 | Cloud | AWS (EC2, S3, cost), Azure (VMs, Blob, subscriptions), GCP (Compute, GCS) |
 | Automation | Send/Expect macro engine, snippet library, session recording & playback |
-| Network | TCP/ICMP scanner, WiFi analysis (macOS CoreWLAN), port forward manager, WakeOnLAN |
+| Network | TCP/ICMP scanner with 8-method parallel hostname resolution (mDNS, ARP, gateway-direct DNS, TLS cert CN, ...), service/version fingerprinting, Tailscale peer awareness, WiFi analysis (macOS CoreWLAN), Aircrack security tooling, port forward manager, WakeOnLAN — see §3 "Network Discovery" for how this stacks up against Angry IP Scanner / Advanced IP Scanner |
 | Platform | macOS, Windows, Linux, Android (tablet + phone layouts) |
 | Extensibility | WASM plugin runtime with sandboxed capability grants |
 
@@ -93,6 +93,26 @@ Royal TSX and SecureCRT are the closest competitors on security posture; neither
 
 **Our wedge:** The only tool that combines security-first credential management, the deepest protocol breadth in the category (SSH through mainframe terminals to hypervisor consoles), native performance, and a plugin ecosystem — available on every platform including Android.
 
+### Network Discovery — a second, adjacent comparison
+
+Network Explorer (TCP/ICMP scanner, mDNS discovery, WiFi analysis, WakeOnLAN) puts CrossTerm in a second competitive set: dedicated LAN discovery tools like **Angry IP Scanner** and **Advanced IP Scanner**. These aren't terminal clients, so the comparison is narrower and the verdict is more mixed — CrossTerm's scanner is richer but not the tool for a pure "fastest possible sweep of a /16."
+
+| | CrossTerm Network Explorer | Angry IP Scanner | Advanced IP Scanner |
+|---|---|---|---|
+| Platforms | macOS, Windows, Linux | macOS, Windows, Linux (Java) | Windows only |
+| License | Bundled, commercial | Free, open source | Free (Famatech) |
+| Hostname resolution | 8 parallel methods (mDNS, ARP, gateway-direct DNS, local-DNS-server-direct reverse DNS, TLS cert CN, ...) | Basic PTR + NetBIOS | Basic PTR + NetBIOS |
+| Service/version fingerprinting + TLS cert detail | ✅ | ❌ | ❌ |
+| Device-specific identification (Jellyfin, Plex, Proxmox VMs, ...) | ✅ | ❌ | ❌ |
+| Mesh VPN awareness (Tailscale peers) | ✅ | ❌ | ❌ |
+| WakeOnLAN | ✅ | Via plugin | ✅ |
+| Launch an authenticated session on a found host | ✅ — full vault-backed SSH/RDP/VNC/32-protocol connect, saved credentials | ❌ (IP only, no session) | Quick-launch RDP/FTP/HTTP, no saved credentials |
+| WiFi analysis + Aircrack security tooling | ✅ | ❌ | ❌ |
+| Raw scan speed on a large flat range (e.g. /16) | Slower — richer per-host fingerprinting has a cost | Fastest in class | Fast |
+| Extensibility | WASM plugin runtime | Java fetcher plugin API | ❌ |
+
+Angry IP Scanner in particular remains the better choice for a network engineer who just wants the fastest possible raw IP sweep with no per-host enrichment. CrossTerm's bet is different: nobody wants to discover a host in one tool and then alt-tab to a second one to actually connect to it with the right credentials. Network Explorer exists to feed CrossTerm's own session list, not to compete as a standalone scanner — and it's the only one of the three that can identify *what* a host is (Jellyfin server, Proxmox VM, Tailscale peer) rather than just *that* it's alive.
+
 ---
 
 ## 4. Design Principles
@@ -117,7 +137,7 @@ The following issues were identified through heuristic evaluation against Nielse
 | U-1 | No import from PuTTY / `.ssh/config` / SecureCRT | ✅ FIXED v0.3.0 | Import wizard with multi-format parser |
 | U-2 | Vault unlock is the first thing new users see — no explainer | ✅ FIXED v0.3.0 | First-run wizard with 3-step onboarding |
 | U-3 | SSH connection failure messages are raw Rust error strings | ✅ FIXED v0.3.0 | 40+ typed AppError codes, localized to EN/DE/FR |
-| U-4 | Session editor opens in a modal with 20+ fields — no progressive disclosure | ⏳ Phase 2 | Session tree v2 with progressive disclosure |
+| U-4 | Session editor opens in a modal with 20+ fields — no progressive disclosure | ❌ NOT DONE | `SessionEditor.tsx` renders every field (name, type, host, port, username, group, tags, credential, startup script, notes) as one flat, always-visible column — no tabs, accordion, "Advanced" collapse, or wizard steps. Verified against source 2026-08-15; still open. |
 | U-5 | No visual indicator when a background tunnel silently drops | ✅ FIXED v0.3.0 | Session watchdog with toast + auto-reconnect |
 
 ### High (reduce retention)
@@ -126,16 +146,16 @@ The following issues were identified through heuristic evaluation against Nielse
 | U-6 | Scrollback search requires Ctrl+Shift+F — not discoverable | ✅ FIXED v0.3.0 | Hotkey bound, auto-surfaces on text selection |
 | U-7 | Multiple locked vaults: "Delete" icon is easy to trigger by accident | ✅ FIXED v0.8.0 | `pendingDeleteId` 2s confirm guard in VaultUnlock + CredentialManager |
 | U-8 | No bulk session actions (select 10, connect all / delete all) | ⏳ Phase 2 | Multi-select with Shift/Ctrl+click, bulk ops |
-| U-9 | Theme changes require restart to fully apply in terminal renderer | ⏳ Phase 2 | Hot theme reload in terminal view |
+| U-9 | Theme changes require restart to fully apply in terminal renderer | ❌ NOT DONE | `TerminalView.tsx` passes `theme: getTerminalTheme()` only once, at `xterm.js` `Terminal` construction in the mount effect — `theme` isn't in that effect's dependency array, and nothing in the codebase calls `term.options.theme = ...` on an existing instance. An open terminal's colors are fixed at creation. Verified against source 2026-08-15; still open. |
 | U-10 | Android soft keyboard overlaps terminal on small phones | ⏳ Phase 5 | Keyboard management redesign |
 
 ### Medium (limit power use)
 | # | Issue | Status | Resolution |
 |---|-------|--------|------------|
 | U-11 | Macro editor has no test/dry-run mode | ⏳ Phase 2 | Macro GUI builder with dry-run mode |
-| U-12 | Port forward rules show no live traffic metrics | ⏳ Phase 2 | Live bytes in/out metrics per rule |
+| U-12 | Port forward rules show no live traffic metrics | ⚠️ BACKEND ONLY | `TunnelMetrics` struct + `network_tunnel_metrics/_all/_reset` commands exist and are registered (`network/mod.rs`, v0.9.0), but `PortForwardManager.tsx` never calls them — only `network_tunnel_list/create/toggle/remove`. The metrics exist and are unused; nothing in the UI shows a byte count. Verified against source 2026-08-15; wiring the existing backend into the panel is a small follow-up, not new engineering. |
 | U-13 | No "recently used" section at the top of session tree | ✅ FIXED v0.8.0 | Collapsible "Recently Connected" section, last 5 by `lastConnectedAt`, persisted in localStorage |
-| U-14 | SFTP drag-and-drop only works one direction (local → remote) | ⏳ Phase 2 | Bidirectional drag-and-drop |
+| U-14 | SFTP drag-and-drop only works one direction (local → remote) | ✅ FIXED | `SftpBrowser.tsx`: `handleLocalPaneDrop` handles remote→local (`sftp_download`), `handleRemotePaneDrop` handles local→remote (`sftp_upload`); both directions wired. Verified against source 2026-08-15. |
 | U-15 | No right-click → "Open in SFTP" from a terminal tab | ✅ FIXED v0.3.0 | Context menu integration
 
 ---
@@ -208,7 +228,7 @@ Individual power users spend 8+ hours a day in their terminal client. This phase
 - [x] Regex search (DONE v0.5.0)
 - [x] **Right-to-left text support**: `RtlSettings.tsx` with `auto`/`ltr`/`rtl` direction selector; `useEffect` sets `document.documentElement.dir` globally (DONE v0.9.0)
 
-**Phase 2 Status: ✅ COMPLETE — all items done as of v0.10.0.**
+**Phase 2 Status: mostly complete, three usability items overlooked.** All items explicitly listed above shipped by v0.10.0. However, auditing the original usability findings (§5) against the current codebase (2026-08-15) found three that this section's "all done" claim had missed: **U-4** (session editor still has no progressive disclosure — flat 10-field form), **U-9** (terminal theme changes still require reopening the tab — no hot reload), and **U-12** (tunnel metrics backend exists and is registered but was never wired into `PortForwardManager.tsx`'s UI). None are large — U-12 especially is a UI-only follow-up on top of already-shipped backend work — but they should not have been marked done. Scheduling them alongside Phase 5/hardening work rather than reopening Phase 2.
 
 ---
 
@@ -297,7 +317,7 @@ Not part of the original v0.3–v1.2 phase sequence — a separately-scoped init
 
 **Why this matters for the roadmap:** this is the "protocol breadth" axis of our competitive positioning (§3) made real rather than aspirational — CrossTerm now reaches further into heterogeneous infrastructure (mainframes, BMCs, hypervisor consoles, IoT/SNMP devices) than Termius, Royal TSX, or SecureCRT.
 
-**Status:** feature-complete, all tests green, 18 commits ahead of `main` with a clean fast-forward (0 commits behind). **Not yet merged** — see `docs/ENGINEERING_PLAN.md` §1.1 for the merge-readiness note and known follow-ups.
+**Status:** ✅ Merged to `main` 2026-08-15 (clean fast-forward, no conflicts). See `docs/ENGINEERING_PLAN.md` §1.1 for the full phase breakdown and known, non-blocking follow-ups.
 
 ---
 
