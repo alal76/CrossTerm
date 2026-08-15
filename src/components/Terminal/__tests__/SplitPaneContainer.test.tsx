@@ -101,6 +101,16 @@ vi.mock("@/components/Tn5250/Tn5250Screen", () => ({
     <div data-testid={`tn5250-screen-${sessionId}`}>Tn5250Screen Mock</div>
   ),
 }));
+vi.mock("@/components/Rlogin/RloginTerminalTab", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`rlogin-terminal-tab-${sessionId}`}>RloginTerminalTab Mock</div>
+  ),
+}));
+vi.mock("@/components/DockerLogs/DockerLogsViewer", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`docker-logs-viewer-${sessionId}`}>DockerLogsViewer Mock</div>
+  ),
+}));
 
 function baseSession(overrides: Partial<Session> = {}): Session {
   return {
@@ -316,5 +326,25 @@ describe("SplitPaneContainer session type routing", () => {
     render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
 
     expect(screen.getByTestId(`tn5250-screen-${tab.sessionId}`)).toBeInTheDocument();
+  });
+
+  it("routes a Rlogin leaf pane to RloginTerminalTab", () => {
+    const session = baseSession({ type: SessionType.Rlogin, connection: { host: "10.0.0.70", port: 513 } });
+    const tab = baseTab({ sessionType: SessionType.Rlogin });
+    useSessionStore.setState({ sessions: [session], openTabs: [tab] });
+
+    render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
+
+    expect(screen.getByTestId(`rlogin-terminal-tab-${tab.sessionId}`)).toBeInTheDocument();
+  });
+
+  it("routes a Docker Logs leaf pane to DockerLogsViewer", () => {
+    const session = baseSession({ type: SessionType.DockerLogs, connection: { host: "10.0.0.80", port: 2375 } });
+    const tab = baseTab({ sessionType: SessionType.DockerLogs });
+    useSessionStore.setState({ sessions: [session], openTabs: [tab] });
+
+    render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
+
+    expect(screen.getByTestId(`docker-logs-viewer-${tab.sessionId}`)).toBeInTheDocument();
   });
 });

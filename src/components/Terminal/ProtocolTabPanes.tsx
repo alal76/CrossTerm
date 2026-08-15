@@ -25,6 +25,8 @@ import SnmpBrowser from "@/components/Snmp/SnmpBrowser";
 import GrpcExplorer from "@/components/Grpc/GrpcExplorer";
 import Tn3270Screen from "@/components/Tn3270/Tn3270Screen";
 import Tn5250Screen from "@/components/Tn5250/Tn5250Screen";
+import RloginTerminalTab from "@/components/Rlogin/RloginTerminalTab";
+import DockerLogsViewer from "@/components/DockerLogs/DockerLogsViewer";
 import {
   buildRdpConfig,
   buildVncConfig,
@@ -41,6 +43,8 @@ import {
   buildGrpcConfig,
   buildTn3270Config,
   buildTn5250Config,
+  buildRloginConfig,
+  buildDockerLogsConfig,
 } from "@/utils/sessionConfig";
 import type { Session } from "@/types";
 
@@ -122,4 +126,14 @@ export function Tn3270TabPane({ sessionId, session }: PaneProps) {
 export function Tn5250TabPane({ sessionId, session }: PaneProps) {
   const config = useMemo(() => buildTn5250Config(session), [session]);
   return <Tn5250Screen sessionId={sessionId} config={config} />;
+}
+
+export function RloginTabPane({ sessionId, session }: PaneProps) {
+  const config = useMemo(() => buildRloginConfig(session), [session]);
+  return <RloginTerminalTab sessionId={sessionId} config={config} />;
+}
+
+export function DockerLogsTabPane({ sessionId, session }: PaneProps) {
+  const config = useMemo(() => buildDockerLogsConfig(session), [session]);
+  return <DockerLogsViewer sessionId={sessionId} config={config} />;
 }

@@ -121,6 +121,16 @@ vi.mock("@/components/Tn5250/Tn5250Screen", () => ({
     <div data-testid={`tn5250-screen-${sessionId}`}>Tn5250Screen Mock</div>
   ),
 }));
+vi.mock("@/components/Rlogin/RloginTerminalTab", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`rlogin-terminal-tab-${sessionId}`}>RloginTerminalTab Mock</div>
+  ),
+}));
+vi.mock("@/components/DockerLogs/DockerLogsViewer", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`docker-logs-viewer-${sessionId}`}>DockerLogsViewer Mock</div>
+  ),
+}));
 
 // Mock components that use localStorage directly (tested separately)
 vi.mock("@/components/Help/WhatsNewPanel", () => ({
@@ -495,6 +505,28 @@ describe("App", () => {
       render(<App />);
 
       expect(screen.getByTestId(`tn5250-screen-${tab.sessionId}`)).toBeInTheDocument();
+      expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
+    });
+
+    it("routes a Rlogin tab to RloginTerminalTab, not the generic local-shell fallback", () => {
+      const session = baseSession({ type: SessionType.Rlogin, connection: { host: "10.0.0.70", port: 513 } });
+      const tab = baseTab({ sessionType: SessionType.Rlogin });
+      useSessionStore.setState({ sessions: [session], openTabs: [tab], activeTabId: tab.id });
+
+      render(<App />);
+
+      expect(screen.getByTestId(`rlogin-terminal-tab-${tab.sessionId}`)).toBeInTheDocument();
+      expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
+    });
+
+    it("routes a Docker Logs tab to DockerLogsViewer, not the generic local-shell fallback", () => {
+      const session = baseSession({ type: SessionType.DockerLogs, connection: { host: "10.0.0.80", port: 2375 } });
+      const tab = baseTab({ sessionType: SessionType.DockerLogs });
+      useSessionStore.setState({ sessions: [session], openTabs: [tab], activeTabId: tab.id });
+
+      render(<App />);
+
+      expect(screen.getByTestId(`docker-logs-viewer-${tab.sessionId}`)).toBeInTheDocument();
       expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
     });
   });

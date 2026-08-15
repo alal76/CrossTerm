@@ -11,8 +11,10 @@ mod team;
 mod ftp;
 mod grpc;
 mod importer;
+mod docker_logs;
 mod ebcdic;
 mod ipmi;
+mod rlogin;
 mod keygen;
 mod mosh;
 mod mqtt;
@@ -86,6 +88,8 @@ pub fn run() {
         .manage(ftp::FtpState::new())
         .manage(grpc::GrpcState::new())
         .manage(ipmi::IpmiState::new())
+        .manage(rlogin::RloginState::new())
+        .manage(docker_logs::DockerLogsState::new())
         .manage(mosh::MoshState::new())
         .manage(mqtt::MqttState::new())
         .manage(netconf::NetconfState::new())
@@ -339,6 +343,13 @@ pub fn run() {
             ipmi::ipmi_power_control,
             ipmi::ipmi_sol_disconnect,
             ipmi::ipmi_list,
+            rlogin::rlogin_connect,
+            rlogin::rlogin_send,
+            rlogin::rlogin_disconnect,
+            rlogin::rlogin_list,
+            docker_logs::docker_logs_connect,
+            docker_logs::docker_logs_disconnect,
+            docker_logs::docker_logs_list,
             // Redfish
             redfish::redfish_connect,
             redfish::redfish_get_systems,

@@ -1515,3 +1515,37 @@ export type Tn5250Aid =
   | "f1" | "f2" | "f3" | "f4" | "f5" | "f6"
   | "f7" | "f8" | "f9" | "f10" | "f11" | "f12"
   | "clear" | "help" | "roll_up" | "roll_down";
+
+// --- Rlogin ---
+
+export interface RloginConfig {
+  host: string;
+  port: number;
+  local_username: string;
+  remote_username: string;
+  terminal_type: string;
+  terminal_speed: number;
+}
+
+export interface RloginDataEvent {
+  session_id: string;
+  data: string;
+}
+
+// --- Docker Logs ---
+
+export interface DockerLogsConfig {
+  socket_path?: string;
+  host?: string;
+  port?: number;
+  container_id: string;
+  tty: boolean;
+  tail?: number;
+  timestamps: boolean;
+}
+
+export interface DockerLogLine {
+  session_id: string;
+  stream: "stdout" | "stderr" | "raw";
+  data: string;
+}

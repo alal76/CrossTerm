@@ -24,6 +24,8 @@ import {
   GrpcTabPane,
   Tn3270TabPane,
   Tn5250TabPane,
+  RloginTabPane,
+  DockerLogsTabPane,
 } from "@/components/Terminal/ProtocolTabPanes";
 
 // ── Resize Handle ──
@@ -113,6 +115,8 @@ const SESSION_TAB_PANES: Partial<Record<SessionType, typeof RdpTabPane>> = {
   [SessionType.GrpcExplorer]: GrpcTabPane,
   [SessionType.TN3270]: Tn3270TabPane,
   [SessionType.TN5250]: Tn5250TabPane,
+  [SessionType.Rlogin]: RloginTabPane,
+  [SessionType.DockerLogs]: DockerLogsTabPane,
 };
 
 function renderPaneContent(tab: { sessionId: string; sessionType: SessionType }, session: Session | undefined, isActive: boolean) {

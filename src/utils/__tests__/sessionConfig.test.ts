@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildRdpConfig, buildVncConfig, buildWsTermConfig, buildRedfishConfig, buildWebDavConfig, buildMqttConfig, buildSmbConfig, buildNetconfConfig, buildMoshConfig, buildWinRmConfig, buildIpmiConfig, buildSnmpConfig, buildGrpcConfig, buildTn3270Config, buildTn5250Config } from "@/utils/sessionConfig";
+import { buildRdpConfig, buildVncConfig, buildWsTermConfig, buildRedfishConfig, buildWebDavConfig, buildMqttConfig, buildSmbConfig, buildNetconfConfig, buildMoshConfig, buildWinRmConfig, buildIpmiConfig, buildSnmpConfig, buildGrpcConfig, buildTn3270Config, buildTn5250Config, buildRloginConfig, buildDockerLogsConfig } from "@/utils/sessionConfig";
 import type { Session } from "@/types";
 import { SessionType } from "@/types";
 
@@ -380,5 +380,44 @@ describe("buildTn5250Config", () => {
   it("defaults ssl to false without protocolOptions", () => {
     const config = buildTn5250Config(baseSession({ connection: { host: "10.0.0.60", port: 23 } }));
     expect(config.ssl).toBe(false);
+  });
+});
+
+describe("buildRloginConfig", () => {
+  it("maps host/port and defaults terminal_type/speed", () => {
+    const config = buildRloginConfig(baseSession({ connection: { host: "10.0.0.70", port: 513, protocolOptions: { username: "alal" } } }));
+    expect(config.host).toBe("10.0.0.70");
+    expect(config.port).toBe(513);
+    expect(config.local_username).toBe("alal");
+    expect(config.remote_username).toBe("alal");
+    expect(config.terminal_type).toBe("xterm");
+    expect(config.terminal_speed).toBe(38400);
+  });
+
+  it("prefers explicit local_username/remote_username over the shared username fallback", () => {
+    const config = buildRloginConfig(
+      baseSession({ connection: { host: "10.0.0.70", port: 513, protocolOptions: { username: "shared", local_username: "alal", remote_username: "root" } } })
+    );
+    expect(config.local_username).toBe("alal");
+    expect(config.remote_username).toBe("root");
+  });
+});
+
+describe("buildDockerLogsConfig", () => {
+  it("uses TCP host/port when no socket_path is configured", () => {
+    const config = buildDockerLogsConfig(baseSession({ connection: { host: "10.0.0.80", port: 2375, protocolOptions: { container_id: "abc123" } } }));
+    expect(config.host).toBe("10.0.0.80");
+    expect(config.port).toBe(2375);
+    expect(config.socket_path).toBeUndefined();
+    expect(config.container_id).toBe("abc123");
+  });
+
+  it("prefers socket_path over host/port when both could apply", () => {
+    const config = buildDockerLogsConfig(
+      baseSession({ connection: { host: "10.0.0.80", port: 2375, protocolOptions: { socket_path: "/var/run/docker.sock", container_id: "abc123" } } })
+    );
+    expect(config.socket_path).toBe("/var/run/docker.sock");
+    expect(config.host).toBeUndefined();
+    expect(config.port).toBeUndefined();
   });
 });

@@ -8,7 +8,7 @@
 // specific fields yet — domain, NLA, codec, etc. — so those fall back to
 // sensible defaults here until the editor grows per-type fields).
 
-import type { Session, RdpConfig, VncConfig, WsTermConfig, RedfishConfig, WebDavConfig, MqttConfig, SmbConfig, NetconfConfig, MoshConfig, WinRmConfig, WinRmAuth, IpmiConfig, IpmiPrivilege, SnmpConfig, SnmpVersion, SnmpV3AuthProtocol, SnmpV3PrivProtocol, GrpcConfig, Tn3270Config, Tn3270Model, Tn5250Config } from '@/types';
+import type { Session, RdpConfig, VncConfig, WsTermConfig, RedfishConfig, WebDavConfig, MqttConfig, SmbConfig, NetconfConfig, MoshConfig, WinRmConfig, WinRmAuth, IpmiConfig, IpmiPrivilege, SnmpConfig, SnmpVersion, SnmpV3AuthProtocol, SnmpV3PrivProtocol, GrpcConfig, Tn3270Config, Tn3270Model, Tn5250Config, RloginConfig, DockerLogsConfig } from '@/types';
 
 export function buildRdpConfig(session: Session): RdpConfig {
   const opts = session.connection.protocolOptions;
@@ -203,5 +203,31 @@ export function buildTn5250Config(session: Session): Tn5250Config {
     device_name: opts?.['device_name'] as string | undefined,
     system_name: opts?.['system_name'] as string | undefined,
     ssl: Boolean(opts?.['ssl']),
+  };
+}
+
+export function buildRloginConfig(session: Session): RloginConfig {
+  const opts = session.connection.protocolOptions;
+  return {
+    host: session.connection.host,
+    port: session.connection.port,
+    local_username: (opts?.['local_username'] as string) ?? (opts?.['username'] as string) ?? '',
+    remote_username: (opts?.['remote_username'] as string) ?? (opts?.['username'] as string) ?? '',
+    terminal_type: (opts?.['terminal_type'] as string) ?? 'xterm',
+    terminal_speed: (opts?.['terminal_speed'] as number) ?? 38400,
+  };
+}
+
+export function buildDockerLogsConfig(session: Session): DockerLogsConfig {
+  const opts = session.connection.protocolOptions;
+  const socketPath = opts?.['socket_path'] as string | undefined;
+  return {
+    socket_path: socketPath,
+    host: socketPath ? undefined : session.connection.host,
+    port: socketPath ? undefined : session.connection.port,
+    container_id: (opts?.['container_id'] as string) ?? '',
+    tty: Boolean(opts?.['tty']),
+    tail: opts?.['tail'] as number | undefined,
+    timestamps: Boolean(opts?.['timestamps']),
   };
 }
