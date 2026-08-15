@@ -111,6 +111,16 @@ vi.mock("@/components/Grpc/GrpcExplorer", () => ({
     <div data-testid={`grpc-explorer-${sessionId}`}>GrpcExplorer Mock</div>
   ),
 }));
+vi.mock("@/components/Tn3270/Tn3270Screen", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`tn3270-screen-${sessionId}`}>Tn3270Screen Mock</div>
+  ),
+}));
+vi.mock("@/components/Tn5250/Tn5250Screen", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`tn5250-screen-${sessionId}`}>Tn5250Screen Mock</div>
+  ),
+}));
 
 // Mock components that use localStorage directly (tested separately)
 vi.mock("@/components/Help/WhatsNewPanel", () => ({
@@ -463,6 +473,28 @@ describe("App", () => {
       render(<App />);
 
       expect(screen.getByTestId(`grpc-explorer-${tab.sessionId}`)).toBeInTheDocument();
+      expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
+    });
+
+    it("routes a TN3270 tab to Tn3270Screen, not the generic local-shell fallback", () => {
+      const session = baseSession({ type: SessionType.TN3270, connection: { host: "10.0.0.50", port: 23 } });
+      const tab = baseTab({ sessionType: SessionType.TN3270 });
+      useSessionStore.setState({ sessions: [session], openTabs: [tab], activeTabId: tab.id });
+
+      render(<App />);
+
+      expect(screen.getByTestId(`tn3270-screen-${tab.sessionId}`)).toBeInTheDocument();
+      expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
+    });
+
+    it("routes a TN5250 tab to Tn5250Screen, not the generic local-shell fallback", () => {
+      const session = baseSession({ type: SessionType.TN5250, connection: { host: "10.0.0.60", port: 23 } });
+      const tab = baseTab({ sessionType: SessionType.TN5250 });
+      useSessionStore.setState({ sessions: [session], openTabs: [tab], activeTabId: tab.id });
+
+      render(<App />);
+
+      expect(screen.getByTestId(`tn5250-screen-${tab.sessionId}`)).toBeInTheDocument();
       expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
     });
   });

@@ -91,6 +91,16 @@ vi.mock("@/components/Grpc/GrpcExplorer", () => ({
     <div data-testid={`grpc-explorer-${sessionId}`}>GrpcExplorer Mock</div>
   ),
 }));
+vi.mock("@/components/Tn3270/Tn3270Screen", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`tn3270-screen-${sessionId}`}>Tn3270Screen Mock</div>
+  ),
+}));
+vi.mock("@/components/Tn5250/Tn5250Screen", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`tn5250-screen-${sessionId}`}>Tn5250Screen Mock</div>
+  ),
+}));
 
 function baseSession(overrides: Partial<Session> = {}): Session {
   return {
@@ -286,5 +296,25 @@ describe("SplitPaneContainer session type routing", () => {
     render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
 
     expect(screen.getByTestId(`grpc-explorer-${tab.sessionId}`)).toBeInTheDocument();
+  });
+
+  it("routes a TN3270 leaf pane to Tn3270Screen", () => {
+    const session = baseSession({ type: SessionType.TN3270, connection: { host: "10.0.0.50", port: 23 } });
+    const tab = baseTab({ sessionType: SessionType.TN3270 });
+    useSessionStore.setState({ sessions: [session], openTabs: [tab] });
+
+    render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
+
+    expect(screen.getByTestId(`tn3270-screen-${tab.sessionId}`)).toBeInTheDocument();
+  });
+
+  it("routes a TN5250 leaf pane to Tn5250Screen", () => {
+    const session = baseSession({ type: SessionType.TN5250, connection: { host: "10.0.0.60", port: 23 } });
+    const tab = baseTab({ sessionType: SessionType.TN5250 });
+    useSessionStore.setState({ sessions: [session], openTabs: [tab] });
+
+    render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
+
+    expect(screen.getByTestId(`tn5250-screen-${tab.sessionId}`)).toBeInTheDocument();
   });
 });

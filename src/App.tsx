@@ -61,6 +61,8 @@ import {
   IpmiSolTabPane,
   SnmpTabPane,
   GrpcTabPane,
+  Tn3270TabPane,
+  Tn5250TabPane,
 } from "@/components/Terminal/ProtocolTabPanes";
 import SplitPaneContainer from "@/components/Terminal/SplitPaneContainer";
 import CommandPalette from "@/components/Shared/CommandPalette";
@@ -1269,6 +1271,22 @@ function SessionCanvas() {
           return (
             <div key={tab.id} className={clsx("absolute inset-0 overflow-hidden", isActive ? "z-10" : "z-0 hidden")}>
               <GrpcTabPane sessionId={tab.sessionId} session={session} />
+            </div>
+          );
+        }
+
+        if (tab.sessionType === SessionType.TN3270 && session) {
+          return (
+            <div key={tab.id} className={clsx("absolute inset-0 overflow-auto", isActive ? "z-10" : "z-0 hidden")}>
+              <Tn3270TabPane sessionId={tab.sessionId} session={session} />
+            </div>
+          );
+        }
+
+        if (tab.sessionType === SessionType.TN5250 && session) {
+          return (
+            <div key={tab.id} className={clsx("absolute inset-0 overflow-auto", isActive ? "z-10" : "z-0 hidden")}>
+              <Tn5250TabPane sessionId={tab.sessionId} session={session} />
             </div>
           );
         }

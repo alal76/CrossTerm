@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildRdpConfig, buildVncConfig, buildWsTermConfig, buildRedfishConfig, buildWebDavConfig, buildMqttConfig, buildSmbConfig, buildNetconfConfig, buildMoshConfig, buildWinRmConfig, buildIpmiConfig, buildSnmpConfig, buildGrpcConfig } from "@/utils/sessionConfig";
+import { buildRdpConfig, buildVncConfig, buildWsTermConfig, buildRedfishConfig, buildWebDavConfig, buildMqttConfig, buildSmbConfig, buildNetconfConfig, buildMoshConfig, buildWinRmConfig, buildIpmiConfig, buildSnmpConfig, buildGrpcConfig, buildTn3270Config, buildTn5250Config } from "@/utils/sessionConfig";
 import type { Session } from "@/types";
 import { SessionType } from "@/types";
 
@@ -348,5 +348,37 @@ describe("buildGrpcConfig", () => {
   it("passes through custom metadata headers", () => {
     const config = buildGrpcConfig(baseSession({ connection: { host: "10.0.0.40", port: 50051, protocolOptions: { metadata: { authorization: "Bearer abc" } } } }));
     expect(config.metadata).toEqual({ authorization: "Bearer abc" });
+  });
+});
+
+describe("buildTn3270Config", () => {
+  it("defaults to model2 and maps host/port/lu_name", () => {
+    const config = buildTn3270Config(baseSession({ connection: { host: "10.0.0.50", port: 23, protocolOptions: { lu_name: "LU1" } } }));
+    expect(config.host).toBe("10.0.0.50");
+    expect(config.port).toBe(23);
+    expect(config.model).toBe("model2");
+    expect(config.lu_name).toBe("LU1");
+  });
+
+  it("honors an explicit model override", () => {
+    const config = buildTn3270Config(baseSession({ connection: { host: "10.0.0.50", port: 23, protocolOptions: { model: "model5" } } }));
+    expect(config.model).toBe("model5");
+  });
+});
+
+describe("buildTn5250Config", () => {
+  it("maps host/port/device_name/system_name/ssl", () => {
+    const config = buildTn5250Config(
+      baseSession({ connection: { host: "10.0.0.60", port: 23, protocolOptions: { device_name: "QPADEV0001", system_name: "SYS1", ssl: true } } })
+    );
+    expect(config.host).toBe("10.0.0.60");
+    expect(config.device_name).toBe("QPADEV0001");
+    expect(config.system_name).toBe("SYS1");
+    expect(config.ssl).toBe(true);
+  });
+
+  it("defaults ssl to false without protocolOptions", () => {
+    const config = buildTn5250Config(baseSession({ connection: { host: "10.0.0.60", port: 23 } }));
+    expect(config.ssl).toBe(false);
   });
 });

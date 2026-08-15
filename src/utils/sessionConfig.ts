@@ -8,7 +8,7 @@
 // specific fields yet — domain, NLA, codec, etc. — so those fall back to
 // sensible defaults here until the editor grows per-type fields).
 
-import type { Session, RdpConfig, VncConfig, WsTermConfig, RedfishConfig, WebDavConfig, MqttConfig, SmbConfig, NetconfConfig, MoshConfig, WinRmConfig, WinRmAuth, IpmiConfig, IpmiPrivilege, SnmpConfig, SnmpVersion, SnmpV3AuthProtocol, SnmpV3PrivProtocol, GrpcConfig } from '@/types';
+import type { Session, RdpConfig, VncConfig, WsTermConfig, RedfishConfig, WebDavConfig, MqttConfig, SmbConfig, NetconfConfig, MoshConfig, WinRmConfig, WinRmAuth, IpmiConfig, IpmiPrivilege, SnmpConfig, SnmpVersion, SnmpV3AuthProtocol, SnmpV3PrivProtocol, GrpcConfig, Tn3270Config, Tn3270Model, Tn5250Config } from '@/types';
 
 export function buildRdpConfig(session: Session): RdpConfig {
   const opts = session.connection.protocolOptions;
@@ -182,5 +182,26 @@ export function buildGrpcConfig(session: Session): GrpcConfig {
     endpoint: explicitEndpoint ?? `${secure ? 'https' : 'http'}://${session.connection.host}:${session.connection.port}`,
     verify_tls: false,
     metadata: (opts?.['metadata'] as Record<string, string>) ?? {},
+  };
+}
+
+export function buildTn3270Config(session: Session): Tn3270Config {
+  const opts = session.connection.protocolOptions;
+  return {
+    host: session.connection.host,
+    port: session.connection.port,
+    model: (opts?.['model'] as Tn3270Model) ?? 'model2',
+    lu_name: opts?.['lu_name'] as string | undefined,
+  };
+}
+
+export function buildTn5250Config(session: Session): Tn5250Config {
+  const opts = session.connection.protocolOptions;
+  return {
+    host: session.connection.host,
+    port: session.connection.port,
+    device_name: opts?.['device_name'] as string | undefined,
+    system_name: opts?.['system_name'] as string | undefined,
+    ssl: Boolean(opts?.['ssl']),
   };
 }

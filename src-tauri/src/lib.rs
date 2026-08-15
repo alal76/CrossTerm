@@ -11,6 +11,7 @@ mod team;
 mod ftp;
 mod grpc;
 mod importer;
+mod ebcdic;
 mod ipmi;
 mod keygen;
 mod mosh;
@@ -319,12 +320,16 @@ pub fn run() {
             websocket_term::wsterm_list,
             // TN3270
             tn3270::tn3270_connect,
-            tn3270::tn3270_send,
+            tn3270::tn3270_type,
+            tn3270::tn3270_aid,
+            tn3270::tn3270_screen,
             tn3270::tn3270_disconnect,
             tn3270::tn3270_list,
             // TN5250
             tn5250::tn5250_connect,
-            tn5250::tn5250_send,
+            tn5250::tn5250_type,
+            tn5250::tn5250_aid,
+            tn5250::tn5250_screen,
             tn5250::tn5250_disconnect,
             tn5250::tn5250_list,
             // IPMI SOL

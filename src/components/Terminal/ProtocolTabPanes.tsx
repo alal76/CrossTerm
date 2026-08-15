@@ -23,6 +23,8 @@ import WinRmConsole from "@/components/WinRm/WinRmConsole";
 import IpmiSolTab from "@/components/Ipmi/IpmiSolTab";
 import SnmpBrowser from "@/components/Snmp/SnmpBrowser";
 import GrpcExplorer from "@/components/Grpc/GrpcExplorer";
+import Tn3270Screen from "@/components/Tn3270/Tn3270Screen";
+import Tn5250Screen from "@/components/Tn5250/Tn5250Screen";
 import {
   buildRdpConfig,
   buildVncConfig,
@@ -37,6 +39,8 @@ import {
   buildIpmiConfig,
   buildSnmpConfig,
   buildGrpcConfig,
+  buildTn3270Config,
+  buildTn5250Config,
 } from "@/utils/sessionConfig";
 import type { Session } from "@/types";
 
@@ -108,4 +112,14 @@ export function SnmpTabPane({ sessionId, session }: PaneProps) {
 export function GrpcTabPane({ sessionId, session }: PaneProps) {
   const config = useMemo(() => buildGrpcConfig(session), [session]);
   return <GrpcExplorer sessionId={sessionId} config={config} />;
+}
+
+export function Tn3270TabPane({ sessionId, session }: PaneProps) {
+  const config = useMemo(() => buildTn3270Config(session), [session]);
+  return <Tn3270Screen sessionId={sessionId} config={config} />;
+}
+
+export function Tn5250TabPane({ sessionId, session }: PaneProps) {
+  const config = useMemo(() => buildTn5250Config(session), [session]);
+  return <Tn5250Screen sessionId={sessionId} config={config} />;
 }

@@ -1446,3 +1446,72 @@ export interface GrpcRpcResult {
   body: string;
   trailing_metadata: Record<string, string>;
 }
+
+// --- TN3270 ---
+
+export type Tn3270Model = "model2" | "model3" | "model4" | "model5";
+
+export interface Tn3270Config {
+  host: string;
+  port: number;
+  model: Tn3270Model;
+  lu_name?: string;
+}
+
+export interface Tn3270CellInfo {
+  ch: string;
+  protected: boolean;
+  numeric: boolean;
+  displayable: boolean;
+  intensified: boolean;
+  field_start: boolean;
+}
+
+export interface Tn3270Screen {
+  session_id: string;
+  rows: number;
+  cols: number;
+  cursor_addr: number;
+  cells: Tn3270CellInfo[];
+}
+
+export type Tn3270Aid =
+  | "enter"
+  | "pf1" | "pf2" | "pf3" | "pf4" | "pf5" | "pf6"
+  | "pf7" | "pf8" | "pf9" | "pf10" | "pf11" | "pf12"
+  | "pa1" | "pa2" | "pa3"
+  | "clear";
+
+// --- TN5250 ---
+
+export interface Tn5250Config {
+  host: string;
+  port: number;
+  device_name?: string;
+  system_name?: string;
+  ssl: boolean;
+}
+
+export interface Tn5250CellInfo {
+  ch: string;
+  bypass: boolean;
+  numeric: boolean;
+  nondisplay: boolean;
+  mandatory: boolean;
+  field_start: boolean;
+}
+
+export interface Tn5250Screen {
+  session_id: string;
+  rows: number;
+  cols: number;
+  cursor_row: number;
+  cursor_col: number;
+  cells: Tn5250CellInfo[];
+}
+
+export type Tn5250Aid =
+  | "enter"
+  | "f1" | "f2" | "f3" | "f4" | "f5" | "f6"
+  | "f7" | "f8" | "f9" | "f10" | "f11" | "f12"
+  | "clear" | "help" | "roll_up" | "roll_down";
