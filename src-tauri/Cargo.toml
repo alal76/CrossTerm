@@ -104,7 +104,9 @@ p256 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
 # System
 libc = "0.2"
 if-addrs = "0.13"
-socket2 = "0.5"
+# "all" is required for Socket::bind_device (Linux/Android SO_BINDTODEVICE,
+# used by network::bind_socket_to_interface for interface-scoped scans).
+socket2 = { version = "0.5", features = ["all"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 
 # Network discovery (mDNS/Bonjour + TLS certificate inspection for Network Explorer)
