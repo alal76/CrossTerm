@@ -41,7 +41,6 @@ export default function TerminalView({ terminalId, isActive }: TerminalViewProps
 
   useHotTerminalTheme(termRef);
 
-  const terminals = useTerminalStore((state) => state.terminals);
   const broadcastMode = useTerminalStore((state) => state.broadcastMode);
   const updateTerminalDimensions = useTerminalStore((state) => state.updateTerminalDimensions);
   const updateTerminalStatus = useTerminalStore((state) => state.updateTerminalStatus);
@@ -68,14 +67,20 @@ export default function TerminalView({ terminalId, isActive }: TerminalViewProps
   const emitData = useCallback(
     (data: string) => {
       if (broadcastMode) {
-        for (const [id] of terminals.entries()) {
+        // Read the live map imperatively rather than subscribing to it —
+        // subscribing here would put `terminals` in this callback's deps,
+        // and since every store mutator (incl. updateTerminalStatus, called
+        // by the mount effect below) always returns a new Map, that would
+        // make `emitData` — and the mount effect that depends on it —
+        // re-run on every store update, an infinite dispose/recreate loop.
+        for (const [id] of useTerminalStore.getState().terminals.entries()) {
           void invoke("terminal_write", { id, data }).catch(() => {});
         }
         return;
       }
       void invoke("terminal_write", { id: terminalId, data }).catch(() => {});
     },
-    [broadcastMode, terminalId, terminals],
+    [broadcastMode, terminalId],
   );
 
   const handleResize = useCallback(() => {
