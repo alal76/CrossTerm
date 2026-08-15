@@ -21,6 +21,7 @@ import {
   WinRmTabPane,
   IpmiSolTabPane,
   SnmpTabPane,
+  GrpcTabPane,
 } from "@/components/Terminal/ProtocolTabPanes";
 
 // ── Resize Handle ──
@@ -107,6 +108,7 @@ const SESSION_TAB_PANES: Partial<Record<SessionType, typeof RdpTabPane>> = {
   [SessionType.WinRM]: WinRmTabPane,
   [SessionType.IpmiSol]: IpmiSolTabPane,
   [SessionType.Snmp]: SnmpTabPane,
+  [SessionType.GrpcExplorer]: GrpcTabPane,
 };
 
 function renderPaneContent(tab: { sessionId: string; sessionType: SessionType }, session: Session | undefined, isActive: boolean) {

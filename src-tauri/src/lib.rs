@@ -372,6 +372,7 @@ pub fn run() {
             // gRPC
             grpc::grpc_connect,
             grpc::grpc_list_services,
+            grpc::grpc_describe_service,
             grpc::grpc_invoke,
             grpc::grpc_disconnect,
             grpc::grpc_list_sessions,

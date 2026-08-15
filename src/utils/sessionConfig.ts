@@ -8,7 +8,7 @@
 // specific fields yet — domain, NLA, codec, etc. — so those fall back to
 // sensible defaults here until the editor grows per-type fields).
 
-import type { Session, RdpConfig, VncConfig, WsTermConfig, RedfishConfig, WebDavConfig, MqttConfig, SmbConfig, NetconfConfig, MoshConfig, WinRmConfig, WinRmAuth, IpmiConfig, IpmiPrivilege, SnmpConfig, SnmpVersion, SnmpV3AuthProtocol, SnmpV3PrivProtocol } from '@/types';
+import type { Session, RdpConfig, VncConfig, WsTermConfig, RedfishConfig, WebDavConfig, MqttConfig, SmbConfig, NetconfConfig, MoshConfig, WinRmConfig, WinRmAuth, IpmiConfig, IpmiPrivilege, SnmpConfig, SnmpVersion, SnmpV3AuthProtocol, SnmpV3PrivProtocol, GrpcConfig } from '@/types';
 
 export function buildRdpConfig(session: Session): RdpConfig {
   const opts = session.connection.protocolOptions;
@@ -171,5 +171,16 @@ export function buildSnmpConfig(session: Session): SnmpConfig {
     priv_passphrase: opts?.['priv_passphrase'] as string | undefined,
     priv_protocol: opts?.['priv_protocol'] as SnmpV3PrivProtocol | undefined,
     timeout_ms: 2000,
+  };
+}
+
+export function buildGrpcConfig(session: Session): GrpcConfig {
+  const opts = session.connection.protocolOptions;
+  const explicitEndpoint = opts?.['endpoint'] as string | undefined;
+  const secure = Boolean(opts?.['secure']);
+  return {
+    endpoint: explicitEndpoint ?? `${secure ? 'https' : 'http'}://${session.connection.host}:${session.connection.port}`,
+    verify_tls: false,
+    metadata: (opts?.['metadata'] as Record<string, string>) ?? {},
   };
 }

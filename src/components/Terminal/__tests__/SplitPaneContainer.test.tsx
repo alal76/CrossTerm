@@ -86,6 +86,11 @@ vi.mock("@/components/Snmp/SnmpBrowser", () => ({
     <div data-testid={`snmp-browser-${sessionId}`}>SnmpBrowser Mock</div>
   ),
 }));
+vi.mock("@/components/Grpc/GrpcExplorer", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`grpc-explorer-${sessionId}`}>GrpcExplorer Mock</div>
+  ),
+}));
 
 function baseSession(overrides: Partial<Session> = {}): Session {
   return {
@@ -271,5 +276,15 @@ describe("SplitPaneContainer session type routing", () => {
     render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
 
     expect(screen.getByTestId(`snmp-browser-${tab.sessionId}`)).toBeInTheDocument();
+  });
+
+  it("routes a gRPC leaf pane to GrpcExplorer", () => {
+    const session = baseSession({ type: SessionType.GrpcExplorer, connection: { host: "10.0.0.40", port: 50051 } });
+    const tab = baseTab({ sessionType: SessionType.GrpcExplorer });
+    useSessionStore.setState({ sessions: [session], openTabs: [tab] });
+
+    render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
+
+    expect(screen.getByTestId(`grpc-explorer-${tab.sessionId}`)).toBeInTheDocument();
   });
 });

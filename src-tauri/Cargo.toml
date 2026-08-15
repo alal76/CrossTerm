@@ -60,6 +60,7 @@ async-trait = "0.1"
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
+tokio-stream = "0.1"
 
 # Serialization
 toml = "0.8"

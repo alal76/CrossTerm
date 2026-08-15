@@ -1418,3 +1418,31 @@ export interface SnmpVarBind {
   value_type: string;
   value: string;
 }
+
+// --- gRPC ---
+
+export interface GrpcConfig {
+  endpoint: string;
+  verify_tls: boolean;
+  metadata: Record<string, string>;
+}
+
+export interface GrpcMethod {
+  name: string;
+  client_streaming: boolean;
+  server_streaming: boolean;
+  input_type: string;
+  output_type: string;
+}
+
+export interface GrpcService {
+  name: string;
+  methods: GrpcMethod[];
+}
+
+export interface GrpcRpcResult {
+  status_code: number;
+  message: string;
+  body: string;
+  trailing_metadata: Record<string, string>;
+}

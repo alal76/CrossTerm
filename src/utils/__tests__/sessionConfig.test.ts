@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildRdpConfig, buildVncConfig, buildWsTermConfig, buildRedfishConfig, buildWebDavConfig, buildMqttConfig, buildSmbConfig, buildNetconfConfig, buildMoshConfig, buildWinRmConfig, buildIpmiConfig, buildSnmpConfig } from "@/utils/sessionConfig";
+import { buildRdpConfig, buildVncConfig, buildWsTermConfig, buildRedfishConfig, buildWebDavConfig, buildMqttConfig, buildSmbConfig, buildNetconfConfig, buildMoshConfig, buildWinRmConfig, buildIpmiConfig, buildSnmpConfig, buildGrpcConfig } from "@/utils/sessionConfig";
 import type { Session } from "@/types";
 import { SessionType } from "@/types";
 
@@ -324,5 +324,29 @@ describe("buildSnmpConfig", () => {
   it("maps the community string for v1/v2c", () => {
     const config = buildSnmpConfig(baseSession({ connection: { host: "10.0.0.30", port: 161, protocolOptions: { community: "private" } } }));
     expect(config.community).toBe("private");
+  });
+});
+
+describe("buildGrpcConfig", () => {
+  it("builds an http:// endpoint from host/port by default", () => {
+    const config = buildGrpcConfig(baseSession({ connection: { host: "10.0.0.40", port: 50051 } }));
+    expect(config.endpoint).toBe("http://10.0.0.40:50051");
+    expect(config.verify_tls).toBe(false);
+    expect(config.metadata).toEqual({});
+  });
+
+  it("uses https:// when protocolOptions.secure is set", () => {
+    const config = buildGrpcConfig(baseSession({ connection: { host: "10.0.0.40", port: 443, protocolOptions: { secure: true } } }));
+    expect(config.endpoint).toBe("https://10.0.0.40:443");
+  });
+
+  it("prefers an explicit protocolOptions.endpoint over the derived one", () => {
+    const config = buildGrpcConfig(baseSession({ connection: { host: "h", port: 1, protocolOptions: { endpoint: "https://api.example.com" } } }));
+    expect(config.endpoint).toBe("https://api.example.com");
+  });
+
+  it("passes through custom metadata headers", () => {
+    const config = buildGrpcConfig(baseSession({ connection: { host: "10.0.0.40", port: 50051, protocolOptions: { metadata: { authorization: "Bearer abc" } } } }));
+    expect(config.metadata).toEqual({ authorization: "Bearer abc" });
   });
 });
