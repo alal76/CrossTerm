@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import clsx from "clsx";
-import { X, Save } from "lucide-react";
+import { X, Save, ChevronRight, ChevronDown } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import { useSessionStore } from "@/stores/sessionStore";
 import { SessionType } from "@/types";
@@ -104,6 +104,9 @@ export default function SessionEditor({ session, defaultType, onClose }: Session
   const [startupScript, setStartupScript] = useState(session?.startupScript ?? "");
   const [notes, setNotes] = useState(session?.notes ?? "");
   const [errors, setErrors] = useState<FormErrors>({});
+  const [advancedOpen, setAdvancedOpen] = useState(
+    !!(session?.group || session?.tags.length || session?.credentialRef || session?.startupScript || session?.notes)
+  );
 
   const nameRef = useRef<HTMLInputElement>(null);
 
@@ -278,63 +281,78 @@ export default function SessionEditor({ session, defaultType, onClose }: Session
             </Field>
           )}
 
-          {/* Group */}
-          <Field label="Group / Folder">
-            <input
-              value={group}
-              onChange={(e) => setGroup(e.target.value)}
-              placeholder="Production"
-              list="session-folders"
-              className={inputClass(false)}
-            />
-            <datalist id="session-folders">
-              {sessionFolders.map((f) => (
-                <option key={f} value={f} />
-              ))}
-            </datalist>
-          </Field>
+          {/* Advanced toggle */}
+          <button
+            type="button"
+            onClick={() => setAdvancedOpen((v) => !v)}
+            className="flex items-center gap-1 text-[11px] text-text-secondary hover:text-text-primary transition-colors duration-[var(--duration-micro)]"
+            aria-expanded={advancedOpen}
+          >
+            {advancedOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            Advanced
+          </button>
 
-          {/* Tags */}
-          <Field label="Tags (comma-separated)">
-            <input
-              value={tags}
-              onChange={(e) => setTags(e.target.value)}
-              placeholder="web, staging"
-              className={inputClass(false)}
-            />
-          </Field>
+          {advancedOpen && (
+            <div className="space-y-3.5">
+              {/* Group */}
+              <Field label="Group / Folder">
+                <input
+                  value={group}
+                  onChange={(e) => setGroup(e.target.value)}
+                  placeholder="Production"
+                  list="session-folders"
+                  className={inputClass(false)}
+                />
+                <datalist id="session-folders">
+                  {sessionFolders.map((f) => (
+                    <option key={f} value={f} />
+                  ))}
+                </datalist>
+              </Field>
 
-          {/* Credential Reference */}
-          <Field label="Credential">
-            <input
-              value={credentialRef}
-              onChange={(e) => setCredentialRef(e.target.value)}
-              placeholder="Credential name or ID"
-              className={inputClass(false)}
-            />
-          </Field>
+              {/* Tags */}
+              <Field label="Tags (comma-separated)">
+                <input
+                  value={tags}
+                  onChange={(e) => setTags(e.target.value)}
+                  placeholder="web, staging"
+                  className={inputClass(false)}
+                />
+              </Field>
 
-          {/* Startup Script */}
-          <Field label="Startup Script">
-            <textarea
-              value={startupScript}
-              onChange={(e) => setStartupScript(e.target.value)}
-              placeholder="Commands to run after connection..."
-              rows={2}
-              className={clsx(inputClass(false), "resize-none font-mono text-xs")}
-            />
-          </Field>
+              {/* Credential Reference */}
+              <Field label="Credential">
+                <input
+                  value={credentialRef}
+                  onChange={(e) => setCredentialRef(e.target.value)}
+                  placeholder="Credential name or ID"
+                  className={inputClass(false)}
+                />
+              </Field>
 
-          {/* Notes */}
-          <Field label="Notes">
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Optional notes…"
-              rows={2}
-              className={clsx(inputClass(false), "resize-none")}
-            />
-          </Field>
+              {/* Startup Script */}
+              <Field label="Startup Script">
+                <textarea
+                  value={startupScript}
+                  onChange={(e) => setStartupScript(e.target.value)}
+                  placeholder="Commands to run after connection..."
+                  rows={2}
+                  className={clsx(inputClass(false), "resize-none font-mono text-xs")}
+                />
+              </Field>
+
+              {/* Notes */}
+              <Field label="Notes">
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Optional notes…"
+                  rows={2}
+                  className={clsx(inputClass(false), "resize-none")}
+                />
+              </Field>
+            </div>
+          )}
         </div>
 
         {/* Footer */}

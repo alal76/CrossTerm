@@ -51,11 +51,14 @@ describe("SessionEditor", () => {
     // Dialog should be open
     expect(screen.getByRole("dialog")).toBeInTheDocument();
 
-    // All key form fields should be present
+    // Always-visible fields should be present
     expect(screen.getByPlaceholderText("My Server")).toBeInTheDocument(); // Name
     expect(screen.getByDisplayValue("SSH")).toBeInTheDocument(); // Type select (default SSH)
     expect(screen.getByPlaceholderText("192.168.1.100")).toBeInTheDocument(); // Host
     expect(screen.getByPlaceholderText("22")).toBeInTheDocument(); // Port
+
+    // Advanced fields are behind the collapsed "Advanced" toggle
+    await user.click(screen.getByRole("button", { name: "Advanced" }));
     expect(screen.getByPlaceholderText("Production")).toBeInTheDocument(); // Group
     expect(screen.getByPlaceholderText("web, staging")).toBeInTheDocument(); // Tags
     expect(screen.getByPlaceholderText("Credential name or ID")).toBeInTheDocument(); // Credential
@@ -116,6 +119,7 @@ describe("SessionEditor", () => {
     // Fill in form fields
     const nameInput = screen.getByPlaceholderText("My Server");
     const hostInput = screen.getByPlaceholderText("192.168.1.100");
+    await user.click(screen.getByRole("button", { name: "Advanced" }));
     const groupInput = screen.getByPlaceholderText("Production");
     const tagsInput = screen.getByPlaceholderText("web, staging");
 
@@ -158,5 +162,36 @@ describe("SessionEditor", () => {
     expect((screen.getByPlaceholderText("192.168.1.100") as HTMLInputElement).value).toBe(
       "10.0.0.5"
     );
+  });
+
+  it("Advanced section is collapsed by default for a new session", () => {
+    render(<SessionEditor onClose={onClose} />);
+
+    expect(screen.getByRole("button", { name: "Advanced" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByPlaceholderText("Production")).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("web, staging")).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Credential name or ID")).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Commands to run after connection...")).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Optional notes…")).not.toBeInTheDocument();
+  });
+
+  it("clicking the Advanced toggle reveals the advanced fields", async () => {
+    const user = userEvent.setup();
+    render(<SessionEditor onClose={onClose} />);
+
+    const toggle = screen.getByRole("button", { name: "Advanced" });
+    await user.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByPlaceholderText("Production")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("web, staging")).toBeInTheDocument();
+  });
+
+  it("Advanced section starts expanded when editing a session that already has advanced data", () => {
+    const session = makeSession({ group: "Staging", tags: ["prod"] });
+    render(<SessionEditor session={session} onClose={onClose} />);
+
+    expect(screen.getByRole("button", { name: "Advanced" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByPlaceholderText("Production")).toBeInTheDocument();
   });
 });
