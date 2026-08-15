@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 use thiserror::Error;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -343,21 +344,25 @@ fn validate_config(config: &VncConfig) -> Result<(), VncError> {
 
 // ── Tauri Commands ────────────────────────────────────────────────────────
 
-#[tauri::command]
-pub async fn vnc_connect(
-    state: tauri::State<'_, VncState>,
-    app: AppHandle,
-    config: VncConfig,
-) -> Result<VncConnectResult, VncError> {
-    validate_config(&config)?;
-
-    let addr = format!("{}:{}", config.host, config.port);
-    let tcp = TcpStream::connect(&addr)
-        .await
-        .map_err(|e| VncError::ConnectionFailed(e.to_string()))?;
-
-    let password = config.password.clone().unwrap_or_default();
-    let vnc = VncConnector::new(tcp)
+/// Runs the VNC handshake and event loop over any duplex stream and
+/// registers the resulting connection in `state` — shared by `vnc_connect`
+/// (a plain `TcpStream`) and the Proxmox console module (a WebSocket
+/// stream bridged to look like a duplex stream), which both need the exact
+/// same encoding negotiation, resolution handshake, and event-loop/state
+/// bookkeeping and would otherwise have to duplicate all of it.
+pub(crate) async fn connect_stream<S>(
+    state: &VncState,
+    app: &AppHandle,
+    stream: S,
+    host: String,
+    port: u16,
+    password: Option<String>,
+) -> Result<VncConnectResult, VncError>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
+{
+    let password = password.unwrap_or_default();
+    let vnc = VncConnector::new(stream)
         .set_auth_method(async move { Ok(password) })
         .add_encoding(VncLibEncoding::Tight)
         .add_encoding(VncLibEncoding::Zrle)
@@ -398,8 +403,8 @@ pub async fn vnc_connect(
             id.clone(),
             VncConn {
                 input_tx,
-                host: config.host.clone(),
-                port: config.port,
+                host,
+                port,
                 width,
                 height,
                 view_only: false,
@@ -423,6 +428,22 @@ pub async fn vnc_connect(
     );
 
     Ok(VncConnectResult { id, width, height })
+}
+
+#[tauri::command]
+pub async fn vnc_connect(
+    state: tauri::State<'_, VncState>,
+    app: AppHandle,
+    config: VncConfig,
+) -> Result<VncConnectResult, VncError> {
+    validate_config(&config)?;
+
+    let addr = format!("{}:{}", config.host, config.port);
+    let tcp = TcpStream::connect(&addr)
+        .await
+        .map_err(|e| VncError::ConnectionFailed(e.to_string()))?;
+
+    connect_stream(&state, &app, tcp, config.host, config.port, config.password).await
 }
 
 #[tauri::command]

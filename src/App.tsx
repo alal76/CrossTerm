@@ -66,6 +66,7 @@ import {
   RloginTabPane,
   DockerLogsTabPane,
   X11ForwardTabPane,
+  ProxmoxConsoleTabPane,
 } from "@/components/Terminal/ProtocolTabPanes";
 import SplitPaneContainer from "@/components/Terminal/SplitPaneContainer";
 import CommandPalette from "@/components/Shared/CommandPalette";
@@ -1314,6 +1315,14 @@ function SessionCanvas() {
           return (
             <div key={tab.id} className={clsx("absolute inset-0 overflow-hidden", isActive ? "z-10" : "z-0 hidden")}>
               <X11ForwardTabPane sessionId={tab.sessionId} session={session} />
+            </div>
+          );
+        }
+
+        if (tab.sessionType === SessionType.ProxmoxConsole && session) {
+          return (
+            <div key={tab.id} className={clsx("absolute inset-0 overflow-hidden", isActive ? "z-10" : "z-0 hidden")}>
+              <ProxmoxConsoleTabPane sessionId={tab.sessionId} session={session} />
             </div>
           );
         }

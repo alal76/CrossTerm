@@ -8,7 +8,7 @@
 // specific fields yet — domain, NLA, codec, etc. — so those fall back to
 // sensible defaults here until the editor grows per-type fields).
 
-import type { Session, RdpConfig, VncConfig, WsTermConfig, RedfishConfig, WebDavConfig, MqttConfig, SmbConfig, NetconfConfig, MoshConfig, WinRmConfig, WinRmAuth, IpmiConfig, IpmiPrivilege, SnmpConfig, SnmpVersion, SnmpV3AuthProtocol, SnmpV3PrivProtocol, GrpcConfig, Tn3270Config, Tn3270Model, Tn5250Config, RloginConfig, DockerLogsConfig, X11ForwardConfig, X11ForwardAuth } from '@/types';
+import type { Session, RdpConfig, VncConfig, WsTermConfig, RedfishConfig, WebDavConfig, MqttConfig, SmbConfig, NetconfConfig, MoshConfig, WinRmConfig, WinRmAuth, IpmiConfig, IpmiPrivilege, SnmpConfig, SnmpVersion, SnmpV3AuthProtocol, SnmpV3PrivProtocol, GrpcConfig, Tn3270Config, Tn3270Model, Tn5250Config, RloginConfig, DockerLogsConfig, X11ForwardConfig, X11ForwardAuth, ProxmoxConsoleConfig, ProxmoxResourceType } from '@/types';
 
 export function buildRdpConfig(session: Session): RdpConfig {
   const opts = session.connection.protocolOptions;
@@ -245,5 +245,20 @@ export function buildX11ForwardConfig(session: Session): X11ForwardConfig {
     auth,
     remote_command: (opts?.['remote_command'] as string) ?? 'xterm',
     local_display: (opts?.['local_display'] as string) ?? '0',
+  };
+}
+
+export function buildProxmoxConsoleConfig(session: Session): ProxmoxConsoleConfig {
+  const opts = session.connection.protocolOptions;
+  return {
+    host: session.connection.host,
+    port: session.connection.port || 8006,
+    node: (opts?.['node'] as string) ?? '',
+    vmid: (opts?.['vmid'] as string) ?? '',
+    resource_type: ((opts?.['resource_type'] as ProxmoxResourceType) ?? 'qemu'),
+    username: (opts?.['username'] as string) ?? '',
+    realm: (opts?.['realm'] as string) ?? 'pam',
+    password: (opts?.['password'] as string) ?? '',
+    verify_tls: Boolean(opts?.['verify_tls']),
   };
 }

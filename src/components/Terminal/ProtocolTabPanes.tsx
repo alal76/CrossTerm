@@ -47,6 +47,7 @@ import {
   buildRloginConfig,
   buildDockerLogsConfig,
   buildX11ForwardConfig,
+  buildProxmoxConsoleConfig,
 } from "@/utils/sessionConfig";
 import type { Session } from "@/types";
 
@@ -143,4 +144,9 @@ export function DockerLogsTabPane({ sessionId, session }: PaneProps) {
 export function X11ForwardTabPane({ sessionId, session }: PaneProps) {
   const config = useMemo(() => buildX11ForwardConfig(session), [session]);
   return <X11ForwardPanel sessionId={sessionId} config={config} />;
+}
+
+export function ProxmoxConsoleTabPane({ sessionId, session }: PaneProps) {
+  const config = useMemo(() => buildProxmoxConsoleConfig(session), [session]);
+  return <VncViewer sessionId={sessionId} config={config} connectCommand="proxmox_console_connect" />;
 }

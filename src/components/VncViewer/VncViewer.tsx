@@ -3,12 +3,16 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
 import clsx from "clsx";
-import type { VncConfig, VncConnectionStatus, VncScalingMode } from "@/types";
+import type { VncConfig, VncConnectionStatus, VncScalingMode, ProxmoxConsoleConfig } from "@/types";
 import VncToolbar from "./VncToolbar";
 
 interface VncViewerProps {
   readonly sessionId: string;
-  readonly config: VncConfig;
+  readonly config: VncConfig | ProxmoxConsoleConfig;
+  /** Tauri command that establishes the connection and returns { id, width, height }.
+   * Defaults to plain VNC; ProxmoxConsole reuses this viewer with its own connect
+   * command since Proxmox's console is VNC tunneled inside a WebSocket. */
+  readonly connectCommand?: string;
 }
 
 interface VncFramePayload {
@@ -67,7 +71,7 @@ function vncKeysym(e: KeyboardEvent): number {
   return 0;
 }
 
-export default function VncViewer({ sessionId, config }: VncViewerProps) {
+export default function VncViewer({ sessionId, config, connectCommand = "vnc_connect" }: VncViewerProps) {
   const { t } = useTranslation();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -85,7 +89,7 @@ export default function VncViewer({ sessionId, config }: VncViewerProps) {
     async function connect() {
       try {
         const result = await invoke<{ id: string; width: number; height: number }>(
-          "vnc_connect",
+          connectCommand,
           { config }
         );
         if (cancelled) {
@@ -116,7 +120,7 @@ export default function VncViewer({ sessionId, config }: VncViewerProps) {
         connectionIdRef.current = null;
       }
     };
-  }, [sessionId, config]);
+  }, [sessionId, config, connectCommand]);
 
   // Server-initiated resize (e.g. DesktopSize pseudo-encoding)
   useEffect(() => {

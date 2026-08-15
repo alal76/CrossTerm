@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildRdpConfig, buildVncConfig, buildWsTermConfig, buildRedfishConfig, buildWebDavConfig, buildMqttConfig, buildSmbConfig, buildNetconfConfig, buildMoshConfig, buildWinRmConfig, buildIpmiConfig, buildSnmpConfig, buildGrpcConfig, buildTn3270Config, buildTn5250Config, buildRloginConfig, buildDockerLogsConfig, buildX11ForwardConfig } from "@/utils/sessionConfig";
+import { buildRdpConfig, buildVncConfig, buildWsTermConfig, buildRedfishConfig, buildWebDavConfig, buildMqttConfig, buildSmbConfig, buildNetconfConfig, buildMoshConfig, buildWinRmConfig, buildIpmiConfig, buildSnmpConfig, buildGrpcConfig, buildTn3270Config, buildTn5250Config, buildRloginConfig, buildDockerLogsConfig, buildX11ForwardConfig, buildProxmoxConsoleConfig } from "@/utils/sessionConfig";
 import type { Session } from "@/types";
 import { SessionType } from "@/types";
 
@@ -439,5 +439,38 @@ describe("buildX11ForwardConfig", () => {
     expect(config.auth).toEqual({ type: "private_key", key_data: "PEM", passphrase: "pass" });
     expect(config.remote_command).toBe("xclock");
     expect(config.local_display).toBe("1");
+  });
+});
+
+describe("buildProxmoxConsoleConfig", () => {
+  it("maps host/port/node/vmid and defaults realm to pam, resource_type to qemu", () => {
+    const config = buildProxmoxConsoleConfig(
+      baseSession({ connection: { host: "10.0.0.5", port: 8006, protocolOptions: { node: "pve1", vmid: "101", username: "root", password: "hunter2" } } })
+    );
+    expect(config.host).toBe("10.0.0.5");
+    expect(config.port).toBe(8006);
+    expect(config.node).toBe("pve1");
+    expect(config.vmid).toBe("101");
+    expect(config.resource_type).toBe("qemu");
+    expect(config.realm).toBe("pam");
+    expect(config.username).toBe("root");
+    expect(config.password).toBe("hunter2");
+    expect(config.verify_tls).toBe(false);
+  });
+
+  it("falls back to port 8006 when the session has no port, and honors explicit lxc/realm/verify_tls", () => {
+    const config = buildProxmoxConsoleConfig(
+      baseSession({
+        connection: {
+          host: "10.0.0.5",
+          port: 0,
+          protocolOptions: { node: "pve1", vmid: "200", resource_type: "lxc", realm: "pve", verify_tls: true },
+        },
+      })
+    );
+    expect(config.port).toBe(8006);
+    expect(config.resource_type).toBe("lxc");
+    expect(config.realm).toBe("pve");
+    expect(config.verify_tls).toBe(true);
   });
 });

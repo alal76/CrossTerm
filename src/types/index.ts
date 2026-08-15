@@ -440,6 +440,22 @@ export interface VncConnectionInfo {
   scaling_mode: VncScalingMode;
 }
 
+// --- Proxmox Console Types ---
+
+export type ProxmoxResourceType = 'qemu' | 'lxc';
+
+export interface ProxmoxConsoleConfig {
+  host: string;
+  port: number;
+  node: string;
+  vmid: string;
+  resource_type: ProxmoxResourceType;
+  username: string;
+  realm: string;
+  password: string;
+  verify_tls: boolean;
+}
+
 // --- Cloud Types ---
 
 export type CloudProvider = 'aws' | 'azure' | 'gcp';

@@ -43,8 +43,10 @@ vi.mock("@/components/RdpViewer/RdpViewer", () => ({
   ),
 }));
 vi.mock("@/components/VncViewer/VncViewer", () => ({
-  default: ({ sessionId }: { sessionId: string }) => (
-    <div data-testid={`vnc-viewer-${sessionId}`}>VncViewer Mock</div>
+  default: ({ sessionId, connectCommand }: { sessionId: string; connectCommand?: string }) => (
+    <div data-testid={`vnc-viewer-${sessionId}`} data-connect-command={connectCommand ?? "vnc_connect"}>
+      VncViewer Mock
+    </div>
   ),
 }));
 vi.mock("@/components/Telnet/TelnetTerminal", () => ({
@@ -335,6 +337,20 @@ describe("App", () => {
       render(<App />);
 
       expect(screen.getByTestId(`vnc-viewer-${tab.sessionId}`)).toBeInTheDocument();
+      expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
+    });
+
+    it("routes a Proxmox Console tab to VncViewer with the proxmox connect command", () => {
+      const session = baseSession({ type: SessionType.ProxmoxConsole, connection: { host: "10.0.0.5", port: 8006 } });
+      const tab = baseTab({ sessionType: SessionType.ProxmoxConsole });
+      useSessionStore.setState({ sessions: [session], openTabs: [tab], activeTabId: tab.id });
+
+      render(<App />);
+
+      expect(screen.getByTestId(`vnc-viewer-${tab.sessionId}`)).toHaveAttribute(
+        "data-connect-command",
+        "proxmox_console_connect"
+      );
       expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
     });
 

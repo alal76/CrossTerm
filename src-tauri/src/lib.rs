@@ -20,6 +20,7 @@ mod keygen;
 mod mosh;
 mod mqtt;
 mod netconf;
+mod proxmox;
 mod redfish;
 mod smb;
 mod snmp;
@@ -491,6 +492,7 @@ pub fn run() {
             vnc::vnc_screenshot,
             vnc::vnc_set_scaling,
             vnc::vnc_list_connections,
+            proxmox::proxmox_console_connect,
             // Editor
             editor::editor_open,
             editor::editor_save,
