@@ -24,6 +24,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use thiserror::Error;
+#[cfg(unix)]
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 #[cfg(unix)]
 use tokio::net::UnixStream;
@@ -172,6 +173,11 @@ fn hex_encode(bytes: &[u8]) -> String {
 /// because our fake cookie is generated to be the exact same length as a
 /// real `MIT-MAGIC-COOKIE-1` (16 bytes), so no length field needs to
 /// change and the rest of the packet's byte offsets stay valid.
+// Portable byte-manipulation logic (no Unix-specific code), kept unguarded
+// so its tests below run on every platform — only #[cfg(unix)]'s
+// relay_x11_channel calls it at runtime, so it's genuinely unreachable
+// outside tests on Windows today.
+#[cfg_attr(not(unix), allow(dead_code))]
 fn patch_connection_setup(packet: &mut [u8], real_auth: &(String, Vec<u8>)) -> Option<()> {
     if packet.len() < 12 {
         return None;

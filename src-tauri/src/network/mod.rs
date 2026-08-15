@@ -774,7 +774,10 @@ async fn check_port(ip: IpAddr, port: u16, timeout: Duration) -> Option<OpenPort
 async fn ping_host(ip: IpAddr, timeout: Duration) -> (bool, Option<u8>) {
     let ip_str = ip.to_string();
     // See the `BOUND_INTERFACE` note above `connect_bound`: same VPN-route
-    // race applies to ping's ICMP socket, so bind it the same way.
+    // race applies to ping's ICMP socket, so bind it the same way. Windows'
+    // `ping` argv below has no interface-binding equivalent, so it's unused
+    // on that platform.
+    #[cfg_attr(target_os = "windows", allow(unused_variables))]
     let bound_if = current_bound_interface();
 
     // Platform-specific argv for a single-shot ping.
@@ -926,7 +929,7 @@ fn dns_lookup_via_getnameinfo(ip: IpAddr) -> Option<String> {
 }
 
 #[cfg(not(unix))]
-fn dns_lookup_via_getnameinfo(ip: IpAddr) -> Option<String> {
+fn dns_lookup_via_getnameinfo(_ip: IpAddr) -> Option<String> {
     // On Windows use nslookup (spawned below); getnameinfo is available but
     // the nslookup path is cleaner across MSVC and GNUC toolchains.
     None
