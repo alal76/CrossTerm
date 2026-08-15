@@ -586,3 +586,40 @@ pub fn vnc_list_connections(
         .collect();
     Ok(list)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_config() -> VncConfig {
+        VncConfig {
+            host: "192.168.0.11".into(),
+            port: 5900,
+            password: Some("hunter2".into()),
+            vnc_auth: true,
+            vencrypt: false,
+            tls_cert_path: None,
+        }
+    }
+
+    #[test]
+    fn validate_config_accepts_a_well_formed_config() {
+        assert!(validate_config(&sample_config()).is_ok());
+    }
+
+    #[test]
+    fn validate_config_rejects_an_empty_host() {
+        let mut cfg = sample_config();
+        cfg.host = String::new();
+        let err = validate_config(&cfg).unwrap_err();
+        assert!(matches!(err, VncError::InvalidConfig(_)));
+    }
+
+    #[test]
+    fn validate_config_rejects_a_zero_port() {
+        let mut cfg = sample_config();
+        cfg.port = 0;
+        let err = validate_config(&cfg).unwrap_err();
+        assert!(matches!(err, VncError::InvalidConfig(_)));
+    }
+}

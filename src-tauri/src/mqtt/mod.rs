@@ -216,3 +216,15 @@ pub async fn mqtt_disconnect(
 pub fn mqtt_list_sessions(state: tauri::State<'_, MqttState>) -> Vec<MqttSession> {
     state.sessions.lock().unwrap().values().map(|(s, _)| s.clone()).collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mqtt_qos_maps_to_the_matching_rumqttc_qos_level() {
+        assert!(matches!(QoS::from(MqttQos::AtMostOnce), QoS::AtMostOnce));
+        assert!(matches!(QoS::from(MqttQos::AtLeastOnce), QoS::AtLeastOnce));
+        assert!(matches!(QoS::from(MqttQos::ExactlyOnce), QoS::ExactlyOnce));
+    }
+}

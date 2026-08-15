@@ -74,6 +74,13 @@ fn build_client(verify_tls: bool) -> Result<reqwest::Client, WebDavError> {
     b.build().map_err(|e| WebDavError::Request(e.to_string()))
 }
 
+/// Parses a multistatus PROPFIND response. Note: this matches tags by the
+/// literal `D:` prefix (as sent in this module's own PROPFIND_BODY request
+/// and commonly echoed back by IIS/Apache mod_dav), not by resolving the
+/// `DAV:` namespace URI — per the XML spec a server is free to use any
+/// prefix (or none), so a server that replies with e.g. `d:` or `lp1:`-
+/// prefixed elements (as some WebDAV implementations do) would parse to an
+/// empty list here. Documented rather than silently assumed to be complete.
 fn parse_propfind(xml: &str, base_url: &str) -> Vec<WebDavEntry> {
     let mut entries = Vec::new();
     for response in xml.split("<D:response>").skip(1) {
@@ -248,4 +255,77 @@ pub fn webdav_list_sessions(state: tauri::State<'_, WebDavState>) -> Vec<WebDavS
     state.sessions.lock().unwrap().iter().map(|(id, (cfg, _))| WebDavSession {
         id: id.clone(), url: cfg.url.clone(),
     }).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_propfind_extracts_collection_and_file_entries() {
+        let xml = r#"<?xml version="1.0"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>/dav/docs/</D:href>
+    <D:propstat><D:prop>
+      <D:resourcetype><D:collection/></D:resourcetype>
+      <D:getlastmodified>Mon, 01 Jan 2026 00:00:00 GMT</D:getlastmodified>
+    </D:prop></D:propstat>
+  </D:response>
+  <D:response>
+    <D:href>/dav/notes.txt</D:href>
+    <D:propstat><D:prop>
+      <D:resourcetype/>
+      <D:getcontentlength>42</D:getcontentlength>
+      <D:getcontenttype>text/plain</D:getcontenttype>
+    </D:prop></D:propstat>
+  </D:response>
+</D:multistatus>"#;
+
+        let entries = parse_propfind(xml, "http://example.com/dav");
+        assert_eq!(entries.len(), 2);
+
+        assert_eq!(entries[0].href, "/dav/docs/");
+        assert_eq!(entries[0].name, "docs");
+        assert_eq!(entries[0].entry_type, WebDavEntryType::Collection);
+        assert_eq!(entries[0].last_modified.as_deref(), Some("Mon, 01 Jan 2026 00:00:00 GMT"));
+        assert_eq!(entries[0].content_length, None);
+
+        assert_eq!(entries[1].href, "/dav/notes.txt");
+        assert_eq!(entries[1].name, "notes.txt");
+        assert_eq!(entries[1].entry_type, WebDavEntryType::File);
+        assert_eq!(entries[1].content_length, Some(42));
+        assert_eq!(entries[1].content_type.as_deref(), Some("text/plain"));
+    }
+
+    #[test]
+    fn parse_propfind_returns_empty_for_a_response_with_no_entries() {
+        let xml = r#"<D:multistatus xmlns:D="DAV:"></D:multistatus>"#;
+        assert!(parse_propfind(xml, "http://example.com").is_empty());
+    }
+
+    #[test]
+    fn parse_propfind_skips_a_malformed_response_missing_href() {
+        let xml = r#"<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:propstat><D:prop><D:getcontentlength>10</D:getcontentlength></D:prop></D:propstat>
+  </D:response>
+</D:multistatus>"#;
+        assert!(parse_propfind(xml, "http://example.com").is_empty());
+    }
+
+    #[test]
+    fn parse_propfind_strips_trailing_slash_when_deriving_the_display_name() {
+        let xml = r#"<D:multistatus xmlns:D="DAV:">
+  <D:response><D:href>/a/b/c/</D:href></D:response>
+</D:multistatus>"#;
+        let entries = parse_propfind(xml, "http://example.com");
+        assert_eq!(entries[0].name, "c");
+    }
+
+    #[test]
+    fn build_client_succeeds_with_and_without_tls_verification() {
+        assert!(build_client(true).is_ok());
+        assert!(build_client(false).is_ok());
+    }
 }

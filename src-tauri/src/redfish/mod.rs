@@ -207,3 +207,35 @@ pub fn redfish_list(state: tauri::State<'_, RedfishState>) -> Vec<RedfishSession
         id: id.clone(), host: cfg.host.clone(), service_root: base.clone(),
     }).collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_config(use_tls: bool) -> RedfishConfig {
+        RedfishConfig {
+            host: "10.0.0.5".into(),
+            port: if use_tls { 443 } else { 8080 },
+            username: "admin".into(),
+            password: "hunter2".into(),
+            use_tls,
+            verify_tls: false,
+        }
+    }
+
+    #[test]
+    fn base_url_uses_https_and_the_configured_port_when_tls_is_enabled() {
+        assert_eq!(base_url(&sample_config(true)), "https://10.0.0.5:443/redfish/v1");
+    }
+
+    #[test]
+    fn base_url_uses_http_when_tls_is_disabled() {
+        assert_eq!(base_url(&sample_config(false)), "http://10.0.0.5:8080/redfish/v1");
+    }
+
+    #[test]
+    fn build_client_succeeds_with_and_without_tls_verification() {
+        assert!(build_client(true).is_ok());
+        assert!(build_client(false).is_ok());
+    }
+}
