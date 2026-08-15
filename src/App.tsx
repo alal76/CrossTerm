@@ -69,6 +69,7 @@ import {
   ProxmoxConsoleTabPane,
   NfsTabPane,
   K8sPortForwardTabPane,
+  SpiceConsoleTabPane,
 } from "@/components/Terminal/ProtocolTabPanes";
 import SplitPaneContainer from "@/components/Terminal/SplitPaneContainer";
 import CommandPalette from "@/components/Shared/CommandPalette";
@@ -1341,6 +1342,14 @@ function SessionCanvas() {
           return (
             <div key={tab.id} className={clsx("absolute inset-0 overflow-hidden", isActive ? "z-10" : "z-0 hidden")}>
               <K8sPortForwardTabPane sessionId={tab.sessionId} session={session} />
+            </div>
+          );
+        }
+
+        if (tab.sessionType === SessionType.SpiceConsole && session) {
+          return (
+            <div key={tab.id} className={clsx("absolute inset-0 overflow-hidden", isActive ? "z-10" : "z-0 hidden")}>
+              <SpiceConsoleTabPane sessionId={tab.sessionId} session={session} />
             </div>
           );
         }

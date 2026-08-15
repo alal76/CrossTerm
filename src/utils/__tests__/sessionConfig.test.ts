@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildRdpConfig, buildVncConfig, buildWsTermConfig, buildRedfishConfig, buildWebDavConfig, buildMqttConfig, buildSmbConfig, buildNetconfConfig, buildMoshConfig, buildWinRmConfig, buildIpmiConfig, buildSnmpConfig, buildGrpcConfig, buildTn3270Config, buildTn5250Config, buildRloginConfig, buildDockerLogsConfig, buildX11ForwardConfig, buildProxmoxConsoleConfig, buildNfsConfig, buildK8sPortForwardConfig } from "@/utils/sessionConfig";
+import { buildRdpConfig, buildVncConfig, buildWsTermConfig, buildRedfishConfig, buildWebDavConfig, buildMqttConfig, buildSmbConfig, buildNetconfConfig, buildMoshConfig, buildWinRmConfig, buildIpmiConfig, buildSnmpConfig, buildGrpcConfig, buildTn3270Config, buildTn5250Config, buildRloginConfig, buildDockerLogsConfig, buildX11ForwardConfig, buildProxmoxConsoleConfig, buildNfsConfig, buildK8sPortForwardConfig, buildSpiceConsoleConfig } from "@/utils/sessionConfig";
 import type { Session } from "@/types";
 import { SessionType } from "@/types";
 
@@ -539,5 +539,22 @@ describe("buildK8sPortForwardConfig", () => {
     expect(config.kubeconfig_path).toBe("/home/alal/.kube/prod-config");
     expect(config.remote_port).toBe(9090);
     expect(config.local_port).toBe(19090);
+  });
+});
+
+describe("buildSpiceConsoleConfig", () => {
+  it("maps host/port and leaves password undefined when not set", () => {
+    const config = buildSpiceConsoleConfig(baseSession({ connection: { host: "10.0.0.30", port: 5900 } }));
+    expect(config.host).toBe("10.0.0.30");
+    expect(config.port).toBe(5900);
+    expect(config.password).toBeUndefined();
+  });
+
+  it("falls back to port 5900 when the session has no port, and pulls password from protocolOptions", () => {
+    const config = buildSpiceConsoleConfig(
+      baseSession({ connection: { host: "10.0.0.30", port: 0, protocolOptions: { password: "ticket123" } } })
+    );
+    expect(config.port).toBe(5900);
+    expect(config.password).toBe("ticket123");
   });
 });

@@ -30,6 +30,7 @@ import {
   ProxmoxConsoleTabPane,
   NfsTabPane,
   K8sPortForwardTabPane,
+  SpiceConsoleTabPane,
 } from "@/components/Terminal/ProtocolTabPanes";
 
 // ── Resize Handle ──
@@ -125,6 +126,7 @@ const SESSION_TAB_PANES: Partial<Record<SessionType, typeof RdpTabPane>> = {
   [SessionType.ProxmoxConsole]: ProxmoxConsoleTabPane,
   [SessionType.NfsExplorer]: NfsTabPane,
   [SessionType.KubernetesPortForward]: K8sPortForwardTabPane,
+  [SessionType.SpiceConsole]: SpiceConsoleTabPane,
 };
 
 function renderPaneContent(tab: { sessionId: string; sessionType: SessionType }, session: Session | undefined, isActive: boolean) {

@@ -8,7 +8,7 @@
 // specific fields yet — domain, NLA, codec, etc. — so those fall back to
 // sensible defaults here until the editor grows per-type fields).
 
-import type { Session, RdpConfig, VncConfig, WsTermConfig, RedfishConfig, WebDavConfig, MqttConfig, SmbConfig, NetconfConfig, MoshConfig, WinRmConfig, WinRmAuth, IpmiConfig, IpmiPrivilege, SnmpConfig, SnmpVersion, SnmpV3AuthProtocol, SnmpV3PrivProtocol, GrpcConfig, Tn3270Config, Tn3270Model, Tn5250Config, RloginConfig, DockerLogsConfig, X11ForwardConfig, X11ForwardAuth, ProxmoxConsoleConfig, ProxmoxResourceType, NfsConfig, K8sPortForwardConfig } from '@/types';
+import type { Session, RdpConfig, VncConfig, WsTermConfig, RedfishConfig, WebDavConfig, MqttConfig, SmbConfig, NetconfConfig, MoshConfig, WinRmConfig, WinRmAuth, IpmiConfig, IpmiPrivilege, SnmpConfig, SnmpVersion, SnmpV3AuthProtocol, SnmpV3PrivProtocol, GrpcConfig, Tn3270Config, Tn3270Model, Tn5250Config, RloginConfig, DockerLogsConfig, X11ForwardConfig, X11ForwardAuth, ProxmoxConsoleConfig, ProxmoxResourceType, NfsConfig, K8sPortForwardConfig, SpiceConsoleConfig } from '@/types';
 
 export function buildRdpConfig(session: Session): RdpConfig {
   const opts = session.connection.protocolOptions;
@@ -286,5 +286,14 @@ export function buildK8sPortForwardConfig(session: Session): K8sPortForwardConfi
     pod_name: (opts?.['pod_name'] as string) ?? '',
     remote_port: (opts?.['remote_port'] as number) ?? session.connection.port ?? 80,
     local_port: (opts?.['local_port'] as number) ?? 0,
+  };
+}
+
+export function buildSpiceConsoleConfig(session: Session): SpiceConsoleConfig {
+  const opts = session.connection.protocolOptions;
+  return {
+    host: session.connection.host,
+    port: session.connection.port || 5900,
+    password: (opts?.['password'] as string) ?? undefined,
   };
 }

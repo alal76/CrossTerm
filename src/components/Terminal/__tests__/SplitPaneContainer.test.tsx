@@ -128,6 +128,11 @@ vi.mock("@/components/KubernetesPortForward/KubernetesPortForwardPanel", () => (
     <div data-testid={`k8s-port-forward-panel-${sessionId}`}>KubernetesPortForwardPanel Mock</div>
   ),
 }));
+vi.mock("@/components/Spice/SpiceViewer", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`spice-viewer-${sessionId}`}>SpiceViewer Mock</div>
+  ),
+}));
 
 function baseSession(overrides: Partial<Session> = {}): Session {
   return {
@@ -216,6 +221,16 @@ describe("SplitPaneContainer session type routing", () => {
     render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
 
     expect(screen.getByTestId(`k8s-port-forward-panel-${tab.sessionId}`)).toBeInTheDocument();
+  });
+
+  it("routes a SPICE Console leaf pane to SpiceViewer", () => {
+    const session = baseSession({ type: SessionType.SpiceConsole, connection: { host: "10.0.0.30", port: 5900 } });
+    const tab = baseTab({ sessionType: SessionType.SpiceConsole });
+    useSessionStore.setState({ sessions: [session], openTabs: [tab] });
+
+    render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
+
+    expect(screen.getByTestId(`spice-viewer-${tab.sessionId}`)).toBeInTheDocument();
   });
 
   it("routes a Telnet leaf pane to TelnetTerminal", () => {

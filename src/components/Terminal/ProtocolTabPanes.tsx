@@ -30,6 +30,7 @@ import DockerLogsViewer from "@/components/DockerLogs/DockerLogsViewer";
 import X11ForwardPanel from "@/components/X11Forward/X11ForwardPanel";
 import NfsExplorer from "@/components/Nfs/NfsExplorer";
 import KubernetesPortForwardPanel from "@/components/KubernetesPortForward/KubernetesPortForwardPanel";
+import SpiceViewer from "@/components/Spice/SpiceViewer";
 import {
   buildRdpConfig,
   buildVncConfig,
@@ -52,6 +53,7 @@ import {
   buildProxmoxConsoleConfig,
   buildNfsConfig,
   buildK8sPortForwardConfig,
+  buildSpiceConsoleConfig,
 } from "@/utils/sessionConfig";
 import type { Session } from "@/types";
 
@@ -163,4 +165,9 @@ export function NfsTabPane({ sessionId, session }: PaneProps) {
 export function K8sPortForwardTabPane({ sessionId, session }: PaneProps) {
   const config = useMemo(() => buildK8sPortForwardConfig(session), [session]);
   return <KubernetesPortForwardPanel sessionId={sessionId} config={config} />;
+}
+
+export function SpiceConsoleTabPane({ sessionId, session }: PaneProps) {
+  const config = useMemo(() => buildSpiceConsoleConfig(session), [session]);
+  return <SpiceViewer sessionId={sessionId} config={config} />;
 }

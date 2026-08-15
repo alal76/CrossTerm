@@ -476,6 +476,32 @@ export interface NfsEntry {
   mode: number;
 }
 
+// --- SPICE Console Types ---
+
+export interface SpiceConsoleConfig {
+  host: string;
+  port: number;
+  password?: string;
+}
+
+export interface SpiceConnectResult {
+  id: string;
+  width: number;
+  height: number;
+}
+
+export interface SpiceFrameEvent {
+  connection_id: string;
+  width: number;
+  height: number;
+  data_base64: string;
+}
+
+export interface SpiceDisconnectedEvent {
+  connection_id: string;
+  reason: string;
+}
+
 // --- Kubernetes Port-Forward Types ---
 
 export interface K8sPortForwardConfig {

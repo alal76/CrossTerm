@@ -26,6 +26,7 @@ mod proxmox;
 mod redfish;
 mod smb;
 mod snmp;
+mod spice;
 mod tn3270;
 mod tn5250;
 mod webdav;
@@ -101,6 +102,7 @@ pub fn run() {
         .manage(network::NetworkState::new())
         .manage(nfs::NfsState::new())
         .manage(kube_forward::K8sPortForwardState::new())
+        .manage(spice::SpiceState::new())
         .manage(redfish::RedfishState::new())
         .manage(smb::SmbState::new())
         .manage(snmp::SnmpState::new())
@@ -504,6 +506,11 @@ pub fn run() {
             kube_forward::k8s_port_forward_connect,
             kube_forward::k8s_port_forward_disconnect,
             kube_forward::k8s_port_forward_list,
+            spice::spice_connect,
+            spice::spice_disconnect,
+            spice::spice_send_key,
+            spice::spice_send_mouse_move,
+            spice::spice_send_mouse_button,
             // Editor
             editor::editor_open,
             editor::editor_save,
