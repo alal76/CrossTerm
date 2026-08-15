@@ -3988,7 +3988,7 @@ pub async fn network_aircrack_stop_all(
 ) -> Result<String, NetworkError> {
     let mut procs = state.aircrack_processes.lock().unwrap();
     let mut killed = 0;
-    for (_, proc) in procs.iter_mut() {
+    for proc in procs.values_mut() {
         if proc.active {
             if let Some(_pid) = proc.pid {
                 #[cfg(unix)]

@@ -123,7 +123,7 @@ pub fn keygen_generate(
     let short_id = &id[..8];
     let filename = format!("id_{}_{}", key_type.to_lowercase(), short_id);
     let key_path = ssh_dir().join(&filename);
-    let pub_path = ssh_dir().join(format!("{}.pub", &filename));
+    let pub_path = ssh_dir().join(format!("{}.pub", filename));
 
     // Ensure .ssh directory exists with correct permissions
     let ssh_directory = ssh_dir();
@@ -299,7 +299,7 @@ pub fn keygen_import(
     // Also copy public key if it exists
     let pub_source = PathBuf::from(format!("{}.pub", path));
     if pub_source.exists() {
-        let pub_dest = ssh_dir().join(format!("{}.pub", &filename));
+        let pub_dest = ssh_dir().join(format!("{}.pub", filename));
         if !pub_dest.exists() {
             std::fs::copy(&pub_source, &pub_dest)?;
         }
