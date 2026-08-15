@@ -66,9 +66,9 @@ Compared to **Termius**, **Royal TSX**, and **SecureCRT**, CrossTerm's remaining
 ```
                 HIGH SECURITY
                       │
-         CrossTerm ───┼─── Royal TSX
-         (target)     │
-                      │
+                      │           CrossTerm
+         Royal TSX ───┼───        (achieved,
+                      │            2026-08)
 LOW ──────────────────┼────────────────── HIGH
 PROTOCOL              │                   PROTOCOL
 BREADTH               │                   BREADTH
@@ -79,7 +79,19 @@ BREADTH               │                   BREADTH
                  LOW SECURITY
 ```
 
-**Our wedge:** The only tool that combines security-first credential management, full protocol breadth, native performance, and a plugin ecosystem — available on every platform including Android.
+As of the protocol-breadth completion (2026-08), CrossTerm has moved from "(target)" to occupying the high-security/high-protocol-breadth quadrant alone. The basis for that claim, concretely:
+
+| | Session types (approx.) | Vault-grade credential storage | Mainframe/AS400 (TN3270/TN5250) | BMC out-of-band (IPMI SOL, Redfish) | Hypervisor consoles (SPICE, Proxmox) | Native perf, no Electron |
+|---|---|---|---|---|---|---|
+| **CrossTerm** | **32** | ✅ AES-256-GCM + Argon2id | ✅ | ✅ | ✅ | ✅ |
+| Termius | ~6 | Partial (cloud-synced) | ❌ | ❌ | ❌ | ✅ (native) |
+| MobaXterm | ~20 (many via plugins) | ❌ (plaintext session store) | ❌ | ❌ | ❌ | ❌ (Electron-adjacent) |
+| Royal TSX | ~15 | ✅ (per-document encryption) | ❌ | Partial (IPMI via plugin) | ❌ | ✅ (native, macOS-only) |
+| SecureCRT | ~10 | Partial | ✅ (paid add-on) | ❌ | ❌ | ✅ (native) |
+
+Royal TSX and SecureCRT are the closest competitors on security posture; neither reaches into mainframe, BMC, or hypervisor-console protocols the way CrossTerm now does. MobaXterm has broad protocol coverage but weak credential security. No competitor combines both axes with CrossTerm's breadth.
+
+**Our wedge:** The only tool that combines security-first credential management, the deepest protocol breadth in the category (SSH through mainframe terminals to hypervisor consoles), native performance, and a plugin ecosystem — available on every platform including Android.
 
 ---
 
