@@ -9,40 +9,12 @@ import { listen } from "@tauri-apps/api/event";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { ConnectionStatus } from "@/types";
 import ReconnectOverlay from "@/components/Shared/ReconnectOverlay";
+import { getTerminalTheme, useHotTerminalTheme } from "@/utils/terminalTheme";
 import "@xterm/xterm/css/xterm.css";
 
 interface SshTerminalViewProps {
   readonly connectionId: string;
   readonly isActive: boolean;
-}
-
-function getCSSVar(name: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
-
-function getTerminalTheme(): Record<string, string> {
-  return {
-    foreground: getCSSVar("--terminal-fg"),
-    background: getCSSVar("--terminal-bg"),
-    cursor: getCSSVar("--terminal-cursor"),
-    selectionBackground: getCSSVar("--terminal-selection"),
-    black: getCSSVar("--terminal-ansi-0"),
-    red: getCSSVar("--terminal-ansi-1"),
-    green: getCSSVar("--terminal-ansi-2"),
-    yellow: getCSSVar("--terminal-ansi-3"),
-    blue: getCSSVar("--terminal-ansi-4"),
-    magenta: getCSSVar("--terminal-ansi-5"),
-    cyan: getCSSVar("--terminal-ansi-6"),
-    white: getCSSVar("--terminal-ansi-7"),
-    brightBlack: getCSSVar("--terminal-ansi-8"),
-    brightRed: getCSSVar("--terminal-ansi-9"),
-    brightGreen: getCSSVar("--terminal-ansi-10"),
-    brightYellow: getCSSVar("--terminal-ansi-11"),
-    brightBlue: getCSSVar("--terminal-ansi-12"),
-    brightMagenta: getCSSVar("--terminal-ansi-13"),
-    brightCyan: getCSSVar("--terminal-ansi-14"),
-    brightWhite: getCSSVar("--terminal-ansi-15"),
-  };
 }
 
 // Shape of the session_health Tauri event payload
@@ -57,6 +29,8 @@ export default function SshTerminalView({ connectionId, isActive }: SshTerminalV
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+
+  useHotTerminalTheme(termRef);
   const updateTerminalDimensions = useTerminalStore((s) => s.updateTerminalDimensions);
   const updateTerminalStatus = useTerminalStore((s) => s.updateTerminalStatus);
 

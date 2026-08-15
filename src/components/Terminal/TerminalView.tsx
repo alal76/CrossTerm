@@ -12,40 +12,12 @@ import { useTerminalStore } from "@/stores/terminalStore";
 import { useAppStore } from "@/stores/appStore";
 import { ConnectionStatus } from "@/types";
 import TerminalSearch from "@/components/Terminal/TerminalSearch";
+import { getTerminalTheme, useHotTerminalTheme } from "@/utils/terminalTheme";
 import "@xterm/xterm/css/xterm.css";
 
 interface TerminalViewProps {
   readonly terminalId: string;
   readonly isActive: boolean;
-}
-
-function getCssVar(name: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
-
-function getTerminalTheme(): Record<string, string> {
-  return {
-    foreground: getCssVar("--terminal-fg"),
-    background: getCssVar("--terminal-bg"),
-    cursor: getCssVar("--terminal-cursor"),
-    selectionBackground: getCssVar("--terminal-selection"),
-    black: getCssVar("--terminal-ansi-0"),
-    red: getCssVar("--terminal-ansi-1"),
-    green: getCssVar("--terminal-ansi-2"),
-    yellow: getCssVar("--terminal-ansi-3"),
-    blue: getCssVar("--terminal-ansi-4"),
-    magenta: getCssVar("--terminal-ansi-5"),
-    cyan: getCssVar("--terminal-ansi-6"),
-    white: getCssVar("--terminal-ansi-7"),
-    brightBlack: getCssVar("--terminal-ansi-8"),
-    brightRed: getCssVar("--terminal-ansi-9"),
-    brightGreen: getCssVar("--terminal-ansi-10"),
-    brightYellow: getCssVar("--terminal-ansi-11"),
-    brightBlue: getCssVar("--terminal-ansi-12"),
-    brightMagenta: getCssVar("--terminal-ansi-13"),
-    brightCyan: getCssVar("--terminal-ansi-14"),
-    brightWhite: getCssVar("--terminal-ansi-15"),
-  };
 }
 
 function playBell() {
@@ -66,6 +38,8 @@ export default function TerminalView({ terminalId, isActive }: TerminalViewProps
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
+
+  useHotTerminalTheme(termRef);
 
   const terminals = useTerminalStore((state) => state.terminals);
   const broadcastMode = useTerminalStore((state) => state.broadcastMode);

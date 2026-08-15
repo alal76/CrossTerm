@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render } from "@testing-library/react";
+import { render, act } from "@testing-library/react";
 import "@/i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -46,7 +46,7 @@ const mockTerminalInstance = {
   }),
   dispose: vi.fn(),
   loadAddon: vi.fn(),
-  options: {},
+  options: {} as { theme?: unknown },
   cols: 80,
   rows: 24,
   focus: vi.fn(),
@@ -201,5 +201,26 @@ describe("TerminalView", () => {
       rows: 24,
       cols: 80,
     });
+  });
+
+  // U-9: theme changes update an already-mounted terminal live, without remount
+  it("U-9: live-updates the mounted terminal's theme when resolvedTheme changes", () => {
+    render(<TerminalView terminalId="test-term-1" isActive={true} />);
+
+    act(() => {
+      useAppStore.setState({ resolvedTheme: ThemeVariant.Light });
+    });
+
+    // useHotTerminalTheme assigns a fresh theme object onto the already-
+    // mounted instance (xterm requires reference-inequality to notice the
+    // change) rather than tearing the terminal down and recreating it.
+    expect(mockTerminalInstance.options.theme).toBeTruthy();
+    expect(mockTerminalInstance.dispose).not.toHaveBeenCalled();
+
+    const themeAfterFirstChange = mockTerminalInstance.options.theme;
+    act(() => {
+      useAppStore.setState({ resolvedTheme: ThemeVariant.Dark });
+    });
+    expect(mockTerminalInstance.options.theme).not.toBe(themeAfterFirstChange);
   });
 });

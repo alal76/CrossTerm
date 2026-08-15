@@ -6,40 +6,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Loader2, AlertTriangle } from "lucide-react";
 import type { WsTermConfig, WsTermData, WsTermDisconnected } from "@/types";
+import { getTerminalTheme, useHotTerminalTheme } from "@/utils/terminalTheme";
 import "@xterm/xterm/css/xterm.css";
 
 interface WebSocketTerminalTabProps {
   readonly sessionId: string;
   readonly config: WsTermConfig;
-}
-
-function getCSSVar(name: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
-
-function getTerminalTheme(): Record<string, string> {
-  return {
-    foreground: getCSSVar("--terminal-fg"),
-    background: getCSSVar("--terminal-bg"),
-    cursor: getCSSVar("--terminal-cursor"),
-    selectionBackground: getCSSVar("--terminal-selection"),
-    black: getCSSVar("--terminal-ansi-0"),
-    red: getCSSVar("--terminal-ansi-1"),
-    green: getCSSVar("--terminal-ansi-2"),
-    yellow: getCSSVar("--terminal-ansi-3"),
-    blue: getCSSVar("--terminal-ansi-4"),
-    magenta: getCSSVar("--terminal-ansi-5"),
-    cyan: getCSSVar("--terminal-ansi-6"),
-    white: getCSSVar("--terminal-ansi-7"),
-    brightBlack: getCSSVar("--terminal-ansi-8"),
-    brightRed: getCSSVar("--terminal-ansi-9"),
-    brightGreen: getCSSVar("--terminal-ansi-10"),
-    brightYellow: getCSSVar("--terminal-ansi-11"),
-    brightBlue: getCSSVar("--terminal-ansi-12"),
-    brightMagenta: getCSSVar("--terminal-ansi-13"),
-    brightCyan: getCSSVar("--terminal-ansi-14"),
-    brightWhite: getCSSVar("--terminal-ansi-15"),
-  };
 }
 
 /** ttyd/wetty/gotty terminal over a plain WebSocket — same xterm.js wiring
@@ -52,6 +24,8 @@ export default function WebSocketTerminalTab({ sessionId, config }: WebSocketTer
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const connectionIdRef = useRef<string | null>(null);
+
+  useHotTerminalTheme(termRef);
 
   const [status, setStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
   const [error, setError] = useState<string | null>(null);
