@@ -2,8 +2,8 @@
 ### Becoming the Premium Network & Connectivity Platform
 
 **Document owner:** Product  
-**Last updated:** 2026-05-05  
-**Current version:** 0.10.0 (all phases complete; v1.0 hardening in progress)  
+**Last updated:** 2026-08-15  
+**Current version:** 1.0.0 (all v0.3–v1.2 roadmap phases complete; protocol-breadth expansion complete on `feat/protocol-breadth`, not yet merged to `main`)  
 **Horizon:** 18 months (v0.7 → v1.2)
 
 ---
@@ -16,7 +16,7 @@ CrossTerm has an unusually deep technical foundation for a v0.2 product:
 
 | Domain | Current capability |
 |--------|--------------------|
-| Protocols | SSH, SFTP/SCP, RDP, VNC, Telnet, Serial, FTP/FTPS, WSL, Cloud Shell, Kubernetes Exec, Docker Exec |
+| Protocols | SSH, SFTP/SCP, RDP, VNC, Telnet, Serial, FTP/FTPS, WSL, Cloud Shell, Kubernetes Exec, Docker Exec, Mosh, WinRM/PowerShell, WebSocket Terminal, TN3270, TN5250, IPMI SOL, Redfish, NETCONF/YANG, SNMP (v1/v2c/v3), SMB/CIFS, WebDAV, gRPC Explorer, MQTT, Kubernetes Port-Forward, Docker Logs, SPICE Console, Proxmox Console, Rlogin, X11 Forwarding, NFS Explorer — 32 session types total, all wired end-to-end as of the `feat/protocol-breadth` branch (§6, Protocol Breadth) |
 | Security | AES-256-GCM vault, Argon2id KDF, biometric unlock, per-profile audit log, zeroize-on-drop key memory |
 | Cloud | AWS (EC2, S3, cost), Azure (VMs, Blob, subscriptions), GCP (Compute, GCS) |
 | Automation | Send/Expect macro engine, snippet library, session recording & playback |
@@ -268,6 +268,24 @@ AI assistance is a table-stakes differentiator by 2027. Done right, it materiall
 - [x] **VS Code extension**: `integrations/vscode/` — `package.json` manifest + `src/extension.ts` with `openSession`, `openSFTP`, `listSessions` commands; context menu contribution for Explorer (DONE v0.7.0 — scaffold)
 - [x] **Raycast plugin**: `integrations/raycast/` — `package.json` manifest + `src/open-session.tsx` with session list, search, and `crossterm://session/<id>` URL scheme launch (DONE v0.7.0 — scaffold)
 - [x] **Encrypted sync packages**: `SyncPackage` with AES-256-GCM encrypted payload + SHA-256 checksum; `sync_create_package` / `sync_import_package` / share-code round-trip (DONE v0.7.0 — ahead of schedule)
+
+---
+
+### Protocol Breadth — competitive moat expansion (2026-08) · ✅ COMPLETE on `feat/protocol-breadth`, pending merge to `main`
+
+**Theme: The only tool that actually connects to everything**
+
+Not part of the original v0.3–v1.2 phase sequence — a separately-scoped initiative that closed a gap an audit found: 31 of 32 session types in the type system were unreachable from the UI. Four had complete, working frontend components that were simply never wired into routing (RDP, VNC, Telnet, Serial); the rest had partial or zero backend implementation. This shipped all of it:
+
+- [x] RDP / VNC / Telnet / Serial wired into tab routing (were built, never reachable)
+- [x] WebSocket Terminal, Redfish (BMC REST), WebDAV, MQTT — new UI on existing backends
+- [x] WinRM/PowerShell (real NTLM via `sspi`), NETCONF/YANG (private-key auth + TOFU), Mosh (real PTY), SMB/CIFS (get/put/delete) — backends fixed and wired
+- [x] IPMI Serial-over-LAN (RAKP+ session establishment, hand-rolled), SNMPv3 (USM, hand-rolled, verified against RFC 3414 test vectors), gRPC Explorer (server reflection), TN3270 / TN5250 (IBM mainframe/AS400 — order-stream parser + block-mode screen emulator, hand-rolled from spec)
+- [x] Rlogin, Docker Logs, X11 Forwarding (SSH), Proxmox Console (VNC-over-WebSocket reuse), NFS Explorer (hand-rolled read-only NFSv3), Kubernetes Port-Forward, SPICE Console — the 7 session types that had no backend at all
+
+**Why this matters for the roadmap:** this is the "protocol breadth" axis of our competitive positioning (§3) made real rather than aspirational — CrossTerm now reaches further into heterogeneous infrastructure (mainframes, BMCs, hypervisor consoles, IoT/SNMP devices) than Termius, Royal TSX, or SecureCRT.
+
+**Status:** feature-complete, all tests green, 18 commits ahead of `main` with a clean fast-forward (0 commits behind). **Not yet merged** — see `docs/ENGINEERING_PLAN.md` §1.1 for the merge-readiness note and known follow-ups.
 
 ---
 

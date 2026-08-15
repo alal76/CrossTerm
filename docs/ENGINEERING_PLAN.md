@@ -2,7 +2,7 @@
 ### Delivering the Product Roadmap — v0.3 through v1.2
 
 **Document owner:** Engineering  
-**Last updated:** 2026-05-05 (v0.10.0 update)  
+**Last updated:** 2026-08-15 (protocol-breadth completion update)  
 **Paired with:** [ROADMAP.md](ROADMAP.md)
 
 ---
@@ -26,7 +26,8 @@ Before planning, an honest inventory of what we are working with:
 | Team collab (`team/mod.rs`) | 6 tests | Library, presence, handoff |
 | Audit (`audit/mod.rs`) | 11 tests | Syslog, anomaly, compliance report |
 | Frontend components | 219 tests | Session tree, vault, settings, terminal, health card, SSH diff, broadcast, timestamp, RTL, MacroEditor DnD |
-| **Total** | **384 Rust + 219 frontend** | **All passing** |
+| Protocol-breadth modules (20 new session types — see §1.1) | 200+ new Rust tests | RDP/VNC/Telnet/Serial routing, WinRM NTLM, NETCONF, Mosh, SMB, IPMI RAKP+, SNMPv3 USM, gRPC reflection, TN3270/TN5250, Rlogin, DockerLogs, X11Forward, ProxmoxConsole, NfsExplorer (NFSv3), KubernetesPortForward, SpiceConsole |
+| **Total (as of protocol-breadth branch)** | **584 Rust + 457 frontend** | **All passing** |
 
 ### Infrastructure (v0.8.0)
 
@@ -100,6 +101,26 @@ As of **May 5, 2026**, all roadmap phases are implemented. **384 Rust unit tests
 - ✅ PuTTY registry reader: `winreg = "0.52"` Windows-only dep; `parse_putty_registry()` reads `HKCU\Software\SimonTatham\PuTTY\Sessions`; `"putty_registry"` arm in `import_parse_source`
 - ✅ Startup time instrumentation: `startup.rs` — `mark_startup_begin()` + `startup_get_timing` command; `StartupTiming { time_to_ready_ms }` (1 test; 384 Rust total)
 - ✅ Tunnel health events: `TunnelHealthStatus` enum (Active/Degraded/Dropped) + `emit_tunnel_health()` + `network_tunnel_health_check` (from v0.9.0 — doc updated)
+
+### 1.1 Protocol-breadth completion (`feat/protocol-breadth` branch, 2026-08)
+
+A separate initiative from the v0.3–v1.2 phase plan above: an audit found that 31 of 32 `SessionType` enum values were unreachable from the UI — only SSH had a real, wired component. The rest either had a complete frontend component that was never imported (RDP, VNC, Telnet, Serial), a backend with no frontend at all (13 modules), or didn't exist yet (7 session types with zero code). This work closed that gap end-to-end, phased as:
+
+- **Phase 0:** wired the four already-complete orphaned viewers (RDP, VNC, Telnet, Serial) into routing — no new backend code.
+- **Phase 1:** built UI for four solid backends (websocket_term, redfish, webdav, mqtt).
+- **Phase 2:** fixed and wired four partial backends — WinRM (NTLM via `sspi`), NETCONF (private-key auth + TOFU host-key verification), Mosh (real PTY stream), SMB (get/put/delete).
+- **Phase 3:** hand-rolled protocol/crypto work with no suitable crate available — IPMI RAKP+ (HMAC + AES-CBC-128), SNMPv3 USM (verified against RFC 3414 Appendix A test vectors), gRPC server reflection, and TN3270/TN5250 order-stream parsers + block-mode screen emulation, all built from spec since no Rust crate exists for any of them.
+- **Phase 4:** built the 7 session types with no backend at all — Rlogin, DockerLogs, X11Forward (SSH X11 forwarding), ProxmoxConsole (reuses the VNC client over a bridged WebSocket), NfsExplorer (hand-rolled read-only NFSv3 — ONC RPC/XDR/MOUNT/READDIRPLUS, no crate exists), KubernetesPortForward (built on the `kube` crate rather than hand-rolling — port-forward tunnels SPDY frames even in its WebSocket variant), and SpiceConsole (built on `spice-client`, but patched a real gap: its native auth path had no way to supply a SPICE ticket password at all, which would have made it non-functional against any real hypervisor — see the Phase 4f commit for the fix).
+- **Phase 5:** fixed a real React bug (reading a ref via a `setState` functional updater during unmount cleanup is batching-order-dependent) across 10 components, and closed test-coverage gaps in both Rust (webdav, redfish, vnc, mqtt) and the four Phase-0 viewers, which had zero component tests despite being the oldest code in the app.
+
+Every hand-rolled protocol was verified against an authoritative source (RFC text, or a reference implementation's actual source fetched via `gh api`) before implementation, not from memory — this caught several real bugs during development (an IPMI integrity-trailer offset bug, transcribed SNMPv3 test vectors, a WebDAV XML-namespace-prefix fragility now documented rather than silently assumed complete).
+
+**Status:** 18 commits ahead of `main`, 0 behind (clean fast-forward). 584 Rust + 457 frontend tests, all passing. `npx tsc --noEmit` clean. Not yet merged — see the merge-readiness note below.
+
+**Known follow-ups, not blocking:**
+- `webdav::parse_propfind` matches hardcoded `D:`-prefixed XML tags rather than resolving the `DAV:` namespace URI, so servers echoing a different prefix (`d:`, `lp1:`) currently parse to an empty list. Documented in code; not fixed this pass since a correct fix needs real interop samples to verify against.
+- SpiceConsole's mouse input assumes absolute positioning (the common SPICE/QEMU tablet-mode default) since mouse-mode negotiation isn't tracked.
+- NfsExplorer/KubernetesPortForward/SpiceConsole have no Kerberos/RPCSEC_GSS support (same disclosed-limitation pattern as WinRM's Kerberos gap in Phase 2).
 
 **Remaining for v1.0 enterprise-stable hardening (require external tooling or design work):**
 - [x] PuTTY registry reader — DONE v0.10.0
