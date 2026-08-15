@@ -1141,6 +1141,7 @@ checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
 name = "crossterm-app"
 version = "1.0.0"
 dependencies = [
+ "aes 0.8.4",
  "aes-gcm 0.10.3",
  "anyhow",
  "arboard",
@@ -1148,6 +1149,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bytes",
+ "cbc 0.1.2",
  "chrono",
  "criterion",
  "data-encoding",

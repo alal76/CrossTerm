@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildRdpConfig, buildVncConfig, buildWsTermConfig, buildRedfishConfig, buildWebDavConfig, buildMqttConfig, buildSmbConfig, buildNetconfConfig, buildMoshConfig, buildWinRmConfig } from "@/utils/sessionConfig";
+import { buildRdpConfig, buildVncConfig, buildWsTermConfig, buildRedfishConfig, buildWebDavConfig, buildMqttConfig, buildSmbConfig, buildNetconfConfig, buildMoshConfig, buildWinRmConfig, buildIpmiConfig } from "@/utils/sessionConfig";
 import type { Session } from "@/types";
 import { SessionType } from "@/types";
 
@@ -264,5 +264,25 @@ describe("buildWinRmConfig", () => {
   it("honors an explicit auth override from protocolOptions", () => {
     const config = buildWinRmConfig(baseSession({ connection: { host: "10.0.0.5", port: 5985, protocolOptions: { auth: "basic" } } }));
     expect(config.auth).toBe("basic");
+  });
+});
+
+describe("buildIpmiConfig", () => {
+  it("maps host/port/credentials and defaults channel to 1, privilege to administrator", () => {
+    const config = buildIpmiConfig(
+      baseSession({ connection: { host: "10.0.0.10", port: 623, protocolOptions: { username: "admin", password: "hunter2" } } })
+    );
+    expect(config.host).toBe("10.0.0.10");
+    expect(config.port).toBe(623);
+    expect(config.username).toBe("admin");
+    expect(config.password).toBe("hunter2");
+    expect(config.channel).toBe(1);
+    expect(config.privilege).toBe("administrator");
+  });
+
+  it("honors an explicit channel/privilege override from protocolOptions", () => {
+    const config = buildIpmiConfig(baseSession({ connection: { host: "10.0.0.10", port: 623, protocolOptions: { channel: 2, privilege: "operator" } } }));
+    expect(config.channel).toBe(2);
+    expect(config.privilege).toBe("operator");
   });
 });

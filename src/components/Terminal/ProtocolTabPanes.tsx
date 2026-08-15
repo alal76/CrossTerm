@@ -20,6 +20,7 @@ import SmbBrowser from "@/components/Smb/SmbBrowser";
 import NetconfConsole from "@/components/Netconf/NetconfConsole";
 import MoshTerminalTab from "@/components/Mosh/MoshTerminalTab";
 import WinRmConsole from "@/components/WinRm/WinRmConsole";
+import IpmiSolTab from "@/components/Ipmi/IpmiSolTab";
 import {
   buildRdpConfig,
   buildVncConfig,
@@ -31,6 +32,7 @@ import {
   buildNetconfConfig,
   buildMoshConfig,
   buildWinRmConfig,
+  buildIpmiConfig,
 } from "@/utils/sessionConfig";
 import type { Session } from "@/types";
 
@@ -87,4 +89,9 @@ export function MoshTabPane({ sessionId, session }: PaneProps) {
 export function WinRmTabPane({ sessionId, session }: PaneProps) {
   const config = useMemo(() => buildWinRmConfig(session), [session]);
   return <WinRmConsole sessionId={sessionId} config={config} />;
+}
+
+export function IpmiSolTabPane({ sessionId, session }: PaneProps) {
+  const config = useMemo(() => buildIpmiConfig(session), [session]);
+  return <IpmiSolTab sessionId={sessionId} config={config} />;
 }

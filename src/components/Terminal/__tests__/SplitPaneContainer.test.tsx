@@ -76,6 +76,11 @@ vi.mock("@/components/WinRm/WinRmConsole", () => ({
     <div data-testid={`winrm-console-${sessionId}`}>WinRmConsole Mock</div>
   ),
 }));
+vi.mock("@/components/Ipmi/IpmiSolTab", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`ipmi-sol-tab-${sessionId}`}>IpmiSolTab Mock</div>
+  ),
+}));
 
 function baseSession(overrides: Partial<Session> = {}): Session {
   return {
@@ -241,5 +246,15 @@ describe("SplitPaneContainer session type routing", () => {
     render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
 
     expect(screen.getByTestId(`winrm-console-${tab.sessionId}`)).toBeInTheDocument();
+  });
+
+  it("routes an IPMI SOL leaf pane to IpmiSolTab", () => {
+    const session = baseSession({ type: SessionType.IpmiSol, connection: { host: "10.0.0.10", port: 623 } });
+    const tab = baseTab({ sessionType: SessionType.IpmiSol });
+    useSessionStore.setState({ sessions: [session], openTabs: [tab] });
+
+    render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
+
+    expect(screen.getByTestId(`ipmi-sol-tab-${tab.sessionId}`)).toBeInTheDocument();
   });
 });

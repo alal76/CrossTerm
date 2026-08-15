@@ -96,6 +96,11 @@ vi.mock("@/components/WinRm/WinRmConsole", () => ({
     <div data-testid={`winrm-console-${sessionId}`}>WinRmConsole Mock</div>
   ),
 }));
+vi.mock("@/components/Ipmi/IpmiSolTab", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`ipmi-sol-tab-${sessionId}`}>IpmiSolTab Mock</div>
+  ),
+}));
 
 // Mock components that use localStorage directly (tested separately)
 vi.mock("@/components/Help/WhatsNewPanel", () => ({
@@ -415,6 +420,17 @@ describe("App", () => {
       render(<App />);
 
       expect(screen.getByTestId(`winrm-console-${tab.sessionId}`)).toBeInTheDocument();
+      expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
+    });
+
+    it("routes an IPMI SOL tab to IpmiSolTab, not the generic local-shell fallback", () => {
+      const session = baseSession({ type: SessionType.IpmiSol, connection: { host: "10.0.0.10", port: 623 } });
+      const tab = baseTab({ sessionType: SessionType.IpmiSol });
+      useSessionStore.setState({ sessions: [session], openTabs: [tab], activeTabId: tab.id });
+
+      render(<App />);
+
+      expect(screen.getByTestId(`ipmi-sol-tab-${tab.sessionId}`)).toBeInTheDocument();
       expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
     });
   });

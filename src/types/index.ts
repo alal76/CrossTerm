@@ -1368,3 +1368,28 @@ export interface WinRmCommandResult {
   stderr: string;
   exit_code: number;
 }
+
+// --- IPMI ---
+
+export type IpmiPrivilege = "user" | "operator" | "administrator";
+
+export interface IpmiConfig {
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+  channel: number;
+  privilege: IpmiPrivilege;
+}
+
+export interface IpmiSolDataEvent {
+  session_id: string;
+  data: string;
+}
+
+export interface IpmiPowerStatus {
+  session_id: string;
+  powered_on: boolean;
+}
+
+export type IpmiPowerAction = "down" | "up" | "cycle" | "hard_reset";

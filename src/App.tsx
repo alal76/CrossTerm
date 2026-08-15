@@ -58,6 +58,7 @@ import {
   NetconfTabPane,
   MoshTabPane,
   WinRmTabPane,
+  IpmiSolTabPane,
 } from "@/components/Terminal/ProtocolTabPanes";
 import SplitPaneContainer from "@/components/Terminal/SplitPaneContainer";
 import CommandPalette from "@/components/Shared/CommandPalette";
@@ -1242,6 +1243,14 @@ function SessionCanvas() {
           return (
             <div key={tab.id} className={clsx("absolute inset-0 overflow-hidden", isActive ? "z-10" : "z-0 hidden")}>
               <WinRmTabPane sessionId={tab.sessionId} session={session} />
+            </div>
+          );
+        }
+
+        if (tab.sessionType === SessionType.IpmiSol && session) {
+          return (
+            <div key={tab.id} className={clsx("absolute inset-0", isActive ? "z-10" : "z-0 hidden")}>
+              <IpmiSolTabPane sessionId={tab.sessionId} session={session} />
             </div>
           );
         }

@@ -8,7 +8,7 @@
 // specific fields yet — domain, NLA, codec, etc. — so those fall back to
 // sensible defaults here until the editor grows per-type fields).
 
-import type { Session, RdpConfig, VncConfig, WsTermConfig, RedfishConfig, WebDavConfig, MqttConfig, SmbConfig, NetconfConfig, MoshConfig, WinRmConfig, WinRmAuth } from '@/types';
+import type { Session, RdpConfig, VncConfig, WsTermConfig, RedfishConfig, WebDavConfig, MqttConfig, SmbConfig, NetconfConfig, MoshConfig, WinRmConfig, WinRmAuth, IpmiConfig, IpmiPrivilege } from '@/types';
 
 export function buildRdpConfig(session: Session): RdpConfig {
   const opts = session.connection.protocolOptions;
@@ -143,5 +143,17 @@ export function buildWinRmConfig(session: Session): WinRmConfig {
     use_tls: session.connection.port === 5986,
     auth: (opts?.['auth'] as WinRmAuth) ?? 'ntlm',
     verify_tls: false,
+  };
+}
+
+export function buildIpmiConfig(session: Session): IpmiConfig {
+  const opts = session.connection.protocolOptions;
+  return {
+    host: session.connection.host,
+    port: session.connection.port,
+    username: (opts?.['username'] as string) ?? '',
+    password: (opts?.['password'] as string) ?? '',
+    channel: (opts?.['channel'] as number) ?? 1,
+    privilege: (opts?.['privilege'] as IpmiPrivilege) ?? 'administrator',
   };
 }

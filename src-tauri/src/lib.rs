@@ -330,6 +330,8 @@ pub fn run() {
             // IPMI SOL
             ipmi::ipmi_sol_connect,
             ipmi::ipmi_sol_send,
+            ipmi::ipmi_power_status,
+            ipmi::ipmi_power_control,
             ipmi::ipmi_sol_disconnect,
             ipmi::ipmi_list,
             // Redfish

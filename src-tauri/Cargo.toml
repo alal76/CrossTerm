@@ -39,6 +39,10 @@ argon2 = "0.5"
 aes-gcm = "0.10"
 rand = "0.8"
 zeroize = { version = "1", features = ["derive"] }
+# IPMI RAKP+ confidentiality (AES-CBC-128, per IPMI 2.0 spec — separate from
+# aes-gcm above, which is AEAD and not what IPMI's RMCP+ session uses)
+aes = "0.8"
+cbc = "0.1"
 
 # Database
 rusqlite = { version = "0.31", features = ["bundled"] }
