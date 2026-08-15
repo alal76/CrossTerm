@@ -4909,8 +4909,16 @@ fn get_tunnel_metrics() -> Arc<Mutex<HashMap<String, TunnelMetrics>>> {
         .clone()
 }
 
-#[allow(dead_code)]
+/// Accumulates traffic on a tunnel, called from the relay loops in
+/// `ssh::ssh_port_forward_add` (local/dynamic forwards) and
+/// `ssh::SshClientHandler::server_channel_open_forwarded_tcpip` (remote
+/// forwards) as bytes are read from either side of the tunnel. `tunnel_id`
+/// is the same id `PortForwardManager.tsx` already threads through as both
+/// `TunnelRule.id` and `PortForward.id`, so no separate id-mapping is needed.
 pub fn record_tunnel_bytes(tunnel_id: &str, bytes_in: u64, bytes_out: u64) {
+    if tunnel_id.is_empty() {
+        return;
+    }
     if let Ok(mut map) = get_tunnel_metrics().lock() {
         let entry = map
             .entry(tunnel_id.to_string())
@@ -4921,6 +4929,36 @@ pub fn record_tunnel_bytes(tunnel_id: &str, bytes_in: u64, bytes_out: u64) {
         entry.bytes_in += bytes_in;
         entry.bytes_out += bytes_out;
         entry.last_activity = Some(chrono::Utc::now().to_rfc3339());
+    }
+}
+
+/// Marks one more relayed connection as open on a tunnel (each accepted
+/// local/inbound connection on a port-forward gets its own relay task).
+pub fn tunnel_connection_opened(tunnel_id: &str) {
+    if tunnel_id.is_empty() {
+        return;
+    }
+    if let Ok(mut map) = get_tunnel_metrics().lock() {
+        let entry = map
+            .entry(tunnel_id.to_string())
+            .or_insert_with(|| TunnelMetrics {
+                tunnel_id: tunnel_id.to_string(),
+                ..Default::default()
+            });
+        entry.active_connections += 1;
+    }
+}
+
+/// Marks a relayed connection as closed; called from the relay task's
+/// cleanup path so `active_connections` doesn't just grow forever.
+pub fn tunnel_connection_closed(tunnel_id: &str) {
+    if tunnel_id.is_empty() {
+        return;
+    }
+    if let Ok(mut map) = get_tunnel_metrics().lock() {
+        if let Some(entry) = map.get_mut(tunnel_id) {
+            entry.active_connections = entry.active_connections.saturating_sub(1);
+        }
     }
 }
 
@@ -5082,6 +5120,78 @@ mod tunnel_tests {
         let ids: Vec<&str> = all.iter().map(|e| e.tunnel_id.as_str()).collect();
         assert!(ids.contains(&"tun-a"), "tun-a should be present");
         assert!(ids.contains(&"tun-b"), "tun-b should be present");
+    }
+
+    // The tests above exercise `record_tunnel_bytes`'s accumulation logic
+    // against an isolated map rather than the real function, to avoid
+    // sharing the process-wide TUNNEL_METRICS static across parallel test
+    // threads. The tests below exercise the real, production
+    // `record_tunnel_bytes`/`tunnel_connection_opened`/`_closed` functions
+    // directly (this is what ssh/mod.rs's relay loops actually call) —
+    // each uses a tunnel_id unique to this test so concurrent tests can't
+    // collide on the shared global map.
+
+    #[test]
+    fn test_real_record_tunnel_bytes_accumulates_across_calls() {
+        let id = "test-real-record-tunnel-bytes";
+        record_tunnel_bytes(id, 100, 50);
+        record_tunnel_bytes(id, 20, 5);
+
+        let metrics = get_tunnel_metrics();
+        let map = metrics.lock().unwrap();
+        let entry = map.get(id).expect("entry must exist after recording");
+        assert_eq!(entry.bytes_in, 120);
+        assert_eq!(entry.bytes_out, 55);
+        assert!(entry.last_activity.is_some());
+    }
+
+    #[test]
+    fn test_real_record_tunnel_bytes_ignores_an_empty_tunnel_id() {
+        // The Remote-forward fallback in ssh/mod.rs can pass an empty
+        // forward_id if a lookup somehow misses; this must not create a
+        // bogus "" entry in the shared metrics map.
+        record_tunnel_bytes("", 10, 10);
+        let metrics = get_tunnel_metrics();
+        let map = metrics.lock().unwrap();
+        assert!(map.get("").is_none());
+    }
+
+    #[test]
+    fn test_real_tunnel_connection_opened_and_closed_track_active_connections() {
+        let id = "test-real-tunnel-connection-lifecycle";
+        tunnel_connection_opened(id);
+        tunnel_connection_opened(id);
+        {
+            let metrics = get_tunnel_metrics();
+            let map = metrics.lock().unwrap();
+            assert_eq!(map.get(id).unwrap().active_connections, 2);
+        }
+
+        tunnel_connection_closed(id);
+        let metrics = get_tunnel_metrics();
+        let map = metrics.lock().unwrap();
+        assert_eq!(map.get(id).unwrap().active_connections, 1);
+    }
+
+    #[test]
+    fn test_real_tunnel_connection_closed_saturates_at_zero() {
+        let id = "test-real-tunnel-connection-closed-saturates";
+        tunnel_connection_opened(id);
+        tunnel_connection_closed(id);
+        tunnel_connection_closed(id); // one more than was opened
+
+        let metrics = get_tunnel_metrics();
+        let map = metrics.lock().unwrap();
+        assert_eq!(map.get(id).unwrap().active_connections, 0);
+    }
+
+    #[test]
+    fn test_real_tunnel_connection_closed_is_a_noop_for_an_unknown_tunnel() {
+        // Must not panic or create a spurious entry.
+        tunnel_connection_closed("test-real-tunnel-never-opened");
+        let metrics = get_tunnel_metrics();
+        let map = metrics.lock().unwrap();
+        assert!(map.get("test-real-tunnel-never-opened").is_none());
     }
 
     // ── Health tests ──────────────────────────────────────────────────────

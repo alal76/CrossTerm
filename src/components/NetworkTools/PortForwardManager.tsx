@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -11,7 +11,15 @@ import {
   ToggleRight,
   Circle,
 } from 'lucide-react';
-import type { TunnelRule, TunnelStatus } from '@/types';
+import type { TunnelRule, TunnelStatus, TunnelMetrics } from '@/types';
+
+const METRICS_POLL_INTERVAL_MS = 3000;
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 interface SshConnectionInfo {
   connection_id: string;
@@ -60,6 +68,8 @@ export default function PortForwardManager() {
   const { t } = useTranslation();
   const [tunnels, setTunnels] = useState<TunnelEntry[]>([]);
   const [sshSessions, setSshSessions] = useState<SshConnectionInfo[]>([]);
+  const [metrics, setMetrics] = useState<Record<string, TunnelMetrics>>({});
+  const metricsPollingRef = useRef(false);
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -89,6 +99,21 @@ export default function PortForwardManager() {
     }
   }, []);
 
+  // Live traffic metrics — no backend event pushes these, so poll while the
+  // panel is mounted (same idiom as WifiScanner.tsx's auto-refresh).
+  const loadMetrics = useCallback(async () => {
+    if (metricsPollingRef.current) return; // skip if the previous poll is still in flight
+    metricsPollingRef.current = true;
+    try {
+      const list = await invoke<TunnelMetrics[]>('network_tunnel_metrics_all');
+      setMetrics(Object.fromEntries(list.map((m) => [m.tunnel_id, m])));
+    } catch {
+      // ignore
+    } finally {
+      metricsPollingRef.current = false;
+    }
+  }, []);
+
   useEffect(() => {
     loadTunnels();
     loadSshSessions();
@@ -98,6 +123,12 @@ export default function PortForwardManager() {
     );
     return () => { unlisten.then((fn) => fn()); };
   }, [loadTunnels, loadSshSessions]);
+
+  useEffect(() => {
+    loadMetrics();
+    const timer = setInterval(loadMetrics, METRICS_POLL_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [loadMetrics]);
 
   const handleCreate = useCallback(async () => {
     const localPort = Number.parseInt(formData.local_port, 10);
@@ -293,6 +324,7 @@ export default function PortForwardManager() {
           const sshSession = rule.ssh_session_ref
             ? sshSessions.find((s) => s.connection_id === rule.ssh_session_ref)
             : undefined;
+          const ruleMetrics = metrics[rule.id];
           return (
             <div
               key={rule.id}
@@ -317,6 +349,12 @@ export default function PortForwardManager() {
                       </span>
                     )}
                   </div>
+                  {rule.enabled && ruleMetrics && (ruleMetrics.bytes_in > 0 || ruleMetrics.bytes_out > 0) && (
+                    <div className="text-xs text-text-disabled" data-testid={`tunnel-metrics-${rule.id}`}>
+                      ↓{formatBytes(ruleMetrics.bytes_in)} ↑{formatBytes(ruleMetrics.bytes_out)}
+                      {ruleMetrics.active_connections > 0 && ` · ${ruleMetrics.active_connections} connection${ruleMetrics.active_connections === 1 ? '' : 's'}`}
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="flex items-center gap-2">

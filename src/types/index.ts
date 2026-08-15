@@ -629,6 +629,15 @@ export interface TunnelRule {
 
 export type TunnelStatus = 'active' | 'inactive' | { error: string };
 
+export interface TunnelMetrics {
+  tunnel_id: string;
+  bytes_in: number;
+  bytes_out: number;
+  active_connections: number;
+  uptime_seconds: number;
+  last_activity: string | null;
+}
+
 export interface FileServerInfo {
   id: string;
   directory: string;

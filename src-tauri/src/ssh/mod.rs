@@ -222,9 +222,11 @@ pub(crate) struct SshClientHandler {
     connection_id: String,
     host: String,
     port: u16,
-    /// Remote forward configs: remote bind -> local target
+    /// Remote forward configs: remote bind -> (local host, local port, forward id).
+    /// The forward id is threaded through so the inbound-connection handler
+    /// can attribute relayed bytes to the right tunnel in `network::record_tunnel_bytes`.
     #[allow(clippy::type_complexity)]
-    remote_forwards: Arc<TokioMutex<HashMap<(String, u32), (String, u16)>>>,
+    remote_forwards: Arc<TokioMutex<HashMap<(String, u32), (String, u16, String)>>>,
     /// Whether SSH agent forwarding is enabled for this connection.
     #[allow(dead_code)]
     agent_enabled: bool,
@@ -325,10 +327,10 @@ impl client::Handler for SshClientHandler {
     ) -> Result<(), Self::Error> {
         let forwards = self.remote_forwards.lock().await;
         let key = (connected_address.to_string(), connected_port);
-        let (local_host, local_port) = forwards
+        let (local_host, local_port, forward_id) = forwards
             .get(&key)
             .cloned()
-            .unwrap_or_else(|| ("127.0.0.1".to_string(), connected_port as u16));
+            .unwrap_or_else(|| ("127.0.0.1".to_string(), connected_port as u16, String::new()));
         drop(forwards);
 
         let local_addr = format!("{}:{}", local_host, local_port);
@@ -340,12 +342,15 @@ impl client::Handler for SshClientHandler {
             let (mut tcp_read, mut tcp_write) = tcp_stream.split();
             let mut ch = channel;
 
+            crate::network::tunnel_connection_opened(&forward_id);
             loop {
                 tokio::select! {
                     msg = ch.wait() => {
                         match msg {
-                            Some(ChannelMsg::Data { data })
-                                if tcp_write.write_all(&data).await.is_err() => { break; }
+                            Some(ChannelMsg::Data { data }) => {
+                                crate::network::record_tunnel_bytes(&forward_id, data.len() as u64, 0);
+                                if tcp_write.write_all(&data).await.is_err() { break; }
+                            }
                             Some(ChannelMsg::Eof | ChannelMsg::Close) | None => break,
                             _ => {}
                         }
@@ -357,6 +362,7 @@ impl client::Handler for SshClientHandler {
                         match result {
                             Ok((0, _)) => break,
                             Ok((n, buf)) => {
+                                crate::network::record_tunnel_bytes(&forward_id, 0, n as u64);
                                 if ch.data(&buf[..n]).await.is_err() {
                                     break;
                                 }
@@ -366,6 +372,7 @@ impl client::Handler for SshClientHandler {
                     }
                 }
             }
+            crate::network::tunnel_connection_closed(&forward_id);
         });
 
         Ok(())
@@ -434,7 +441,7 @@ pub(crate) struct SshConnection {
     cmd_tx: mpsc::Sender<SshCommand>,
     forward_tasks: HashMap<String, tokio::task::JoinHandle<()>>,
     #[allow(clippy::type_complexity)]
-    remote_forwards: Arc<TokioMutex<HashMap<(String, u32), (String, u16)>>>,
+    remote_forwards: Arc<TokioMutex<HashMap<(String, u32), (String, u16, String)>>>,
     /// Early output buffer: collects data before the frontend terminal mounts.
     /// Shared with the reader task; drained once via `ssh_drain_buffer`.
     output_buffer: Arc<std::sync::Mutex<Option<Vec<String>>>>,
@@ -1296,6 +1303,7 @@ pub async fn ssh_port_forward_add(
             let remote_host = remote_host.clone();
             let remote_port = *remote_port;
             let conn_clone = conn.clone();
+            let forward_id_for_task = forward_id.clone();
 
             let task = tokio::spawn(async move {
                 loop {
@@ -1305,6 +1313,7 @@ pub async fn ssh_port_forward_add(
                     let conn_inner = conn_clone.clone();
                     let rh = remote_host.clone();
                     let rp = remote_port;
+                    let forward_id = forward_id_for_task.clone();
 
                     tokio::spawn(async move {
                         let connection = conn_inner.lock().await;
@@ -1321,12 +1330,15 @@ pub async fn ssh_port_forward_add(
                         let (mut tcp_read, mut tcp_write) = tcp_stream.split();
                         let mut ch = channel;
 
+                        crate::network::tunnel_connection_opened(&forward_id);
                         loop {
                             tokio::select! {
                                 msg = ch.wait() => {
                                     match msg {
-                                        Some(ChannelMsg::Data { data })
-                                            if tcp_write.write_all(&data).await.is_err() => { break; }
+                                        Some(ChannelMsg::Data { data }) => {
+                                            crate::network::record_tunnel_bytes(&forward_id, data.len() as u64, 0);
+                                            if tcp_write.write_all(&data).await.is_err() { break; }
+                                        }
                                         Some(ChannelMsg::Eof | ChannelMsg::Close) | None => break,
                                         _ => {}
                                     }
@@ -1338,6 +1350,7 @@ pub async fn ssh_port_forward_add(
                                     match result {
                                         Ok((0, _)) => break,
                                         Ok((n, buf)) => {
+                                            crate::network::record_tunnel_bytes(&forward_id, 0, n as u64);
                                             if ch.data(&buf[..n]).await.is_err() {
                                                 break;
                                             }
@@ -1347,6 +1360,7 @@ pub async fn ssh_port_forward_add(
                                 }
                             }
                         }
+                        crate::network::tunnel_connection_closed(&forward_id);
                     });
                 }
             });
@@ -1372,7 +1386,7 @@ pub async fn ssh_port_forward_add(
             // Register the mapping so the handler can route incoming connections
             conn_locked.remote_forwards.lock().await.insert(
                 (bind_host.clone(), *bind_port as u32),
-                (remote_host.clone(), *remote_port),
+                (remote_host.clone(), *remote_port, forward_id.clone()),
             );
             conn_locked.info.port_forwards.push(forward);
         }
@@ -1388,12 +1402,14 @@ pub async fn ssh_port_forward_add(
                 .map_err(|e| SshError::PortForward(format!("SOCKS5 bind failed: {}", e)))?;
 
             let conn_clone = conn.clone();
+            let forward_id_for_task = forward_id.clone();
             let task = tokio::spawn(async move {
                 loop {
                     let Ok((mut tcp_stream, _)) = listener.accept().await else {
                         break;
                     };
                     let conn_inner = conn_clone.clone();
+                    let forward_id = forward_id_for_task.clone();
 
                     tokio::spawn(async move {
                         let (mut reader, mut writer) = tcp_stream.split();
@@ -1495,12 +1511,15 @@ pub async fn ssh_port_forward_add(
                         }
 
                         let mut ch = channel;
+                        crate::network::tunnel_connection_opened(&forward_id);
                         loop {
                             tokio::select! {
                                 msg = ch.wait() => {
                                     match msg {
-                                        Some(ChannelMsg::Data { data })
-                                            if writer.write_all(&data).await.is_err() => { break; }
+                                        Some(ChannelMsg::Data { data }) => {
+                                            crate::network::record_tunnel_bytes(&forward_id, data.len() as u64, 0);
+                                            if writer.write_all(&data).await.is_err() { break; }
+                                        }
                                         Some(ChannelMsg::Eof | ChannelMsg::Close) | None => break,
                                         _ => {}
                                     }
@@ -1512,6 +1531,7 @@ pub async fn ssh_port_forward_add(
                                     match result {
                                         Ok((0, _)) => break,
                                         Ok((n, b)) => {
+                                            crate::network::record_tunnel_bytes(&forward_id, 0, n as u64);
                                             if ch.data(&b[..n]).await.is_err() {
                                                 break;
                                             }
@@ -1521,6 +1541,7 @@ pub async fn ssh_port_forward_add(
                                 }
                             }
                         }
+                        crate::network::tunnel_connection_closed(&forward_id);
                     });
                 }
             });
