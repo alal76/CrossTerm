@@ -143,6 +143,11 @@ vi.mock("@/components/Nfs/NfsExplorer", () => ({
     <div data-testid={`nfs-explorer-${sessionId}`}>NfsExplorer Mock</div>
   ),
 }));
+vi.mock("@/components/KubernetesPortForward/KubernetesPortForwardPanel", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`k8s-port-forward-panel-${sessionId}`}>KubernetesPortForwardPanel Mock</div>
+  ),
+}));
 
 // Mock components that use localStorage directly (tested separately)
 vi.mock("@/components/Help/WhatsNewPanel", () => ({
@@ -367,6 +372,17 @@ describe("App", () => {
       render(<App />);
 
       expect(screen.getByTestId(`nfs-explorer-${tab.sessionId}`)).toBeInTheDocument();
+      expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
+    });
+
+    it("routes a Kubernetes Port-Forward tab to KubernetesPortForwardPanel, not the generic local-shell fallback", () => {
+      const session = baseSession({ type: SessionType.KubernetesPortForward, connection: { host: "ignored", port: 8080 } });
+      const tab = baseTab({ sessionType: SessionType.KubernetesPortForward });
+      useSessionStore.setState({ sessions: [session], openTabs: [tab], activeTabId: tab.id });
+
+      render(<App />);
+
+      expect(screen.getByTestId(`k8s-port-forward-panel-${tab.sessionId}`)).toBeInTheDocument();
       expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
     });
 

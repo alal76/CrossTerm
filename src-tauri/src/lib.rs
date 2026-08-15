@@ -14,6 +14,7 @@ mod importer;
 mod docker_logs;
 mod ebcdic;
 mod ipmi;
+mod kube_forward;
 mod rlogin;
 mod x11_forward;
 mod keygen;
@@ -99,6 +100,7 @@ pub fn run() {
         .manage(netconf::NetconfState::new())
         .manage(network::NetworkState::new())
         .manage(nfs::NfsState::new())
+        .manage(kube_forward::K8sPortForwardState::new())
         .manage(redfish::RedfishState::new())
         .manage(smb::SmbState::new())
         .manage(snmp::SnmpState::new())
@@ -499,6 +501,9 @@ pub fn run() {
             nfs::nfs_list,
             nfs::nfs_read,
             nfs::nfs_disconnect,
+            kube_forward::k8s_port_forward_connect,
+            kube_forward::k8s_port_forward_disconnect,
+            kube_forward::k8s_port_forward_list,
             // Editor
             editor::editor_open,
             editor::editor_save,

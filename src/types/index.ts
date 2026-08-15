@@ -476,6 +476,33 @@ export interface NfsEntry {
   mode: number;
 }
 
+// --- Kubernetes Port-Forward Types ---
+
+export interface K8sPortForwardConfig {
+  kubeconfig_path?: string;
+  context?: string;
+  namespace: string;
+  pod_name: string;
+  remote_port: number;
+  local_port: number;
+}
+
+export interface K8sPortForwardConnectResult {
+  id: string;
+  local_port: number;
+}
+
+export interface K8sPortForwardConnEvent {
+  session_id: string;
+  peer: string;
+  state: 'open' | 'closed' | 'error';
+}
+
+export interface K8sPortForwardErrorEvent {
+  session_id: string;
+  message: string;
+}
+
 // --- Cloud Types ---
 
 export type CloudProvider = 'aws' | 'azure' | 'gcp';

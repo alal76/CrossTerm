@@ -123,6 +123,11 @@ vi.mock("@/components/Nfs/NfsExplorer", () => ({
     <div data-testid={`nfs-explorer-${sessionId}`}>NfsExplorer Mock</div>
   ),
 }));
+vi.mock("@/components/KubernetesPortForward/KubernetesPortForwardPanel", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`k8s-port-forward-panel-${sessionId}`}>KubernetesPortForwardPanel Mock</div>
+  ),
+}));
 
 function baseSession(overrides: Partial<Session> = {}): Session {
   return {
@@ -201,6 +206,16 @@ describe("SplitPaneContainer session type routing", () => {
     render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
 
     expect(screen.getByTestId(`nfs-explorer-${tab.sessionId}`)).toBeInTheDocument();
+  });
+
+  it("routes a Kubernetes Port-Forward leaf pane to KubernetesPortForwardPanel", () => {
+    const session = baseSession({ type: SessionType.KubernetesPortForward, connection: { host: "ignored", port: 8080 } });
+    const tab = baseTab({ sessionType: SessionType.KubernetesPortForward });
+    useSessionStore.setState({ sessions: [session], openTabs: [tab] });
+
+    render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
+
+    expect(screen.getByTestId(`k8s-port-forward-panel-${tab.sessionId}`)).toBeInTheDocument();
   });
 
   it("routes a Telnet leaf pane to TelnetTerminal", () => {

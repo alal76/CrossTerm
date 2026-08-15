@@ -29,6 +29,7 @@ import RloginTerminalTab from "@/components/Rlogin/RloginTerminalTab";
 import DockerLogsViewer from "@/components/DockerLogs/DockerLogsViewer";
 import X11ForwardPanel from "@/components/X11Forward/X11ForwardPanel";
 import NfsExplorer from "@/components/Nfs/NfsExplorer";
+import KubernetesPortForwardPanel from "@/components/KubernetesPortForward/KubernetesPortForwardPanel";
 import {
   buildRdpConfig,
   buildVncConfig,
@@ -50,6 +51,7 @@ import {
   buildX11ForwardConfig,
   buildProxmoxConsoleConfig,
   buildNfsConfig,
+  buildK8sPortForwardConfig,
 } from "@/utils/sessionConfig";
 import type { Session } from "@/types";
 
@@ -156,4 +158,9 @@ export function ProxmoxConsoleTabPane({ sessionId, session }: PaneProps) {
 export function NfsTabPane({ sessionId, session }: PaneProps) {
   const config = useMemo(() => buildNfsConfig(session), [session]);
   return <NfsExplorer sessionId={sessionId} config={config} />;
+}
+
+export function K8sPortForwardTabPane({ sessionId, session }: PaneProps) {
+  const config = useMemo(() => buildK8sPortForwardConfig(session), [session]);
+  return <KubernetesPortForwardPanel sessionId={sessionId} config={config} />;
 }

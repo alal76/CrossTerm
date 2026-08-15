@@ -8,7 +8,7 @@
 // specific fields yet — domain, NLA, codec, etc. — so those fall back to
 // sensible defaults here until the editor grows per-type fields).
 
-import type { Session, RdpConfig, VncConfig, WsTermConfig, RedfishConfig, WebDavConfig, MqttConfig, SmbConfig, NetconfConfig, MoshConfig, WinRmConfig, WinRmAuth, IpmiConfig, IpmiPrivilege, SnmpConfig, SnmpVersion, SnmpV3AuthProtocol, SnmpV3PrivProtocol, GrpcConfig, Tn3270Config, Tn3270Model, Tn5250Config, RloginConfig, DockerLogsConfig, X11ForwardConfig, X11ForwardAuth, ProxmoxConsoleConfig, ProxmoxResourceType, NfsConfig } from '@/types';
+import type { Session, RdpConfig, VncConfig, WsTermConfig, RedfishConfig, WebDavConfig, MqttConfig, SmbConfig, NetconfConfig, MoshConfig, WinRmConfig, WinRmAuth, IpmiConfig, IpmiPrivilege, SnmpConfig, SnmpVersion, SnmpV3AuthProtocol, SnmpV3PrivProtocol, GrpcConfig, Tn3270Config, Tn3270Model, Tn5250Config, RloginConfig, DockerLogsConfig, X11ForwardConfig, X11ForwardAuth, ProxmoxConsoleConfig, ProxmoxResourceType, NfsConfig, K8sPortForwardConfig } from '@/types';
 
 export function buildRdpConfig(session: Session): RdpConfig {
   const opts = session.connection.protocolOptions;
@@ -274,5 +274,17 @@ export function buildNfsConfig(session: Session): NfsConfig {
     gid,
     mount_port: opts?.['mount_port'] as number | undefined,
     nfs_port: opts?.['nfs_port'] as number | undefined,
+  };
+}
+
+export function buildK8sPortForwardConfig(session: Session): K8sPortForwardConfig {
+  const opts = session.connection.protocolOptions;
+  return {
+    kubeconfig_path: opts?.['kubeconfig_path'] as string | undefined,
+    context: opts?.['context'] as string | undefined,
+    namespace: (opts?.['namespace'] as string) ?? 'default',
+    pod_name: (opts?.['pod_name'] as string) ?? '',
+    remote_port: (opts?.['remote_port'] as number) ?? session.connection.port ?? 80,
+    local_port: (opts?.['local_port'] as number) ?? 0,
   };
 }

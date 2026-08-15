@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildRdpConfig, buildVncConfig, buildWsTermConfig, buildRedfishConfig, buildWebDavConfig, buildMqttConfig, buildSmbConfig, buildNetconfConfig, buildMoshConfig, buildWinRmConfig, buildIpmiConfig, buildSnmpConfig, buildGrpcConfig, buildTn3270Config, buildTn5250Config, buildRloginConfig, buildDockerLogsConfig, buildX11ForwardConfig, buildProxmoxConsoleConfig, buildNfsConfig } from "@/utils/sessionConfig";
+import { buildRdpConfig, buildVncConfig, buildWsTermConfig, buildRedfishConfig, buildWebDavConfig, buildMqttConfig, buildSmbConfig, buildNetconfConfig, buildMoshConfig, buildWinRmConfig, buildIpmiConfig, buildSnmpConfig, buildGrpcConfig, buildTn3270Config, buildTn5250Config, buildRloginConfig, buildDockerLogsConfig, buildX11ForwardConfig, buildProxmoxConsoleConfig, buildNfsConfig, buildK8sPortForwardConfig } from "@/utils/sessionConfig";
 import type { Session } from "@/types";
 import { SessionType } from "@/types";
 
@@ -501,5 +501,43 @@ describe("buildNfsConfig", () => {
     expect(config.gid).toBe(1000);
     expect(config.mount_port).toBe(20048);
     expect(config.nfs_port).toBe(2049);
+  });
+});
+
+describe("buildK8sPortForwardConfig", () => {
+  it("defaults namespace to default, local_port to 0, and falls back to the session port for remote_port", () => {
+    const config = buildK8sPortForwardConfig(
+      baseSession({ connection: { host: "ignored", port: 8080, protocolOptions: { pod_name: "web-abc123" } } })
+    );
+    expect(config.namespace).toBe("default");
+    expect(config.pod_name).toBe("web-abc123");
+    expect(config.remote_port).toBe(8080);
+    expect(config.local_port).toBe(0);
+    expect(config.kubeconfig_path).toBeUndefined();
+    expect(config.context).toBeUndefined();
+  });
+
+  it("pulls namespace/context/kubeconfig_path/remote_port/local_port from protocolOptions when present", () => {
+    const config = buildK8sPortForwardConfig(
+      baseSession({
+        connection: {
+          host: "ignored",
+          port: 8080,
+          protocolOptions: {
+            pod_name: "web-abc123",
+            namespace: "prod",
+            context: "prod-cluster",
+            kubeconfig_path: "/home/alal/.kube/prod-config",
+            remote_port: 9090,
+            local_port: 19090,
+          },
+        },
+      })
+    );
+    expect(config.namespace).toBe("prod");
+    expect(config.context).toBe("prod-cluster");
+    expect(config.kubeconfig_path).toBe("/home/alal/.kube/prod-config");
+    expect(config.remote_port).toBe(9090);
+    expect(config.local_port).toBe(19090);
   });
 });
