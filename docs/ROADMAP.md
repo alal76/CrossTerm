@@ -137,7 +137,7 @@ The following issues were identified through heuristic evaluation against Nielse
 | U-1 | No import from PuTTY / `.ssh/config` / SecureCRT | ✅ FIXED v0.3.0 | Import wizard with multi-format parser |
 | U-2 | Vault unlock is the first thing new users see — no explainer | ✅ FIXED v0.3.0 | First-run wizard with 3-step onboarding |
 | U-3 | SSH connection failure messages are raw Rust error strings | ✅ FIXED v0.3.0 | 40+ typed AppError codes, localized to EN/DE/FR |
-| U-4 | Session editor opens in a modal with 20+ fields — no progressive disclosure | ❌ NOT DONE | `SessionEditor.tsx` renders every field (name, type, host, port, username, group, tags, credential, startup script, notes) as one flat, always-visible column — no tabs, accordion, "Advanced" collapse, or wizard steps. Verified against source 2026-08-15; still open. |
+| U-4 | Session editor opens in a modal with 20+ fields — no progressive disclosure | ✅ FIXED 2026-08-15 | Group/Tags/Credential/Startup Script/Notes now sit behind a collapsed "Advanced" toggle (chevron + label, matching `SessionTree.tsx`'s folder-expand affordance); Name/Type/Host/Port/Username stay always-visible. Starts expanded when editing a session that already has advanced data, so editing doesn't hide a user's own existing values. |
 | U-5 | No visual indicator when a background tunnel silently drops | ✅ FIXED v0.3.0 | Session watchdog with toast + auto-reconnect |
 
 ### High (reduce retention)
@@ -146,14 +146,14 @@ The following issues were identified through heuristic evaluation against Nielse
 | U-6 | Scrollback search requires Ctrl+Shift+F — not discoverable | ✅ FIXED v0.3.0 | Hotkey bound, auto-surfaces on text selection |
 | U-7 | Multiple locked vaults: "Delete" icon is easy to trigger by accident | ✅ FIXED v0.8.0 | `pendingDeleteId` 2s confirm guard in VaultUnlock + CredentialManager |
 | U-8 | No bulk session actions (select 10, connect all / delete all) | ⏳ Phase 2 | Multi-select with Shift/Ctrl+click, bulk ops |
-| U-9 | Theme changes require restart to fully apply in terminal renderer | ❌ NOT DONE | `TerminalView.tsx` passes `theme: getTerminalTheme()` only once, at `xterm.js` `Terminal` construction in the mount effect — `theme` isn't in that effect's dependency array, and nothing in the codebase calls `term.options.theme = ...` on an existing instance. An open terminal's colors are fixed at creation. Verified against source 2026-08-15; still open. |
+| U-9 | Theme changes require restart to fully apply in terminal renderer | ✅ FIXED 2026-08-15 | New `useHotTerminalTheme` hook (`src/utils/terminalTheme.ts`) subscribes to the theme store and assigns a fresh `term.options.theme` object onto every already-mounted xterm.js instance — wired into all 6 places that construct one (TerminalView, SshTerminalView, WebSocketTerminalTab, Mosh/Rlogin/Ipmi tabs). No remount, no dropped connection. |
 | U-10 | Android soft keyboard overlaps terminal on small phones | ⏳ Phase 5 | Keyboard management redesign |
 
 ### Medium (limit power use)
 | # | Issue | Status | Resolution |
 |---|-------|--------|------------|
 | U-11 | Macro editor has no test/dry-run mode | ⏳ Phase 2 | Macro GUI builder with dry-run mode |
-| U-12 | Port forward rules show no live traffic metrics | ⚠️ BACKEND ONLY | `TunnelMetrics` struct + `network_tunnel_metrics/_all/_reset` commands exist and are registered (`network/mod.rs`, v0.9.0), but `PortForwardManager.tsx` never calls them — only `network_tunnel_list/create/toggle/remove`. The metrics exist and are unused; nothing in the UI shows a byte count. Verified against source 2026-08-15; wiring the existing backend into the panel is a small follow-up, not new engineering. |
+| U-12 | Port forward rules show no live traffic metrics | ✅ FIXED 2026-08-15 | Turned out to need more than "wire the UI" — `record_tunnel_bytes` was dead code, never called from the real relay loops in `ssh/mod.rs`. Now instrumented (all 3 forward types: local, remote, dynamic/SOCKS) with real byte and active-connection counting; `PortForwardManager.tsx` polls `network_tunnel_metrics_all` every 3s and shows live bytes in/out per enabled rule. |
 | U-13 | No "recently used" section at the top of session tree | ✅ FIXED v0.8.0 | Collapsible "Recently Connected" section, last 5 by `lastConnectedAt`, persisted in localStorage |
 | U-14 | SFTP drag-and-drop only works one direction (local → remote) | ✅ FIXED | `SftpBrowser.tsx`: `handleLocalPaneDrop` handles remote→local (`sftp_download`), `handleRemotePaneDrop` handles local→remote (`sftp_upload`); both directions wired. Verified against source 2026-08-15. |
 | U-15 | No right-click → "Open in SFTP" from a terminal tab | ✅ FIXED v0.3.0 | Context menu integration
@@ -228,7 +228,7 @@ Individual power users spend 8+ hours a day in their terminal client. This phase
 - [x] Regex search (DONE v0.5.0)
 - [x] **Right-to-left text support**: `RtlSettings.tsx` with `auto`/`ltr`/`rtl` direction selector; `useEffect` sets `document.documentElement.dir` globally (DONE v0.9.0)
 
-**Phase 2 Status: mostly complete, three usability items overlooked.** All items explicitly listed above shipped by v0.10.0. However, auditing the original usability findings (§5) against the current codebase (2026-08-15) found three that this section's "all done" claim had missed: **U-4** (session editor still has no progressive disclosure — flat 10-field form), **U-9** (terminal theme changes still require reopening the tab — no hot reload), and **U-12** (tunnel metrics backend exists and is registered but was never wired into `PortForwardManager.tsx`'s UI). None are large — U-12 especially is a UI-only follow-up on top of already-shipped backend work — but they should not have been marked done. Scheduling them alongside Phase 5/hardening work rather than reopening Phase 2.
+**Phase 2 Status: ✅ COMPLETE as of 2026-08-15.** All items explicitly listed above shipped by v0.10.0. An audit against the current codebase (2026-08-15) found three usability items (§5) this section had wrongly claimed as done — **U-4** (session editor had no progressive disclosure), **U-9** (terminal theme changes required reopening the tab), and **U-12** (tunnel metrics backend existed but was dead code, never wired into the real relay loops or the UI) — all three have since been fixed and verified (source + full test suite), closing the gap this note originally flagged.
 
 ---
 

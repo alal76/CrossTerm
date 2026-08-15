@@ -27,7 +27,7 @@ Before planning, an honest inventory of what we are working with:
 | Audit (`audit/mod.rs`) | 11 tests | Syslog, anomaly, compliance report |
 | Frontend components | 219 tests | Session tree, vault, settings, terminal, health card, SSH diff, broadcast, timestamp, RTL, MacroEditor DnD |
 | Protocol-breadth modules (20 new session types — see §1.1) | 200+ new Rust tests | RDP/VNC/Telnet/Serial routing, WinRM NTLM, NETCONF, Mosh, SMB, IPMI RAKP+, SNMPv3 USM, gRPC reflection, TN3270/TN5250, Rlogin, DockerLogs, X11Forward, ProxmoxConsole, NfsExplorer (NFSv3), KubernetesPortForward, SpiceConsole |
-| **Total (as of protocol-breadth branch)** | **584 Rust + 457 frontend** | **All passing** |
+| **Total (as of protocol-breadth branch)** | **589 Rust + 475 frontend** | **All passing** |
 
 ### Infrastructure (v0.8.0)
 
@@ -115,7 +115,7 @@ A separate initiative from the v0.3–v1.2 phase plan above: an audit found that
 
 Every hand-rolled protocol was verified against an authoritative source (RFC text, or a reference implementation's actual source fetched via `gh api`) before implementation, not from memory — this caught several real bugs during development (an IPMI integrity-trailer offset bug, transcribed SNMPv3 test vectors, a WebDAV XML-namespace-prefix fragility now documented rather than silently assumed complete).
 
-**Status:** 18 commits ahead of `main`, 0 behind (clean fast-forward). 584 Rust + 457 frontend tests, all passing. `npx tsc --noEmit` clean. Not yet merged — see the merge-readiness note below.
+**Status:** merged to `main` 2026-08-15 (protocol-breadth phases 0–5). A follow-up pass the same day fixed three usability items (§5 of ROADMAP.md: U-4, U-9, U-12) that a roadmap audit found were falsely marked resolved — those commits are on `feat/protocol-breadth`, a few ahead of `main` again as of this writing. 589 Rust + 475 frontend tests, all passing. `npx tsc --noEmit` clean.
 
 **Known follow-ups, not blocking:**
 - `webdav::parse_propfind` matches hardcoded `D:`-prefixed XML tags rather than resolving the `DAV:` namespace URI, so servers echoing a different prefix (`d:`, `lp1:`) currently parse to an empty list. Documented in code; not fixed this pass since a correct fix needs real interop samples to verify against.
