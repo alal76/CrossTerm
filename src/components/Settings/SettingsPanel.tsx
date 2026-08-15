@@ -21,6 +21,7 @@ import {
   Bell,
   Cpu,
   RefreshCw,
+  X,
 } from "lucide-react";
 import { useAppStore } from "@/stores/appStore";
 import { useFeatureFlagsStore } from "@/stores/featureFlagsStore";
@@ -362,6 +363,20 @@ export default function SettingsPanel() {
 
   // Experimental feature flags (used in renderExperimental)
   const featureFlags = useFeatureFlagsStore();
+
+  const setSettingsOpen = useAppStore((s) => s.setSettingsOpen);
+  const closeSettings = useCallback(() => setSettingsOpen(false), [setSettingsOpen]);
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeSettings();
+      }
+    }
+    globalThis.addEventListener("keydown", handleKeyDown);
+    return () => globalThis.removeEventListener("keydown", handleKeyDown);
+  }, [closeSettings]);
 
   const appTheme      = useAppStore((s) => s.theme);
   const setAppTheme   = useAppStore((s) => s.setTheme);
@@ -1019,9 +1034,18 @@ export default function SettingsPanel() {
 
       {/* Content pane */}
       <div className="flex-1 overflow-y-auto px-6 py-4">
-        <h2 className="text-sm font-semibold text-text-primary mb-1">
-          {t(HEADING_KEYS[category])}
-        </h2>
+        <div className="flex items-start justify-between">
+          <h2 className="text-sm font-semibold text-text-primary mb-1">
+            {t(HEADING_KEYS[category])}
+          </h2>
+          <button
+            onClick={closeSettings}
+            className="p-1 rounded hover:bg-surface-elevated text-text-secondary hover:text-text-primary transition-colors shrink-0"
+            title={t("settings.close", "Close settings")}
+          >
+            <X size={16} />
+          </button>
+        </div>
         <p className="text-[11px] text-text-secondary mb-4">
           {t(DESCRIPTION_KEYS[category])}
         </p>

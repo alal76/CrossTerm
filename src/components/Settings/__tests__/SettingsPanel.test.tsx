@@ -62,6 +62,24 @@ describe("SettingsPanel", () => {
     expect(screen.getByRole("heading", { name: "Terminal" })).toBeInTheDocument();
   });
 
+  it("close button sets settingsOpen to false", async () => {
+    const user = userEvent.setup();
+    render(<SettingsPanel />);
+
+    await user.click(screen.getByTitle("Close settings"));
+
+    expect(useAppStore.getState().settingsOpen).toBe(false);
+  });
+
+  it("pressing Escape sets settingsOpen to false", async () => {
+    const user = userEvent.setup();
+    render(<SettingsPanel />);
+
+    await user.keyboard("{Escape}");
+
+    expect(useAppStore.getState().settingsOpen).toBe(false);
+  });
+
   it("FT-C-25: toggle change calls invoke('settings_update')", async () => {
     const user = userEvent.setup();
     const mockInvoke = vi.mocked(invoke);

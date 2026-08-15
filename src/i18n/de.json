@@ -300,6 +300,7 @@
   },
   "settings": {
     "title": "Einstellungen",
+    "close": "Einstellungen schließen",
     "general": "Allgemein",
     "appearance": "Darstellung",
     "terminalCategory": "Terminal",
