@@ -138,6 +138,11 @@ vi.mock("@/components/X11Forward/X11ForwardPanel", () => ({
     <div data-testid={`x11-forward-panel-${sessionId}`}>X11ForwardPanel Mock</div>
   ),
 }));
+vi.mock("@/components/Nfs/NfsExplorer", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`nfs-explorer-${sessionId}`}>NfsExplorer Mock</div>
+  ),
+}));
 
 // Mock components that use localStorage directly (tested separately)
 vi.mock("@/components/Help/WhatsNewPanel", () => ({
@@ -351,6 +356,17 @@ describe("App", () => {
         "data-connect-command",
         "proxmox_console_connect"
       );
+      expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
+    });
+
+    it("routes an NFS Explorer tab to NfsExplorer, not the generic local-shell fallback", () => {
+      const session = baseSession({ type: SessionType.NfsExplorer, connection: { host: "10.0.0.20", port: 2049 } });
+      const tab = baseTab({ sessionType: SessionType.NfsExplorer });
+      useSessionStore.setState({ sessions: [session], openTabs: [tab], activeTabId: tab.id });
+
+      render(<App />);
+
+      expect(screen.getByTestId(`nfs-explorer-${tab.sessionId}`)).toBeInTheDocument();
       expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
     });
 

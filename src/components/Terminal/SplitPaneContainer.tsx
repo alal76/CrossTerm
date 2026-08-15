@@ -28,6 +28,7 @@ import {
   DockerLogsTabPane,
   X11ForwardTabPane,
   ProxmoxConsoleTabPane,
+  NfsTabPane,
 } from "@/components/Terminal/ProtocolTabPanes";
 
 // ── Resize Handle ──
@@ -121,6 +122,7 @@ const SESSION_TAB_PANES: Partial<Record<SessionType, typeof RdpTabPane>> = {
   [SessionType.DockerLogs]: DockerLogsTabPane,
   [SessionType.X11Forward]: X11ForwardTabPane,
   [SessionType.ProxmoxConsole]: ProxmoxConsoleTabPane,
+  [SessionType.NfsExplorer]: NfsTabPane,
 };
 
 function renderPaneContent(tab: { sessionId: string; sessionType: SessionType }, session: Session | undefined, isActive: boolean) {

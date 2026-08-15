@@ -28,6 +28,7 @@ import Tn5250Screen from "@/components/Tn5250/Tn5250Screen";
 import RloginTerminalTab from "@/components/Rlogin/RloginTerminalTab";
 import DockerLogsViewer from "@/components/DockerLogs/DockerLogsViewer";
 import X11ForwardPanel from "@/components/X11Forward/X11ForwardPanel";
+import NfsExplorer from "@/components/Nfs/NfsExplorer";
 import {
   buildRdpConfig,
   buildVncConfig,
@@ -48,6 +49,7 @@ import {
   buildDockerLogsConfig,
   buildX11ForwardConfig,
   buildProxmoxConsoleConfig,
+  buildNfsConfig,
 } from "@/utils/sessionConfig";
 import type { Session } from "@/types";
 
@@ -149,4 +151,9 @@ export function X11ForwardTabPane({ sessionId, session }: PaneProps) {
 export function ProxmoxConsoleTabPane({ sessionId, session }: PaneProps) {
   const config = useMemo(() => buildProxmoxConsoleConfig(session), [session]);
   return <VncViewer sessionId={sessionId} config={config} connectCommand="proxmox_console_connect" />;
+}
+
+export function NfsTabPane({ sessionId, session }: PaneProps) {
+  const config = useMemo(() => buildNfsConfig(session), [session]);
+  return <NfsExplorer sessionId={sessionId} config={config} />;
 }

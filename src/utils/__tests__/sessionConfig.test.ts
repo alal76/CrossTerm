@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildRdpConfig, buildVncConfig, buildWsTermConfig, buildRedfishConfig, buildWebDavConfig, buildMqttConfig, buildSmbConfig, buildNetconfConfig, buildMoshConfig, buildWinRmConfig, buildIpmiConfig, buildSnmpConfig, buildGrpcConfig, buildTn3270Config, buildTn5250Config, buildRloginConfig, buildDockerLogsConfig, buildX11ForwardConfig, buildProxmoxConsoleConfig } from "@/utils/sessionConfig";
+import { buildRdpConfig, buildVncConfig, buildWsTermConfig, buildRedfishConfig, buildWebDavConfig, buildMqttConfig, buildSmbConfig, buildNetconfConfig, buildMoshConfig, buildWinRmConfig, buildIpmiConfig, buildSnmpConfig, buildGrpcConfig, buildTn3270Config, buildTn5250Config, buildRloginConfig, buildDockerLogsConfig, buildX11ForwardConfig, buildProxmoxConsoleConfig, buildNfsConfig } from "@/utils/sessionConfig";
 import type { Session } from "@/types";
 import { SessionType } from "@/types";
 
@@ -472,5 +472,34 @@ describe("buildProxmoxConsoleConfig", () => {
     expect(config.resource_type).toBe("lxc");
     expect(config.realm).toBe("pve");
     expect(config.verify_tls).toBe(true);
+  });
+});
+
+describe("buildNfsConfig", () => {
+  it("defaults export_path to / and leaves uid/gid/ports undefined when not set", () => {
+    const config = buildNfsConfig(baseSession({ connection: { host: "10.0.0.20", port: 2049 } }));
+    expect(config.host).toBe("10.0.0.20");
+    expect(config.export_path).toBe("/");
+    expect(config.uid).toBeUndefined();
+    expect(config.gid).toBeUndefined();
+    expect(config.mount_port).toBeUndefined();
+    expect(config.nfs_port).toBeUndefined();
+  });
+
+  it("pulls export_path/uid/gid/mount_port/nfs_port from protocolOptions when present", () => {
+    const config = buildNfsConfig(
+      baseSession({
+        connection: {
+          host: "10.0.0.20",
+          port: 2049,
+          protocolOptions: { export_path: "/srv/nfs/share", uid: 1000, gid: 1000, mount_port: 20048, nfs_port: 2049 },
+        },
+      })
+    );
+    expect(config.export_path).toBe("/srv/nfs/share");
+    expect(config.uid).toBe(1000);
+    expect(config.gid).toBe(1000);
+    expect(config.mount_port).toBe(20048);
+    expect(config.nfs_port).toBe(2049);
   });
 });

@@ -8,7 +8,7 @@
 // specific fields yet — domain, NLA, codec, etc. — so those fall back to
 // sensible defaults here until the editor grows per-type fields).
 
-import type { Session, RdpConfig, VncConfig, WsTermConfig, RedfishConfig, WebDavConfig, MqttConfig, SmbConfig, NetconfConfig, MoshConfig, WinRmConfig, WinRmAuth, IpmiConfig, IpmiPrivilege, SnmpConfig, SnmpVersion, SnmpV3AuthProtocol, SnmpV3PrivProtocol, GrpcConfig, Tn3270Config, Tn3270Model, Tn5250Config, RloginConfig, DockerLogsConfig, X11ForwardConfig, X11ForwardAuth, ProxmoxConsoleConfig, ProxmoxResourceType } from '@/types';
+import type { Session, RdpConfig, VncConfig, WsTermConfig, RedfishConfig, WebDavConfig, MqttConfig, SmbConfig, NetconfConfig, MoshConfig, WinRmConfig, WinRmAuth, IpmiConfig, IpmiPrivilege, SnmpConfig, SnmpVersion, SnmpV3AuthProtocol, SnmpV3PrivProtocol, GrpcConfig, Tn3270Config, Tn3270Model, Tn5250Config, RloginConfig, DockerLogsConfig, X11ForwardConfig, X11ForwardAuth, ProxmoxConsoleConfig, ProxmoxResourceType, NfsConfig } from '@/types';
 
 export function buildRdpConfig(session: Session): RdpConfig {
   const opts = session.connection.protocolOptions;
@@ -260,5 +260,19 @@ export function buildProxmoxConsoleConfig(session: Session): ProxmoxConsoleConfi
     realm: (opts?.['realm'] as string) ?? 'pam',
     password: (opts?.['password'] as string) ?? '',
     verify_tls: Boolean(opts?.['verify_tls']),
+  };
+}
+
+export function buildNfsConfig(session: Session): NfsConfig {
+  const opts = session.connection.protocolOptions;
+  const uid = opts?.['uid'] as number | undefined;
+  const gid = opts?.['gid'] as number | undefined;
+  return {
+    host: session.connection.host,
+    export_path: (opts?.['export_path'] as string) ?? '/',
+    uid,
+    gid,
+    mount_port: opts?.['mount_port'] as number | undefined,
+    nfs_port: opts?.['nfs_port'] as number | undefined,
   };
 }

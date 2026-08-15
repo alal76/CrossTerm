@@ -456,6 +456,26 @@ export interface ProxmoxConsoleConfig {
   verify_tls: boolean;
 }
 
+// --- NFS Explorer Types ---
+
+export interface NfsConfig {
+  host: string;
+  export_path: string;
+  uid?: number;
+  gid?: number;
+  mount_port?: number;
+  nfs_port?: number;
+}
+
+export type NfsFileType = 'regular' | 'directory' | 'block_device' | 'char_device' | 'symlink' | 'socket' | 'fifo' | 'unknown';
+
+export interface NfsEntry {
+  name: string;
+  file_type: NfsFileType;
+  size: number;
+  mode: number;
+}
+
 // --- Cloud Types ---
 
 export type CloudProvider = 'aws' | 'azure' | 'gcp';

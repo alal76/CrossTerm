@@ -118,6 +118,11 @@ vi.mock("@/components/X11Forward/X11ForwardPanel", () => ({
     <div data-testid={`x11-forward-panel-${sessionId}`}>X11ForwardPanel Mock</div>
   ),
 }));
+vi.mock("@/components/Nfs/NfsExplorer", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`nfs-explorer-${sessionId}`}>NfsExplorer Mock</div>
+  ),
+}));
 
 function baseSession(overrides: Partial<Session> = {}): Session {
   return {
@@ -186,6 +191,16 @@ describe("SplitPaneContainer session type routing", () => {
       "data-connect-command",
       "proxmox_console_connect"
     );
+  });
+
+  it("routes an NFS Explorer leaf pane to NfsExplorer", () => {
+    const session = baseSession({ type: SessionType.NfsExplorer, connection: { host: "10.0.0.20", port: 2049 } });
+    const tab = baseTab({ sessionType: SessionType.NfsExplorer });
+    useSessionStore.setState({ sessions: [session], openTabs: [tab] });
+
+    render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
+
+    expect(screen.getByTestId(`nfs-explorer-${tab.sessionId}`)).toBeInTheDocument();
   });
 
   it("routes a Telnet leaf pane to TelnetTerminal", () => {

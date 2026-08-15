@@ -20,6 +20,7 @@ mod keygen;
 mod mosh;
 mod mqtt;
 mod netconf;
+mod nfs;
 mod proxmox;
 mod redfish;
 mod smb;
@@ -97,6 +98,7 @@ pub fn run() {
         .manage(mqtt::MqttState::new())
         .manage(netconf::NetconfState::new())
         .manage(network::NetworkState::new())
+        .manage(nfs::NfsState::new())
         .manage(redfish::RedfishState::new())
         .manage(smb::SmbState::new())
         .manage(snmp::SnmpState::new())
@@ -493,6 +495,10 @@ pub fn run() {
             vnc::vnc_set_scaling,
             vnc::vnc_list_connections,
             proxmox::proxmox_console_connect,
+            nfs::nfs_connect,
+            nfs::nfs_list,
+            nfs::nfs_read,
+            nfs::nfs_disconnect,
             // Editor
             editor::editor_open,
             editor::editor_save,
