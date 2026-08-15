@@ -1,3 +1,14 @@
+// `cargo test` has no single entrypoint like `run()` below, so the
+// process-wide rustls default provider (needed for the same reason as in
+// `run()`) has to be installed via a load-time constructor instead —
+// otherwise whichever test's TLS client happens to run first "wins" the
+// ambiguous auto-detect race and the rest panic non-deterministically.
+#[cfg(test)]
+#[ctor::ctor(unsafe)]
+fn install_test_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 mod ai;
 mod android;
 mod startup;
@@ -58,6 +69,11 @@ mod window;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Both `ring` and `aws-lc-rs` are linked in transitively (reqwest, kube,
+    // tonic, etc. each pick their own default), so rustls can't
+    // auto-select a process-wide default — install one deterministically
+    // before any TLS client (network scans, MQTT, kube, WinRM/NTLM, ...) runs.
+    let _ = rustls::crypto::ring::default_provider().install_default();
     startup::mark_startup_begin();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
