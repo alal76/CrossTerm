@@ -19,7 +19,9 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Emitter};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpStream, UnixStream};
+use tokio::net::TcpStream;
+#[cfg(unix)]
+use tokio::net::UnixStream;
 use uuid::Uuid;
 
 #[derive(Debug, Error)]
@@ -223,8 +225,15 @@ pub async fn docker_logs_connect(config: DockerLogsConfig, state: tauri::State<'
     }
 
     if let Some(socket_path) = &config.socket_path {
-        let stream = UnixStream::connect(socket_path).await?;
-        pump!(stream);
+        #[cfg(not(unix))]
+        return Err(DockerLogsError::ConnectionFailed(format!(
+            "Unix socket connections ({socket_path}) aren't supported on Windows — use host/port (Docker's TCP API) instead"
+        )));
+        #[cfg(unix)]
+        {
+            let stream = UnixStream::connect(socket_path).await?;
+            pump!(stream);
+        }
     } else {
         let host = config.host.clone().ok_or_else(|| DockerLogsError::ConnectionFailed("No socket_path or host configured".into()))?;
         let port = config.port.unwrap_or(2375);

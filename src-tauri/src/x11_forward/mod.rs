@@ -25,6 +25,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use thiserror::Error;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+#[cfg(unix)]
 use tokio::net::UnixStream;
 use tokio::sync::Mutex as TokioMutex;
 use uuid::Uuid;
@@ -203,6 +204,16 @@ fn patch_connection_setup(packet: &mut [u8], real_auth: &(String, Vec<u8>)) -> O
     Some(())
 }
 
+// X11 forwarding relays to the local X server over the same
+// `/tmp/.X11-unix/X<display>` Unix domain socket XQuartz/X.Org use — there's
+// no equivalent on Windows (a local X server there, e.g. VcXsrv, listens on
+// TCP instead), so this feature is Unix-only until a TCP transport is added.
+#[cfg(not(unix))]
+async fn relay_x11_channel(_channel: Channel<Msg>, local_display: &str, _real_cookie: Option<(String, Vec<u8>)>) -> Result<(), X11ForwardError> {
+    Err(X11ForwardError::NoLocalXServer(format!("X11 forwarding isn't supported on Windows yet (display :{local_display})")))
+}
+
+#[cfg(unix)]
 async fn relay_x11_channel(channel: Channel<Msg>, local_display: &str, real_cookie: Option<(String, Vec<u8>)>) -> Result<(), X11ForwardError> {
     let socket_path = format!("/tmp/.X11-unix/X{local_display}");
     let mut local = UnixStream::connect(&socket_path).await.map_err(|_| X11ForwardError::NoLocalXServer(socket_path.clone()))?;
@@ -264,6 +275,10 @@ impl X11ForwardState {
 
 #[tauri::command]
 pub async fn x11_forward_connect(config: X11ForwardConfig, state: tauri::State<'_, X11ForwardState>, app: AppHandle) -> Result<String, X11ForwardError> {
+    if !cfg!(unix) {
+        return Err(X11ForwardError::NoLocalXServer("X11 forwarding isn't supported on Windows yet".into()));
+    }
+
     let id = Uuid::new_v4().to_string();
 
     let real_cookie = local_x11_cookie(&config.local_display).await.ok();
