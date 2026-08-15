@@ -131,6 +131,11 @@ vi.mock("@/components/DockerLogs/DockerLogsViewer", () => ({
     <div data-testid={`docker-logs-viewer-${sessionId}`}>DockerLogsViewer Mock</div>
   ),
 }));
+vi.mock("@/components/X11Forward/X11ForwardPanel", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`x11-forward-panel-${sessionId}`}>X11ForwardPanel Mock</div>
+  ),
+}));
 
 // Mock components that use localStorage directly (tested separately)
 vi.mock("@/components/Help/WhatsNewPanel", () => ({
@@ -527,6 +532,17 @@ describe("App", () => {
       render(<App />);
 
       expect(screen.getByTestId(`docker-logs-viewer-${tab.sessionId}`)).toBeInTheDocument();
+      expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
+    });
+
+    it("routes an X11 Forward tab to X11ForwardPanel, not the generic local-shell fallback", () => {
+      const session = baseSession({ type: SessionType.X11Forward, connection: { host: "10.0.0.90", port: 22 } });
+      const tab = baseTab({ sessionType: SessionType.X11Forward });
+      useSessionStore.setState({ sessions: [session], openTabs: [tab], activeTabId: tab.id });
+
+      render(<App />);
+
+      expect(screen.getByTestId(`x11-forward-panel-${tab.sessionId}`)).toBeInTheDocument();
       expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
     });
   });

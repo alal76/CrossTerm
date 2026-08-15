@@ -8,7 +8,7 @@
 // specific fields yet — domain, NLA, codec, etc. — so those fall back to
 // sensible defaults here until the editor grows per-type fields).
 
-import type { Session, RdpConfig, VncConfig, WsTermConfig, RedfishConfig, WebDavConfig, MqttConfig, SmbConfig, NetconfConfig, MoshConfig, WinRmConfig, WinRmAuth, IpmiConfig, IpmiPrivilege, SnmpConfig, SnmpVersion, SnmpV3AuthProtocol, SnmpV3PrivProtocol, GrpcConfig, Tn3270Config, Tn3270Model, Tn5250Config, RloginConfig, DockerLogsConfig } from '@/types';
+import type { Session, RdpConfig, VncConfig, WsTermConfig, RedfishConfig, WebDavConfig, MqttConfig, SmbConfig, NetconfConfig, MoshConfig, WinRmConfig, WinRmAuth, IpmiConfig, IpmiPrivilege, SnmpConfig, SnmpVersion, SnmpV3AuthProtocol, SnmpV3PrivProtocol, GrpcConfig, Tn3270Config, Tn3270Model, Tn5250Config, RloginConfig, DockerLogsConfig, X11ForwardConfig, X11ForwardAuth } from '@/types';
 
 export function buildRdpConfig(session: Session): RdpConfig {
   const opts = session.connection.protocolOptions;
@@ -229,5 +229,21 @@ export function buildDockerLogsConfig(session: Session): DockerLogsConfig {
     tty: Boolean(opts?.['tty']),
     tail: opts?.['tail'] as number | undefined,
     timestamps: Boolean(opts?.['timestamps']),
+  };
+}
+
+export function buildX11ForwardConfig(session: Session): X11ForwardConfig {
+  const opts = session.connection.protocolOptions;
+  const password = opts?.['password'] as string | undefined;
+  const auth: X11ForwardAuth = password
+    ? { type: 'password', password }
+    : { type: 'private_key', key_data: (opts?.['key_data'] as string) ?? '', passphrase: opts?.['passphrase'] as string | undefined };
+  return {
+    host: session.connection.host,
+    port: session.connection.port,
+    username: (opts?.['username'] as string) ?? '',
+    auth,
+    remote_command: (opts?.['remote_command'] as string) ?? 'xterm',
+    local_display: (opts?.['local_display'] as string) ?? '0',
   };
 }

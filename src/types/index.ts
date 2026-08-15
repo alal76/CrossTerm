@@ -1549,3 +1549,23 @@ export interface DockerLogLine {
   stream: "stdout" | "stderr" | "raw";
   data: string;
 }
+
+// --- X11 Forward ---
+
+export type X11ForwardAuth =
+  | { type: "password"; password: string }
+  | { type: "private_key"; key_data: string; passphrase?: string };
+
+export interface X11ForwardConfig {
+  host: string;
+  port: number;
+  username: string;
+  auth: X11ForwardAuth;
+  remote_command: string;
+  local_display: string;
+}
+
+export interface X11ForwardOutputEvent {
+  session_id: string;
+  data: string;
+}

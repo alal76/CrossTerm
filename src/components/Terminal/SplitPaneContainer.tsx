@@ -26,6 +26,7 @@ import {
   Tn5250TabPane,
   RloginTabPane,
   DockerLogsTabPane,
+  X11ForwardTabPane,
 } from "@/components/Terminal/ProtocolTabPanes";
 
 // ── Resize Handle ──
@@ -117,6 +118,7 @@ const SESSION_TAB_PANES: Partial<Record<SessionType, typeof RdpTabPane>> = {
   [SessionType.TN5250]: Tn5250TabPane,
   [SessionType.Rlogin]: RloginTabPane,
   [SessionType.DockerLogs]: DockerLogsTabPane,
+  [SessionType.X11Forward]: X11ForwardTabPane,
 };
 
 function renderPaneContent(tab: { sessionId: string; sessionType: SessionType }, session: Session | undefined, isActive: boolean) {

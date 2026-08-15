@@ -27,6 +27,7 @@ import Tn3270Screen from "@/components/Tn3270/Tn3270Screen";
 import Tn5250Screen from "@/components/Tn5250/Tn5250Screen";
 import RloginTerminalTab from "@/components/Rlogin/RloginTerminalTab";
 import DockerLogsViewer from "@/components/DockerLogs/DockerLogsViewer";
+import X11ForwardPanel from "@/components/X11Forward/X11ForwardPanel";
 import {
   buildRdpConfig,
   buildVncConfig,
@@ -45,6 +46,7 @@ import {
   buildTn5250Config,
   buildRloginConfig,
   buildDockerLogsConfig,
+  buildX11ForwardConfig,
 } from "@/utils/sessionConfig";
 import type { Session } from "@/types";
 
@@ -136,4 +138,9 @@ export function RloginTabPane({ sessionId, session }: PaneProps) {
 export function DockerLogsTabPane({ sessionId, session }: PaneProps) {
   const config = useMemo(() => buildDockerLogsConfig(session), [session]);
   return <DockerLogsViewer sessionId={sessionId} config={config} />;
+}
+
+export function X11ForwardTabPane({ sessionId, session }: PaneProps) {
+  const config = useMemo(() => buildX11ForwardConfig(session), [session]);
+  return <X11ForwardPanel sessionId={sessionId} config={config} />;
 }

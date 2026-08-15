@@ -15,6 +15,7 @@ mod docker_logs;
 mod ebcdic;
 mod ipmi;
 mod rlogin;
+mod x11_forward;
 mod keygen;
 mod mosh;
 mod mqtt;
@@ -90,6 +91,7 @@ pub fn run() {
         .manage(ipmi::IpmiState::new())
         .manage(rlogin::RloginState::new())
         .manage(docker_logs::DockerLogsState::new())
+        .manage(x11_forward::X11ForwardState::new())
         .manage(mosh::MoshState::new())
         .manage(mqtt::MqttState::new())
         .manage(netconf::NetconfState::new())
@@ -350,6 +352,9 @@ pub fn run() {
             docker_logs::docker_logs_connect,
             docker_logs::docker_logs_disconnect,
             docker_logs::docker_logs_list,
+            x11_forward::x11_forward_connect,
+            x11_forward::x11_forward_disconnect,
+            x11_forward::x11_forward_list,
             // Redfish
             redfish::redfish_connect,
             redfish::redfish_get_systems,

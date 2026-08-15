@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildRdpConfig, buildVncConfig, buildWsTermConfig, buildRedfishConfig, buildWebDavConfig, buildMqttConfig, buildSmbConfig, buildNetconfConfig, buildMoshConfig, buildWinRmConfig, buildIpmiConfig, buildSnmpConfig, buildGrpcConfig, buildTn3270Config, buildTn5250Config, buildRloginConfig, buildDockerLogsConfig } from "@/utils/sessionConfig";
+import { buildRdpConfig, buildVncConfig, buildWsTermConfig, buildRedfishConfig, buildWebDavConfig, buildMqttConfig, buildSmbConfig, buildNetconfConfig, buildMoshConfig, buildWinRmConfig, buildIpmiConfig, buildSnmpConfig, buildGrpcConfig, buildTn3270Config, buildTn5250Config, buildRloginConfig, buildDockerLogsConfig, buildX11ForwardConfig } from "@/utils/sessionConfig";
 import type { Session } from "@/types";
 import { SessionType } from "@/types";
 
@@ -419,5 +419,25 @@ describe("buildDockerLogsConfig", () => {
     expect(config.socket_path).toBe("/var/run/docker.sock");
     expect(config.host).toBeUndefined();
     expect(config.port).toBeUndefined();
+  });
+});
+
+describe("buildX11ForwardConfig", () => {
+  it("uses password auth when a password is present, and defaults remote_command/local_display", () => {
+    const config = buildX11ForwardConfig(baseSession({ connection: { host: "10.0.0.90", port: 22, protocolOptions: { username: "alal", password: "hunter2" } } }));
+    expect(config.host).toBe("10.0.0.90");
+    expect(config.username).toBe("alal");
+    expect(config.auth).toEqual({ type: "password", password: "hunter2" });
+    expect(config.remote_command).toBe("xterm");
+    expect(config.local_display).toBe("0");
+  });
+
+  it("falls back to private_key auth when no password is set", () => {
+    const config = buildX11ForwardConfig(
+      baseSession({ connection: { host: "10.0.0.90", port: 22, protocolOptions: { username: "alal", key_data: "PEM", passphrase: "pass", remote_command: "xclock", local_display: "1" } } })
+    );
+    expect(config.auth).toEqual({ type: "private_key", key_data: "PEM", passphrase: "pass" });
+    expect(config.remote_command).toBe("xclock");
+    expect(config.local_display).toBe("1");
   });
 });

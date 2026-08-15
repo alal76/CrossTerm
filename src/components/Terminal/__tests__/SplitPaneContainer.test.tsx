@@ -111,6 +111,11 @@ vi.mock("@/components/DockerLogs/DockerLogsViewer", () => ({
     <div data-testid={`docker-logs-viewer-${sessionId}`}>DockerLogsViewer Mock</div>
   ),
 }));
+vi.mock("@/components/X11Forward/X11ForwardPanel", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`x11-forward-panel-${sessionId}`}>X11ForwardPanel Mock</div>
+  ),
+}));
 
 function baseSession(overrides: Partial<Session> = {}): Session {
   return {
@@ -346,5 +351,15 @@ describe("SplitPaneContainer session type routing", () => {
     render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
 
     expect(screen.getByTestId(`docker-logs-viewer-${tab.sessionId}`)).toBeInTheDocument();
+  });
+
+  it("routes an X11 Forward leaf pane to X11ForwardPanel", () => {
+    const session = baseSession({ type: SessionType.X11Forward, connection: { host: "10.0.0.90", port: 22 } });
+    const tab = baseTab({ sessionType: SessionType.X11Forward });
+    useSessionStore.setState({ sessions: [session], openTabs: [tab] });
+
+    render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
+
+    expect(screen.getByTestId(`x11-forward-panel-${tab.sessionId}`)).toBeInTheDocument();
   });
 });
