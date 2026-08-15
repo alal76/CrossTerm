@@ -1,8 +1,8 @@
 /// MQTT v3.1.1 / v5 client using rumqttc.
-use rumqttc::{AsyncClient, EventLoop, MqttOptions, QoS};
+use rumqttc::{AsyncClient, MqttOptions, QoS};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 use thiserror::Error;
 use uuid::Uuid;
@@ -27,6 +27,7 @@ impl Serialize for MqttError {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
+#[allow(clippy::enum_variant_names)] // names mirror the MQTT spec's QoS level names verbatim
 pub enum MqttQos {
     AtMostOnce,
     AtLeastOnce,
@@ -111,14 +112,14 @@ pub async fn mqtt_connect(
     }
 
     if config.use_tls {
-        // Simple TLS with empty CA (accepts any cert) — good for dev brokers
-        opts.set_transport(rumqttc::Transport::Tls(
-            rumqttc::TlsConfiguration::Simple {
-                ca: vec![],
-                alpn: None,
-                client_auth: None,
-            }
-        ));
+        // Accepts any cert (self-signed brokers are common) — rumqttc's
+        // `Simple` variant with an empty `ca` fails with NoValidCertInChain
+        // instead of accepting-all, so a custom verifier is required.
+        let tls_config = rustls::ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(MqttNoCertVerifier))
+            .with_no_client_auth();
+        opts.set_transport(rumqttc::Transport::Tls(rumqttc::TlsConfiguration::Rustls(Arc::new(tls_config))));
     }
 
     let (client, mut event_loop) = AsyncClient::new(opts, 64);
