@@ -307,7 +307,7 @@ pub async fn proxmox_console_connect(
             match bridge_read.read(&mut buf).await {
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
-                    if ws_write.send(Message::Binary(buf[..n].to_vec().into())).await.is_err() {
+                    if ws_write.send(Message::Binary(buf[..n].to_vec())).await.is_err() {
                         break;
                     }
                 }

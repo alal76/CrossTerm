@@ -206,6 +206,7 @@ fn build_open_session_request(console_session_id: u32, privilege: &IpmiPrivilege
 }
 
 struct OpenSessionResponse {
+    #[allow(dead_code)] // validated in parse_open_session_response; kept for test assertions
     status: u8,
     bmc_session_id: u32,
 }
@@ -430,9 +431,7 @@ fn build_active_packet(crypto: &SessionCrypto, out_seq: u32, payload_type: u8, p
     // next header (always 0x07 per spec table 13-8), then the truncated HMAC.
     let unpadded_trailer_len = (msg.len() - session_header_start) + 2;
     let integrity_pad = (4 - (unpadded_trailer_len % 4)) % 4;
-    for _ in 0..integrity_pad {
-        msg.push(0xFF);
-    }
+    msg.resize(msg.len() + integrity_pad, 0xFF);
     msg.push(integrity_pad as u8);
     msg.push(0x07); // next header
     let mac = hmac_sha1(&crypto.k1, &msg[session_header_start..]);

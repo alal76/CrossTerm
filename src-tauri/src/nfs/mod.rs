@@ -130,7 +130,7 @@ impl XdrWriter {
         self.u32(data.len() as u32);
         self.buf.extend_from_slice(data);
         let pad = (4 - (data.len() % 4)) % 4;
-        self.buf.extend(std::iter::repeat_n(0u8, pad));
+        self.buf.resize(self.buf.len() + pad, 0u8);
     }
     fn string(&mut self, s: &str) {
         self.opaque_var(s.as_bytes());
@@ -655,7 +655,7 @@ pub async fn nfs_read(
 
 #[tauri::command]
 pub fn nfs_disconnect(id: String, state: tauri::State<'_, NfsState>) -> Result<(), NfsError> {
-    state.sessions.lock().unwrap().remove(&id).ok_or_else(|| NfsError::NotFound(id))?;
+    state.sessions.lock().unwrap().remove(&id).ok_or(NfsError::NotFound(id))?;
     Ok(())
 }
 

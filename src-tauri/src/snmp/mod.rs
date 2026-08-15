@@ -157,9 +157,7 @@ fn ber_integer(n: i64) -> Vec<u8> {
     // Ensure the sign bit of the leading byte matches the value's sign
     // (prepend a 0x00/0xFF guard byte otherwise) — required so the
     // receiver's two's-complement interpretation matches.
-    if is_negative && bytes[start] & 0x80 == 0 {
-        start -= 1;
-    } else if !is_negative && bytes[start] & 0x80 != 0 {
+    if is_negative == (bytes[start] & 0x80 == 0) {
         start -= 1;
     }
     ber_tlv(0x02, &bytes[start..])
@@ -801,7 +799,7 @@ pub async fn snmp_walk(id: String, root_oid: String, max_vars: u32, state: tauri
 
 #[tauri::command]
 pub fn snmp_remove_session(id: String, state: tauri::State<'_, SnmpState>) -> Result<(), SnmpError> {
-    state.sessions.lock().unwrap().remove(&id).ok_or_else(|| SnmpError::NotFound(id))?;
+    state.sessions.lock().unwrap().remove(&id).ok_or(SnmpError::NotFound(id))?;
     Ok(())
 }
 

@@ -995,7 +995,7 @@ async fn nmblookup_name(ip: String) -> Option<String> {
     // Look for <00> workstation/computer name entries (not GROUP entries)
     for line in text.lines() {
         if line.contains("<00>") && !line.contains("GROUP") {
-            let name = line.trim().split_whitespace().next()?;
+            let name = line.split_whitespace().next()?;
             if !name.is_empty() && name != "Looking" {
                 return Some(name.to_string());
             }
@@ -1039,7 +1039,7 @@ fn parse_arp_mac_output(text: &str) -> Option<String> {
     let re = regex::Regex::new(r"(?:[0-9a-fA-F]{1,2}[:\-]){5}[0-9a-fA-F]{1,2}").ok()?;
     let raw = re.find(text)?.as_str();
     let octets: Vec<String> = raw
-        .split(|c| c == ':' || c == '-')
+        .split([':', '-'])
         .map(|o| format!("{:0>2}", o.to_ascii_uppercase()))
         .collect();
     if octets.len() != 6 {
@@ -1156,7 +1156,7 @@ fn tls_client_config() -> Arc<rustls::ClientConfig> {
 async fn tls_connect(ip: IpAddr, port: u16, timeout: Duration) -> Option<tokio_rustls::client::TlsStream<TcpStream>> {
     let tcp = connect_bound(ip, port, timeout).await.ok()?;
     let connector = tokio_rustls::TlsConnector::from(tls_client_config());
-    let server_name = rustls::pki_types::ServerName::try_from(ip).ok()?;
+    let server_name = rustls::pki_types::ServerName::from(ip);
     tokio::time::timeout(Duration::from_secs(4), connector.connect(server_name, tcp)).await.ok()?.ok()
 }
 
@@ -1272,7 +1272,7 @@ async fn probe_http(ip: IpAddr, port: u16, tls: bool, timeout: Duration) -> Opti
     let server = raw
         .lines()
         .find(|l| l.to_ascii_lowercase().starts_with("server:"))
-        .map(|l| l.splitn(2, ':').nth(1).unwrap_or("").trim().to_string());
+        .map(|l| l.split_once(':').map(|x| x.1).unwrap_or("").trim().to_string());
     let title = extract_html_title(&raw);
 
     Some((server, title))
@@ -1651,6 +1651,12 @@ pub struct NetworkState {
     pub monitor_interfaces: Mutex<HashSet<String>>,
     /// Cancellation flags for in-progress `network_explore_start` scans, keyed by scan_id.
     pub explore_cancel_flags: Mutex<HashMap<String, Arc<AtomicBool>>>,
+}
+
+impl Default for NetworkState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl NetworkState {
@@ -4745,6 +4751,12 @@ pub struct WebRelayState {
 }
 
 #[allow(dead_code)]
+impl Default for WebRelayState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WebRelayState {
     pub fn new() -> Self {
         Self {

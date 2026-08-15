@@ -72,7 +72,7 @@ pub async fn wsterm_connect(
     app: AppHandle,
 ) -> Result<String, WsTermError> {
     let url_str = config.url.clone();
-    let url = url_str.parse::<tokio_tungstenite::tungstenite::http::Uri>()
+    let _url = url_str.parse::<tokio_tungstenite::tungstenite::http::Uri>()
         .map_err(|e| WsTermError::UrlParse(e.to_string()))?;
 
     // TODO: honour verify_tls with system CA bundle; permissive verifier used for initial bringup
@@ -102,10 +102,10 @@ pub async fn wsterm_connect(
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
 
     // Forward outbound messages to WebSocket
-    let id_clone = id.clone();
+    let _id_clone = id.clone();
     tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
-            if write.send(Message::Text(msg.into())).await.is_err() {
+            if write.send(Message::Text(msg)).await.is_err() {
                 break;
             }
         }

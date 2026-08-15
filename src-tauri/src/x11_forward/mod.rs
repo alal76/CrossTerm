@@ -18,7 +18,7 @@
 /// for SMB rather than hand-parsing the binary Xauthority file format)
 /// before going fully passthrough for the rest of that sub-connection.
 use russh::client::{self, Handle, Msg};
-use russh::{Channel, ChannelId, ChannelMsg};
+use russh::{Channel, ChannelId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -242,7 +242,12 @@ async fn relay_x11_channel(channel: Channel<Msg>, local_display: &str, real_cook
 }
 
 struct X11Conn {
+    // Neither field is read directly — both are held here purely to keep
+    // the SSH handle and channel alive for the session's lifetime (RAII).
+    // Dropping either would close the forwarded X11 channel.
+    #[allow(dead_code)]
     handle: Handle<X11Handler>,
+    #[allow(dead_code)]
     channel: TokioMutex<Channel<Msg>>,
 }
 

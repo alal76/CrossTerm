@@ -1,6 +1,6 @@
 /// Redfish (DMTF DSP0266) BMC management REST API client.
 /// Uses reqwest with optional TLS verification skip for self-signed BMC certs.
-use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
+use reqwest::header::{ACCEPT, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -140,10 +140,8 @@ pub async fn redfish_get_systems(
     if let Some(arr) = members["Members"].as_array() {
         for member in arr {
             if let Some(href) = member["@odata.id"].as_str() {
-                let sys_url = format!("{}:{}{}", 
-                    if cfg.use_tls {"https"} else {"http"}, 
-                    format!("//{}:{}", cfg.host, cfg.port), 
-                    href);
+                let scheme = if cfg.use_tls { "https" } else { "http" };
+                let sys_url = format!("{scheme}://{}:{}{href}", cfg.host, cfg.port);
                 if let Ok(resp) = client.get(&sys_url)
                     .basic_auth(&cfg.username, Some(&cfg.password))
                     .header(ACCEPT, "application/json")
@@ -197,7 +195,7 @@ pub async fn redfish_power_control(
 
 #[tauri::command]
 pub fn redfish_disconnect(id: String, state: tauri::State<'_, RedfishState>) -> Result<(), RedfishError> {
-    state.sessions.lock().unwrap().remove(&id).ok_or_else(|| RedfishError::NotFound(id))?;
+    state.sessions.lock().unwrap().remove(&id).ok_or(RedfishError::NotFound(id))?;
     Ok(())
 }
 

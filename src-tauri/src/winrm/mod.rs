@@ -484,7 +484,7 @@ pub async fn winrm_disconnect(id: String, state: tauri::State<'_, WinRmState>) -
     let (config, shell_id) = state
         .sessions.lock().unwrap()
         .remove(&id)
-        .ok_or_else(|| WinRmError::NotFound(id))?;
+        .ok_or(WinRmError::NotFound(id))?;
     let client = build_client(&config)?;
     let url = endpoint_url(&config);
     // Best-effort — the local session is already gone either way.

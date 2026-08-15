@@ -412,7 +412,7 @@ pub fn spice_disconnect(connection_id: String, state: tauri::State<'_, SpiceStat
         .lock()
         .unwrap()
         .remove(&connection_id)
-        .ok_or_else(|| SpiceConsoleError::NotFound(connection_id))?;
+        .ok_or(SpiceConsoleError::NotFound(connection_id))?;
     conn.session_handle.abort();
     Ok(())
 }

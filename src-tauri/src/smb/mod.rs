@@ -305,7 +305,7 @@ pub async fn smb_delete(
 
 #[tauri::command]
 pub fn smb_disconnect(id: String, state: tauri::State<'_, SmbState>) -> Result<(), SmbError> {
-    state.sessions.lock().unwrap().remove(&id).ok_or_else(|| SmbError::NotFound(id))?;
+    state.sessions.lock().unwrap().remove(&id).ok_or(SmbError::NotFound(id))?;
     Ok(())
 }
 

@@ -17,6 +17,7 @@ pub enum WebDavError {
     #[error("Request error: {0}")]
     Request(String),
     #[error("XML parse error: {0}")]
+    #[allow(dead_code)] // reserved for future PROPFIND response validation
     Xml(String),
 }
 
@@ -81,13 +82,13 @@ fn build_client(verify_tls: bool) -> Result<reqwest::Client, WebDavError> {
 /// prefix (or none), so a server that replies with e.g. `d:` or `lp1:`-
 /// prefixed elements (as some WebDAV implementations do) would parse to an
 /// empty list here. Documented rather than silently assumed to be complete.
-fn parse_propfind(xml: &str, base_url: &str) -> Vec<WebDavEntry> {
+fn parse_propfind(xml: &str, _base_url: &str) -> Vec<WebDavEntry> {
     let mut entries = Vec::new();
     for response in xml.split("<D:response>").skip(1) {
         let href = response.split("<D:href>").nth(1)
             .and_then(|s| s.split("</D:href>").next())
             .unwrap_or("").trim().to_string();
-        let name = href.trim_end_matches('/').split('/').last()
+        let name = href.trim_end_matches('/').split('/').next_back()
             .unwrap_or(&href).to_string();
         let is_collection = response.contains("<D:collection");
         let content_length = response.split("<D:getcontentlength>").nth(1)
@@ -246,7 +247,7 @@ pub async fn webdav_delete(
 
 #[tauri::command]
 pub fn webdav_disconnect(id: String, state: tauri::State<'_, WebDavState>) -> Result<(), WebDavError> {
-    state.sessions.lock().unwrap().remove(&id).ok_or_else(|| WebDavError::NotFound(id))?;
+    state.sessions.lock().unwrap().remove(&id).ok_or(WebDavError::NotFound(id))?;
     Ok(())
 }
 

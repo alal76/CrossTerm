@@ -793,7 +793,7 @@ pub async fn grpc_invoke(id: String, service: String, method: String, json_body:
 
 #[tauri::command]
 pub fn grpc_disconnect(id: String, state: tauri::State<'_, GrpcState>) -> Result<(), GrpcError> {
-    state.sessions.lock().unwrap().remove(&id).ok_or_else(|| GrpcError::NotFound(id))?;
+    state.sessions.lock().unwrap().remove(&id).ok_or(GrpcError::NotFound(id))?;
     Ok(())
 }
 

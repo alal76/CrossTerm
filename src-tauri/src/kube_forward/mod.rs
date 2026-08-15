@@ -212,7 +212,7 @@ pub async fn k8s_port_forward_connect(
 
 #[tauri::command]
 pub async fn k8s_port_forward_disconnect(id: String, state: tauri::State<'_, K8sPortForwardState>) -> Result<(), K8sPortForwardError> {
-    let session = state.sessions.lock().unwrap().remove(&id).ok_or_else(|| K8sPortForwardError::NotFound(id))?;
+    let session = state.sessions.lock().unwrap().remove(&id).ok_or(K8sPortForwardError::NotFound(id))?;
     session.accept_handle.abort();
     for handle in session.conn_handles.lock().await.drain(..) {
         handle.abort();

@@ -474,7 +474,9 @@ fn type_into_screen(screen: &mut ScreenBuffer, row: usize, col: usize, text: &st
 const IAC: u8 = 0xFF;
 const DO: u8 = 0xFD;
 const WILL: u8 = 0xFB;
+#[allow(dead_code)] // documents the full negotiation opcode set; server WONT is not distinguished today
 const WONT: u8 = 0xFC;
+#[allow(dead_code)] // documents the full negotiation opcode set; server DONT is not distinguished today
 const DONT: u8 = 0xFE;
 const SB: u8 = 0xFA;
 const SE: u8 = 0xF0;

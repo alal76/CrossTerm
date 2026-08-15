@@ -1,7 +1,7 @@
 /// NETCONF (RFC 6241) over SSH subsystem.
 /// Opens an SSH connection with the "netconf" subsystem, performs the
 /// <hello> capability exchange, and exposes get-config / edit-config / RPC.
-use russh::client::{self, Handle};
+use russh::client::{self};
 use russh::keys::key::PublicKey;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -9,7 +9,6 @@ use std::io::{BufRead, BufReader};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 use thiserror::Error;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
 
 #[derive(Debug, Error)]
@@ -19,6 +18,7 @@ pub enum NetconfError {
     #[error("SSH error: {0}")]
     Ssh(String),
     #[error("NETCONF error: {0}")]
+    #[allow(dead_code)] // reserved for future RPC-level reply validation
     Protocol(String),
     #[error("Host key for {0} has changed — refusing to connect. If this is expected, forget the old key first.")]
     HostKeyChanged(String),
@@ -243,14 +243,9 @@ pub async fn netconf_connect(
 
     // Receive server hello
     let mut server_hello = String::new();
-    loop {
-        match channel.wait().await {
-            Some(russh::ChannelMsg::Data { data }) => {
-                server_hello.push_str(&String::from_utf8_lossy(&data));
-                if server_hello.contains("]]>]]>") { break; }
-            }
-            _ => break,
-        }
+    while let Some(russh::ChannelMsg::Data { data }) = channel.wait().await {
+        server_hello.push_str(&String::from_utf8_lossy(&data));
+        if server_hello.contains("]]>]]>") { break; }
     }
 
     let session_id = extract_session_id(&server_hello);
@@ -312,14 +307,9 @@ async fn send_rpc_and_receive(
     ch.data(rpc.as_bytes()).await.map_err(|e| NetconfError::Ssh(e.to_string()))?;
 
     let mut reply = String::new();
-    loop {
-        match ch.wait().await {
-            Some(russh::ChannelMsg::Data { data }) => {
-                reply.push_str(&String::from_utf8_lossy(&data));
-                if reply.contains("]]>]]>") { break; }
-            }
-            _ => break,
-        }
+    while let Some(russh::ChannelMsg::Data { data }) = ch.wait().await {
+        reply.push_str(&String::from_utf8_lossy(&data));
+        if reply.contains("]]>]]>") { break; }
     }
 
     let ok = reply.contains("<ok/>") || reply.contains("<ok />");
