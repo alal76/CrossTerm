@@ -117,8 +117,7 @@ bytes = "1"
 http = "1"
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
 tonic = { version = "0.12", default-features = false, features = ["channel", "tls-roots", "codegen"] }
-rumqttc = { version = "0.24", default-features = false, features = ["use-rustls"] }
-quick-xml = { version = "0.36", features = ["serialize"] }
+rumqttc = { version = "0.25", default-features = false, features = ["use-rustls"] }
 which = "6"
 
 # Clipboard
@@ -131,6 +130,7 @@ binrw = "0.15"
 [dev-dependencies]
 tempfile = "3"
 criterion = { version = "0.5", features = ["html_reports"] }
+ctor = "1.0.13"
 
 [[bench]]
 name = "vault_bench"
