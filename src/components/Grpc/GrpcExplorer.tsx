@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Loader2, AlertTriangle, Network, Play, RefreshCw, ChevronRight } from "lucide-react";
 import type { GrpcConfig, GrpcService, GrpcMethod, GrpcRpcResult } from "@/types";
@@ -12,6 +12,7 @@ interface GrpcExplorerProps {
 export default function GrpcExplorer({ sessionId, config }: GrpcExplorerProps) {
   const { toast } = useToast();
   const [connectionId, setConnectionId] = useState<string | null>(null);
+  const connectionIdRef = useRef<string | null>(null);
   const [status, setStatus] = useState<"connecting" | "connected" | "error">("connecting");
   const [error, setError] = useState<string | null>(null);
 
@@ -36,6 +37,7 @@ export default function GrpcExplorer({ sessionId, config }: GrpcExplorerProps) {
           invoke("grpc_disconnect", { id }).catch(() => {});
           return;
         }
+        connectionIdRef.current = id;
         setConnectionId(id);
         setStatus("connected");
       })
@@ -48,10 +50,9 @@ export default function GrpcExplorer({ sessionId, config }: GrpcExplorerProps) {
 
     return () => {
       cancelled = true;
-      setConnectionId((id) => {
-        if (id) invoke("grpc_disconnect", { id }).catch(() => {});
-        return null;
-      });
+      const id = connectionIdRef.current;
+      if (id) invoke("grpc_disconnect", { id }).catch(() => {});
+      connectionIdRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, config]);

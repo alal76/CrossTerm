@@ -18,6 +18,7 @@ const MAX_HISTORY = 200;
 export default function WinRmConsole({ sessionId, config }: WinRmConsoleProps) {
   const { toast } = useToast();
   const [connectionId, setConnectionId] = useState<string | null>(null);
+  const connectionIdRef = useRef<string | null>(null);
   const [status, setStatus] = useState<"connecting" | "connected" | "error">("connecting");
   const [error, setError] = useState<string | null>(null);
 
@@ -37,6 +38,7 @@ export default function WinRmConsole({ sessionId, config }: WinRmConsoleProps) {
           invoke("winrm_disconnect", { id }).catch(() => {});
           return;
         }
+        connectionIdRef.current = id;
         setConnectionId(id);
         setStatus("connected");
       })
@@ -49,10 +51,9 @@ export default function WinRmConsole({ sessionId, config }: WinRmConsoleProps) {
 
     return () => {
       cancelled = true;
-      setConnectionId((id) => {
-        if (id) invoke("winrm_disconnect", { id }).catch(() => {});
-        return null;
-      });
+      const id = connectionIdRef.current;
+      if (id) invoke("winrm_disconnect", { id }).catch(() => {});
+      connectionIdRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, config]);

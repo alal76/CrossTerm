@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { readFile, writeFile } from "@tauri-apps/plugin-fs";
@@ -20,6 +20,7 @@ function parentPath(path: string): string {
 export default function WebDavBrowser({ sessionId, config }: WebDavBrowserProps) {
   const { toast } = useToast();
   const [connectionId, setConnectionId] = useState<string | null>(null);
+  const connectionIdRef = useRef<string | null>(null);
   const [path, setPath] = useState("/");
   const [entries, setEntries] = useState<WebDavEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,6 +53,7 @@ export default function WebDavBrowser({ sessionId, config }: WebDavBrowserProps)
           invoke("webdav_disconnect", { id }).catch(() => {});
           return;
         }
+        connectionIdRef.current = id;
         setConnectionId(id);
         await list(id, "/");
       })
@@ -64,10 +66,9 @@ export default function WebDavBrowser({ sessionId, config }: WebDavBrowserProps)
 
     return () => {
       cancelled = true;
-      setConnectionId((id) => {
-        if (id) invoke("webdav_disconnect", { id }).catch(() => {});
-        return null;
-      });
+      const id = connectionIdRef.current;
+      if (id) invoke("webdav_disconnect", { id }).catch(() => {});
+      connectionIdRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, config]);

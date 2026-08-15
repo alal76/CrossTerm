@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Loader2, AlertTriangle, Power, PowerOff, RotateCcw, Zap, RefreshCw, Server } from "lucide-react";
 import type { RedfishConfig, RedfishSystem, RedfishPowerAction } from "@/types";
@@ -21,6 +21,7 @@ const POWER_ACTIONS: { action: RedfishPowerAction; label: string; icon: typeof P
 export default function RedfishExplorer({ sessionId, config }: RedfishExplorerProps) {
   const { toast } = useToast();
   const [connectionId, setConnectionId] = useState<string | null>(null);
+  const connectionIdRef = useRef<string | null>(null);
   const [systems, setSystems] = useState<RedfishSystem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -50,6 +51,7 @@ export default function RedfishExplorer({ sessionId, config }: RedfishExplorerPr
           invoke("redfish_disconnect", { id }).catch(() => {});
           return;
         }
+        connectionIdRef.current = id;
         setConnectionId(id);
         await loadSystems(id);
       })
@@ -62,10 +64,9 @@ export default function RedfishExplorer({ sessionId, config }: RedfishExplorerPr
 
     return () => {
       cancelled = true;
-      setConnectionId((id) => {
-        if (id) invoke("redfish_disconnect", { id }).catch(() => {});
-        return null;
-      });
+      const id = connectionIdRef.current;
+      if (id) invoke("redfish_disconnect", { id }).catch(() => {});
+      connectionIdRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, config]);

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Loader2, AlertTriangle, Router, Play, ListTree } from "lucide-react";
 import type { SnmpConfig, SnmpVarBind } from "@/types";
@@ -15,6 +15,7 @@ const MIB2_ROOT_OID = "1.3.6.1.2.1";
 export default function SnmpBrowser({ sessionId, config }: SnmpBrowserProps) {
   const { toast } = useToast();
   const [connectionId, setConnectionId] = useState<string | null>(null);
+  const connectionIdRef = useRef<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [getOid, setGetOid] = useState(SYS_DESCR_OID);
@@ -29,7 +30,10 @@ export default function SnmpBrowser({ sessionId, config }: SnmpBrowserProps) {
 
     invoke<string>("snmp_add_session", { config })
       .then((id) => {
-        if (!cancelled) setConnectionId(id);
+        if (!cancelled) {
+          connectionIdRef.current = id;
+          setConnectionId(id);
+        }
       })
       .catch((e) => {
         if (!cancelled) setError(String(e));
@@ -37,10 +41,9 @@ export default function SnmpBrowser({ sessionId, config }: SnmpBrowserProps) {
 
     return () => {
       cancelled = true;
-      setConnectionId((id) => {
-        if (id) invoke("snmp_remove_session", { id }).catch(() => {});
-        return null;
-      });
+      const id = connectionIdRef.current;
+      if (id) invoke("snmp_remove_session", { id }).catch(() => {});
+      connectionIdRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, config]);

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Loader2, AlertTriangle } from "lucide-react";
@@ -42,6 +42,7 @@ function fieldStartFor(screen: Tn3270ScreenData, addr: number): number | null {
 export default function Tn3270Screen({ sessionId, config }: Tn3270ScreenProps) {
   const { toast } = useToast();
   const [connectionId, setConnectionId] = useState<string | null>(null);
+  const connectionIdRef = useRef<string | null>(null);
   const [status, setStatus] = useState<"connecting" | "connected" | "error">("connecting");
   const [error, setError] = useState<string | null>(null);
   const [screen, setScreen] = useState<Tn3270ScreenData | null>(null);
@@ -59,6 +60,7 @@ export default function Tn3270Screen({ sessionId, config }: Tn3270ScreenProps) {
           invoke("tn3270_disconnect", { id }).catch(() => {});
           return;
         }
+        connectionIdRef.current = id;
         setConnectionId(id);
         setStatus("connected");
       })
@@ -71,10 +73,9 @@ export default function Tn3270Screen({ sessionId, config }: Tn3270ScreenProps) {
 
     return () => {
       cancelled = true;
-      setConnectionId((id) => {
-        if (id) invoke("tn3270_disconnect", { id }).catch(() => {});
-        return null;
-      });
+      const id = connectionIdRef.current;
+      if (id) invoke("tn3270_disconnect", { id }).catch(() => {});
+      connectionIdRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, config]);

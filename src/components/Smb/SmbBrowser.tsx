@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { Loader2, AlertTriangle, Folder, File as FileIcon, ArrowUp, Download, Upload, Trash2, RefreshCw, HardDrive } from "lucide-react";
@@ -91,6 +91,7 @@ function SharePicker({
 function Browser({ sessionId, config }: SmbBrowserProps) {
   const { toast } = useToast();
   const [connectionId, setConnectionId] = useState<string | null>(null);
+  const connectionIdRef = useRef<string | null>(null);
   const [path, setPath] = useState("");
   const [entries, setEntries] = useState<SmbEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -121,6 +122,7 @@ function Browser({ sessionId, config }: SmbBrowserProps) {
           invoke("smb_disconnect", { id }).catch(() => {});
           return;
         }
+        connectionIdRef.current = id;
         setConnectionId(id);
         await list(id, "");
       })
@@ -133,10 +135,9 @@ function Browser({ sessionId, config }: SmbBrowserProps) {
 
     return () => {
       cancelled = true;
-      setConnectionId((id) => {
-        if (id) invoke("smb_disconnect", { id }).catch(() => {});
-        return null;
-      });
+      const id = connectionIdRef.current;
+      if (id) invoke("smb_disconnect", { id }).catch(() => {});
+      connectionIdRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, config]);
