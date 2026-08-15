@@ -1165,6 +1165,7 @@ dependencies = [
  "keyring",
  "libc",
  "log",
+ "md-5 0.10.6",
  "mdns-sd",
  "p256 0.13.2",
  "portable-pty",

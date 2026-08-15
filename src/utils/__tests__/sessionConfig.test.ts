@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildRdpConfig, buildVncConfig, buildWsTermConfig, buildRedfishConfig, buildWebDavConfig, buildMqttConfig, buildSmbConfig, buildNetconfConfig, buildMoshConfig, buildWinRmConfig, buildIpmiConfig } from "@/utils/sessionConfig";
+import { buildRdpConfig, buildVncConfig, buildWsTermConfig, buildRedfishConfig, buildWebDavConfig, buildMqttConfig, buildSmbConfig, buildNetconfConfig, buildMoshConfig, buildWinRmConfig, buildIpmiConfig, buildSnmpConfig } from "@/utils/sessionConfig";
 import type { Session } from "@/types";
 import { SessionType } from "@/types";
 
@@ -284,5 +284,45 @@ describe("buildIpmiConfig", () => {
     const config = buildIpmiConfig(baseSession({ connection: { host: "10.0.0.10", port: 623, protocolOptions: { channel: 2, privilege: "operator" } } }));
     expect(config.channel).toBe(2);
     expect(config.privilege).toBe("operator");
+  });
+});
+
+describe("buildSnmpConfig", () => {
+  it("defaults to v2c and a 2s timeout", () => {
+    const config = buildSnmpConfig(baseSession({ connection: { host: "10.0.0.30", port: 161 } }));
+    expect(config.host).toBe("10.0.0.30");
+    expect(config.port).toBe(161);
+    expect(config.version).toBe("v2c");
+    expect(config.timeout_ms).toBe(2000);
+  });
+
+  it("maps v3 credentials from protocolOptions", () => {
+    const config = buildSnmpConfig(
+      baseSession({
+        connection: {
+          host: "10.0.0.30",
+          port: 161,
+          protocolOptions: {
+            version: "v3",
+            username: "monitor",
+            auth_passphrase: "authpass123",
+            auth_protocol: "sha1",
+            priv_passphrase: "privpass123",
+            priv_protocol: "aes128",
+          },
+        },
+      })
+    );
+    expect(config.version).toBe("v3");
+    expect(config.username).toBe("monitor");
+    expect(config.auth_passphrase).toBe("authpass123");
+    expect(config.auth_protocol).toBe("sha1");
+    expect(config.priv_passphrase).toBe("privpass123");
+    expect(config.priv_protocol).toBe("aes128");
+  });
+
+  it("maps the community string for v1/v2c", () => {
+    const config = buildSnmpConfig(baseSession({ connection: { host: "10.0.0.30", port: 161, protocolOptions: { community: "private" } } }));
+    expect(config.community).toBe("private");
   });
 });

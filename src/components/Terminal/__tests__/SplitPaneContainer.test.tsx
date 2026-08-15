@@ -81,6 +81,11 @@ vi.mock("@/components/Ipmi/IpmiSolTab", () => ({
     <div data-testid={`ipmi-sol-tab-${sessionId}`}>IpmiSolTab Mock</div>
   ),
 }));
+vi.mock("@/components/Snmp/SnmpBrowser", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`snmp-browser-${sessionId}`}>SnmpBrowser Mock</div>
+  ),
+}));
 
 function baseSession(overrides: Partial<Session> = {}): Session {
   return {
@@ -256,5 +261,15 @@ describe("SplitPaneContainer session type routing", () => {
     render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
 
     expect(screen.getByTestId(`ipmi-sol-tab-${tab.sessionId}`)).toBeInTheDocument();
+  });
+
+  it("routes an SNMP leaf pane to SnmpBrowser", () => {
+    const session = baseSession({ type: SessionType.Snmp, connection: { host: "10.0.0.30", port: 161 } });
+    const tab = baseTab({ sessionType: SessionType.Snmp });
+    useSessionStore.setState({ sessions: [session], openTabs: [tab] });
+
+    render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
+
+    expect(screen.getByTestId(`snmp-browser-${tab.sessionId}`)).toBeInTheDocument();
   });
 });

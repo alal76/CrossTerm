@@ -101,6 +101,11 @@ vi.mock("@/components/Ipmi/IpmiSolTab", () => ({
     <div data-testid={`ipmi-sol-tab-${sessionId}`}>IpmiSolTab Mock</div>
   ),
 }));
+vi.mock("@/components/Snmp/SnmpBrowser", () => ({
+  default: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`snmp-browser-${sessionId}`}>SnmpBrowser Mock</div>
+  ),
+}));
 
 // Mock components that use localStorage directly (tested separately)
 vi.mock("@/components/Help/WhatsNewPanel", () => ({
@@ -431,6 +436,17 @@ describe("App", () => {
       render(<App />);
 
       expect(screen.getByTestId(`ipmi-sol-tab-${tab.sessionId}`)).toBeInTheDocument();
+      expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
+    });
+
+    it("routes an SNMP tab to SnmpBrowser, not the generic local-shell fallback", () => {
+      const session = baseSession({ type: SessionType.Snmp, connection: { host: "10.0.0.30", port: 161 } });
+      const tab = baseTab({ sessionType: SessionType.Snmp });
+      useSessionStore.setState({ sessions: [session], openTabs: [tab], activeTabId: tab.id });
+
+      render(<App />);
+
+      expect(screen.getByTestId(`snmp-browser-${tab.sessionId}`)).toBeInTheDocument();
       expect(screen.queryByTestId(`terminal-tab-${tab.sessionId}`)).not.toBeInTheDocument();
     });
   });

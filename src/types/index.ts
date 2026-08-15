@@ -1393,3 +1393,28 @@ export interface IpmiPowerStatus {
 }
 
 export type IpmiPowerAction = "down" | "up" | "cycle" | "hard_reset";
+
+// --- SNMP ---
+
+export type SnmpVersion = "v1" | "v2c" | "v3";
+export type SnmpV3AuthProtocol = "md5" | "sha1";
+export type SnmpV3PrivProtocol = "none" | "aes128";
+
+export interface SnmpConfig {
+  host: string;
+  port: number;
+  version: SnmpVersion;
+  community?: string;
+  username?: string;
+  auth_passphrase?: string;
+  auth_protocol?: SnmpV3AuthProtocol;
+  priv_passphrase?: string;
+  priv_protocol?: SnmpV3PrivProtocol;
+  timeout_ms: number;
+}
+
+export interface SnmpVarBind {
+  oid: string;
+  value_type: string;
+  value: string;
+}

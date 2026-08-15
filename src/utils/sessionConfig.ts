@@ -8,7 +8,7 @@
 // specific fields yet — domain, NLA, codec, etc. — so those fall back to
 // sensible defaults here until the editor grows per-type fields).
 
-import type { Session, RdpConfig, VncConfig, WsTermConfig, RedfishConfig, WebDavConfig, MqttConfig, SmbConfig, NetconfConfig, MoshConfig, WinRmConfig, WinRmAuth, IpmiConfig, IpmiPrivilege } from '@/types';
+import type { Session, RdpConfig, VncConfig, WsTermConfig, RedfishConfig, WebDavConfig, MqttConfig, SmbConfig, NetconfConfig, MoshConfig, WinRmConfig, WinRmAuth, IpmiConfig, IpmiPrivilege, SnmpConfig, SnmpVersion, SnmpV3AuthProtocol, SnmpV3PrivProtocol } from '@/types';
 
 export function buildRdpConfig(session: Session): RdpConfig {
   const opts = session.connection.protocolOptions;
@@ -155,5 +155,21 @@ export function buildIpmiConfig(session: Session): IpmiConfig {
     password: (opts?.['password'] as string) ?? '',
     channel: (opts?.['channel'] as number) ?? 1,
     privilege: (opts?.['privilege'] as IpmiPrivilege) ?? 'administrator',
+  };
+}
+
+export function buildSnmpConfig(session: Session): SnmpConfig {
+  const opts = session.connection.protocolOptions;
+  return {
+    host: session.connection.host,
+    port: session.connection.port,
+    version: (opts?.['version'] as SnmpVersion) ?? 'v2c',
+    community: opts?.['community'] as string | undefined,
+    username: opts?.['username'] as string | undefined,
+    auth_passphrase: opts?.['auth_passphrase'] as string | undefined,
+    auth_protocol: opts?.['auth_protocol'] as SnmpV3AuthProtocol | undefined,
+    priv_passphrase: opts?.['priv_passphrase'] as string | undefined,
+    priv_protocol: opts?.['priv_protocol'] as SnmpV3PrivProtocol | undefined,
+    timeout_ms: 2000,
   };
 }

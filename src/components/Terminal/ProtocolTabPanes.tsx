@@ -21,6 +21,7 @@ import NetconfConsole from "@/components/Netconf/NetconfConsole";
 import MoshTerminalTab from "@/components/Mosh/MoshTerminalTab";
 import WinRmConsole from "@/components/WinRm/WinRmConsole";
 import IpmiSolTab from "@/components/Ipmi/IpmiSolTab";
+import SnmpBrowser from "@/components/Snmp/SnmpBrowser";
 import {
   buildRdpConfig,
   buildVncConfig,
@@ -33,6 +34,7 @@ import {
   buildMoshConfig,
   buildWinRmConfig,
   buildIpmiConfig,
+  buildSnmpConfig,
 } from "@/utils/sessionConfig";
 import type { Session } from "@/types";
 
@@ -94,4 +96,9 @@ export function WinRmTabPane({ sessionId, session }: PaneProps) {
 export function IpmiSolTabPane({ sessionId, session }: PaneProps) {
   const config = useMemo(() => buildIpmiConfig(session), [session]);
   return <IpmiSolTab sessionId={sessionId} config={config} />;
+}
+
+export function SnmpTabPane({ sessionId, session }: PaneProps) {
+  const config = useMemo(() => buildSnmpConfig(session), [session]);
+  return <SnmpBrowser sessionId={sessionId} config={config} />;
 }

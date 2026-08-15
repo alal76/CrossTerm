@@ -20,6 +20,7 @@ import {
   MoshTabPane,
   WinRmTabPane,
   IpmiSolTabPane,
+  SnmpTabPane,
 } from "@/components/Terminal/ProtocolTabPanes";
 
 // ── Resize Handle ──
@@ -105,6 +106,7 @@ const SESSION_TAB_PANES: Partial<Record<SessionType, typeof RdpTabPane>> = {
   [SessionType.Mosh]: MoshTabPane,
   [SessionType.WinRM]: WinRmTabPane,
   [SessionType.IpmiSol]: IpmiSolTabPane,
+  [SessionType.Snmp]: SnmpTabPane,
 };
 
 function renderPaneContent(tab: { sessionId: string; sessionType: SessionType }, session: Session | undefined, isActive: boolean) {
