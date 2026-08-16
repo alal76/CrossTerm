@@ -100,19 +100,10 @@ export default function SsoButton({
     try {
       // The backend looks up the stored OidcConfig by provider_name, so we only
       // need to pass the name here — the full config was persisted earlier via
-      // auth_save_oidc_config.
+      // auth_save_oidc_config. If no config has been stored the backend
+      // returns an error which surfaces via onError below.
       const result = await invoke<OidcFlowResult>("auth_oidc_begin", {
-        // The Tauri command expects a full OidcConfig struct.  We send a minimal
-        // sentinel that the backend resolves from its AuthState.  If no config
-        // has been stored the backend will return an error which surfaces via
-        // onError below.
-        config: {
-          provider_name: providerName,
-          client_id: "",
-          authorization_endpoint: "",
-          token_endpoint: "",
-          scopes: [],
-        },
+        providerName,
       });
       onSuccess(result.profile);
     } catch (err) {

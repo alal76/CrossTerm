@@ -406,19 +406,43 @@ fn percent_decode(s: &str) -> String {
 /// 4. Wait for the browser redirect to `http://127.0.0.1:{port}/callback`.
 /// 5. Exchange the authorization code for tokens.
 /// 6. Parse the ID token and return the user profile.
+/// Find the saved config for `provider_name`, or a descriptive error.
+/// Extracted from `auth_oidc_begin` so it's unit-testable without a Tauri
+/// app context.
+pub fn resolve_oidc_config(configs: &[OidcConfig], provider_name: &str) -> Result<OidcConfig, String> {
+    configs
+        .iter()
+        .find(|c| c.provider_name == provider_name)
+        .cloned()
+        .ok_or_else(|| format!("No OIDC config found for provider '{provider_name}'"))
+}
+
 #[tauri::command]
 pub async fn auth_oidc_begin(
-    config: OidcConfig,
+    provider_name: String,
     app: tauri::AppHandle,
+    state: tauri::State<'_, AuthState>,
 ) -> Result<OidcFlowResult, String> {
+    // The caller (SsoButton) only knows the provider's display name — the
+    // full config (client_id, endpoints, scopes) was saved earlier via
+    // auth_save_oidc_config and is resolved here so secrets never need to
+    // round-trip back out to the unlock screen.
+    let config = {
+        let configs = state
+            .configs
+            .try_read()
+            .map_err(|_| "Auth state lock poisoned".to_string())?;
+        resolve_oidc_config(&configs, &provider_name)?
+    };
+
     // Step 1 — ephemeral port
     let port = find_free_port().await?;
     let redirect_uri = format!("http://127.0.0.1:{port}/callback");
 
     // Step 2 — PKCE + state
     let (verifier, challenge) = generate_pkce_pair();
-    let state = generate_state();
-    let url = build_auth_url(&config, &redirect_uri, &challenge, &state);
+    let oauth_state = generate_state();
+    let url = build_auth_url(&config, &redirect_uri, &challenge, &oauth_state);
 
     // Step 3 — open browser using the ShellExt trait
     #[allow(deprecated)]
@@ -432,9 +456,9 @@ pub async fn auth_oidc_begin(
     // Verify the state parameter to prevent CSRF.
     let returned_state = extract_query_param(&callback_path, "state")
         .ok_or_else(|| "OIDC callback missing 'state' parameter".to_string())?;
-    if returned_state != state {
+    if returned_state != oauth_state {
         return Err(format!(
-            "OIDC state mismatch: expected '{state}', got '{returned_state}'"
+            "OIDC state mismatch: expected '{oauth_state}', got '{returned_state}'"
         ));
     }
 
@@ -582,6 +606,53 @@ mod tests {
         assert!(url.contains("code_challenge=challenge_value"), "missing code_challenge");
         assert!(url.contains("code_challenge_method=S256"), "missing code_challenge_method");
         assert!(url.contains("state=random_state"), "missing state");
+    }
+
+    /// auth_oidc_begin resolves the full config by provider_name from saved
+    /// state — the frontend only ever sends the display name. This is the
+    /// exact lookup that previously didn't exist: the command used to take a
+    /// full OidcConfig directly from the caller, so SsoButton's sentinel
+    /// (empty client_id/endpoints) would have been used as-is and produced a
+    /// broken authorization URL.
+    #[test]
+    fn test_resolve_oidc_config_finds_saved_provider() {
+        let configs = vec![
+            OidcConfig {
+                provider_name: "Okta".to_owned(),
+                client_id: "okta-client".to_owned(),
+                authorization_endpoint: "https://okta.example.com/auth".to_owned(),
+                token_endpoint: "https://okta.example.com/token".to_owned(),
+                userinfo_endpoint: None,
+                scopes: vec!["openid".to_owned()],
+            },
+            OidcConfig {
+                provider_name: "Google".to_owned(),
+                client_id: "google-client".to_owned(),
+                authorization_endpoint: "https://accounts.google.com/o/oauth2/auth".to_owned(),
+                token_endpoint: "https://oauth2.googleapis.com/token".to_owned(),
+                userinfo_endpoint: None,
+                scopes: vec!["openid".to_owned(), "email".to_owned()],
+            },
+        ];
+
+        let resolved = resolve_oidc_config(&configs, "Google").expect("Google config should resolve");
+        assert_eq!(resolved.client_id, "google-client");
+        assert_eq!(resolved.token_endpoint, "https://oauth2.googleapis.com/token");
+    }
+
+    #[test]
+    fn test_resolve_oidc_config_errors_for_unknown_provider() {
+        let configs = vec![OidcConfig {
+            provider_name: "Okta".to_owned(),
+            client_id: "okta-client".to_owned(),
+            authorization_endpoint: "https://okta.example.com/auth".to_owned(),
+            token_endpoint: "https://okta.example.com/token".to_owned(),
+            userinfo_endpoint: None,
+            scopes: vec![],
+        }];
+
+        let err = resolve_oidc_config(&configs, "Azure AD").unwrap_err();
+        assert!(err.contains("Azure AD"), "error should name the missing provider: {err}");
     }
 
     /// The challenge must equal BASE64URL(SHA-256(verifier_bytes)).

@@ -28,10 +28,12 @@ describe("SsoButton", () => {
     render(<SsoButton providerName="Okta" onSuccess={onSuccess} onError={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button"));
-    expect(mockInvoke).toHaveBeenCalledWith(
-      "auth_oidc_begin",
-      expect.objectContaining({ config: expect.objectContaining({ provider_name: "Okta" }) }),
-    );
+    // Regression: the backend resolves the full saved config by provider
+    // name from AuthState — the frontend previously sent a sentinel config
+    // with empty client_id/endpoints that the backend used as-is (since it
+    // never actually looked anything up), producing a broken authorization
+    // URL on every real SSO attempt. Only providerName should be sent now.
+    expect(mockInvoke).toHaveBeenCalledWith("auth_oidc_begin", { providerName: "Okta" });
     await waitFor(() => expect(onSuccess).toHaveBeenCalledWith(profile));
   });
 
