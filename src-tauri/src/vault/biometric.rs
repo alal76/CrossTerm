@@ -1,17 +1,15 @@
 use super::*;
 
+/// Real native biometric integration (LocalAuthentication.framework on macOS,
+/// Windows Hello on Windows) is not implemented yet — see the TODOs in
+/// `vault_unlock_biometric` below. This used to unconditionally report `true`
+/// on macOS/Windows regardless of that, so the "Use Touch ID"/"Use Windows
+/// Hello" button always appeared and then always failed when clicked.
+/// Reporting `false` here (matching the FIDO2/YubiKey stub's already-accepted
+/// pattern) keeps the button from appearing until real integration lands,
+/// rather than showing a button that can never succeed.
 #[tauri::command]
 pub fn vault_biometric_available() -> Result<bool, VaultError> {
-    #[cfg(target_os = "macos")]
-    return Ok(true); // Touch ID may be available
-
-    #[cfg(target_os = "windows")]
-    return Ok(true); // Windows Hello may be available
-
-    #[cfg(target_os = "linux")]
-    return Ok(false); // Generally not available on desktop Linux
-
-    #[allow(unreachable_code)]
     Ok(false)
 }
 

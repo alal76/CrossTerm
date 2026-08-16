@@ -2082,14 +2082,15 @@ mod tests {
 
     #[test]
     fn test_biometric_available_returns_bool() {
+        // Real native biometric integration (LocalAuthentication.framework /
+        // Windows Hello) isn't implemented yet — this must report `false` on
+        // every platform so the unlock screen never shows a button that can
+        // only ever fail. Previously reported `true` on macOS/Windows
+        // unconditionally, contradicting vault_unlock_biometric's guaranteed
+        // BiometricUnavailable error.
         let result = super::biometric::vault_biometric_available();
         assert!(result.is_ok());
-        let available = result.unwrap();
-        if cfg!(target_os = "macos") || cfg!(target_os = "windows") {
-            assert!(available);
-        } else if cfg!(target_os = "linux") {
-            assert!(!available);
-        }
+        assert!(!result.unwrap(), "biometric must report unavailable until real platform integration exists");
     }
 
     // ── UT-V-21: OS store availability ──────────────────────────────
