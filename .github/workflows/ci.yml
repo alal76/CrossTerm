@@ -480,11 +480,17 @@ jobs:
 
       - name: Rust coverage (tarpaulin)
         working-directory: src-tauri
+        # test_ping_loopback spawns the real OS `ping` binary and waits up to
+        # 2s for a reply — under tarpaulin's ptrace-based instrumentation
+        # that subprocess spawn is slow enough to blow past the internal
+        # timeout most of the time, failing a test that has nothing to do
+        # with coverage instrumentation itself. Skipped here only; it still
+        # runs normally in the plain `cargo test` step of the build job.
         run: |
           cargo tarpaulin --out Lcov --output-dir ../coverage-rust \
             --exclude-files "src/main.rs" \
             --timeout 120 \
-            -- --test-threads=1
+            -- --test-threads=1 --skip test_ping_loopback
 
       - name: Frontend coverage (vitest)
         run: npm run test -- --coverage --reporter=verbose
@@ -506,7 +512,7 @@ jobs:
       - name: Coverage gate — Rust ≥ 60%
         working-directory: src-tauri
         run: |
-          TOTAL=$(cargo tarpaulin --out Json --output-dir /tmp/tarp -- --test-threads=1 2>/dev/null \
+          TOTAL=$(cargo tarpaulin --out Json --output-dir /tmp/tarp -- --test-threads=1 --skip test_ping_loopback 2>/dev/null \
             | python3 -c "import json,sys; d=json.load(sys.stdin); print(round(d.get('coverage',0),1))" 2>/dev/null || echo 0)
           echo "Rust coverage: ${TOTAL}%"
           python3 -c "assert float('${TOTAL}') >= 60, f'Coverage {${TOTAL}}% below 60% gate'"
