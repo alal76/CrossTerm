@@ -26,6 +26,7 @@ import {
   ShieldCheck,
   Users,
   Languages,
+  Puzzle,
 } from "lucide-react";
 import { useAppStore } from "@/stores/appStore";
 import { useFeatureFlagsStore } from "@/stores/featureFlagsStore";
@@ -40,6 +41,8 @@ import KeyManager from "@/components/KeyManager/KeyManager";
 import RtlSettings from "@/components/Settings/RtlSettings";
 import LocaleSelector from "@/components/Settings/LocaleSelector";
 import LocaleInstaller from "@/components/Settings/LocaleInstaller";
+import PluginManager from "@/components/Plugin/PluginManager";
+import PluginRegistry from "@/components/Plugin/PluginRegistry";
 
 import darkTheme from "@/themes/dark.json";
 import lightTheme from "@/themes/light.json";
@@ -75,6 +78,7 @@ type Category =
   | "policy"
   | "team"
   | "language"
+  | "plugins"
   | "advanced"
   | "experimental";
 
@@ -222,6 +226,7 @@ const CATEGORIES: { id: Category; labelKey: string; icon: React.ReactNode }[] = 
   { id: "policy",        labelKey: "settings.policy",                icon: <ShieldCheck size={15} /> },
   { id: "team",          labelKey: "settings.team",                  icon: <Users size={15} /> },
   { id: "language",      labelKey: "settings.language",              icon: <Languages size={15} /> },
+  { id: "plugins",       labelKey: "settings.plugins",                icon: <Puzzle size={15} /> },
   { id: "advanced",      labelKey: "settings.advancedCategory",      icon: <Cpu size={15} /> },
   { id: "experimental",  labelKey: "settings.experimentalCategory",  icon: <RefreshCw size={15} /> },
 ];
@@ -240,6 +245,7 @@ const DESCRIPTION_KEYS: Record<Category, string> = {
   policy:        "settings.policyDescription",
   team:          "settings.teamDescription",
   language:      "settings.languageDescription",
+  plugins:       "settings.pluginsDescription",
   advanced:      "settings.advancedDescription",
   experimental:  "settings.experimentalDescription",
 };
@@ -258,6 +264,7 @@ const HEADING_KEYS: Record<Category, string> = {
   policy:        "settings.policy",
   team:          "settings.team",
   language:      "settings.language",
+  plugins:       "settings.plugins",
   advanced:      "settings.advancedCategory",
   experimental:  "settings.experimentalCategory",
 };
@@ -403,6 +410,7 @@ export default function SettingsPanel() {
     localStorage.setItem("ct_rtl_direction", direction);
   }, []);
   const [showLocaleInstaller, setShowLocaleInstaller] = useState(false);
+  const [pluginView, setPluginView] = useState<"installed" | "discover">("installed");
 
   // Experimental feature flags (used in renderExperimental)
   const featureFlags = useFeatureFlagsStore();
@@ -943,6 +951,42 @@ export default function SettingsPanel() {
     );
   }
 
+  function renderPlugins() {
+    return (
+      <div className="h-[calc(100%-2rem)] -mx-1 flex flex-col">
+        <div className="flex items-center gap-1 px-2 pb-2">
+          <button
+            type="button"
+            onClick={() => setPluginView("installed")}
+            className={clsx(
+              "px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
+              pluginView === "installed"
+                ? "bg-interactive-default/15 text-text-primary"
+                : "text-text-secondary hover:bg-surface-elevated",
+            )}
+          >
+            {t("plugin.installed")}
+          </button>
+          <button
+            type="button"
+            onClick={() => setPluginView("discover")}
+            className={clsx(
+              "px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
+              pluginView === "discover"
+                ? "bg-interactive-default/15 text-text-primary"
+                : "text-text-secondary hover:bg-surface-elevated",
+            )}
+          >
+            Discover
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {pluginView === "installed" ? <PluginManager /> : <PluginRegistry />}
+        </div>
+      </div>
+    );
+  }
+
   function renderAdvanced() {
     return (
       <div>
@@ -1105,6 +1149,7 @@ export default function SettingsPanel() {
       case "policy":        return renderPolicy();
       case "team":          return renderTeam();
       case "language":      return renderLanguage();
+      case "plugins":       return renderPlugins();
       case "advanced":      return renderAdvanced();
       case "experimental":  return renderExperimental();
     }

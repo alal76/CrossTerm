@@ -148,4 +148,23 @@ describe("SettingsPanel", () => {
     expect(screen.getByText("Interface language")).toBeInTheDocument();
     expect(screen.getByText("Enable RTL text support")).toBeInTheDocument();
   });
+
+  // Regression coverage: PluginManager and PluginRegistry were fully built
+  // and tested but never mounted anywhere — the whole plugin system was
+  // unreachable from Settings.
+  it("Plugins category toggles between the installed manager and the discovery registry", async () => {
+    const user = userEvent.setup();
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error("offline"));
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "plugin_list") return Promise.resolve([]);
+      return Promise.resolve(undefined);
+    });
+    render(<ToastProvider><SettingsPanel /></ToastProvider>);
+
+    await user.click(screen.getByRole("button", { name: /Plugins/ }));
+    expect(await screen.findByText("Plugin Manager")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Discover" }));
+    expect(await screen.findByText("Plugin Registry")).toBeInTheDocument();
+  });
 });

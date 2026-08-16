@@ -50,6 +50,7 @@ export enum SidebarMode {
   Tunnels = "tunnels",
   Network = "network",
   RemoteFiles = "remote_files",
+  Plugins = "plugins",
 }
 
 export enum BottomPanelMode {

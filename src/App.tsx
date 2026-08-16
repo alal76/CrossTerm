@@ -27,6 +27,7 @@ import {
   Radio,
   Radar,
   Cloud,
+  Puzzle,
   KeyRound,
   Bell,
   ExternalLink,
@@ -49,6 +50,7 @@ import SshTerminalTab from "@/components/Terminal/SshTerminalTab";
 import TelnetTerminal from "@/components/Telnet/TelnetTerminal";
 import SerialTerminal from "@/components/Serial/SerialTerminal";
 import PortForwardManager from "@/components/NetworkTools/PortForwardManager";
+import PluginSidebar from "@/components/Plugin/PluginSidebar";
 import {
   RdpTabPane,
   VncTabPane,
@@ -885,6 +887,7 @@ const SIDEBAR_MODES = [
   { mode: SidebarMode.Snippets, icon: Code2, label: "sidebar.snippets" as const },
   { mode: SidebarMode.Tunnels, icon: Lock, label: "sidebar.tunnels" as const },
   { mode: SidebarMode.RemoteFiles, icon: FolderTree, label: "sidebar.remote_files" as const },
+  { mode: SidebarMode.Plugins, icon: Puzzle, label: "sidebar.plugins" as const },
 ];
 
 function Sidebar({
@@ -1031,6 +1034,9 @@ function Sidebar({
             )}
             {sidebarMode === SidebarMode.RemoteFiles && (
               <RemoteFileBrowser />
+            )}
+            {sidebarMode === SidebarMode.Plugins && (
+              <PluginSidebar />
             )}
           </div>
         </div>

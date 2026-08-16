@@ -338,6 +338,14 @@ describe("App", () => {
     expect(screen.getByText("Port Forwards")).toBeInTheDocument();
   });
 
+  // Regression coverage: PluginSidebar.tsx was fully built and tested but
+  // had no sidebar mode to render it under.
+  it("Plugins sidebar tab renders PluginSidebar", () => {
+    render(<App />);
+    fireEvent.click(screen.getByTitle("Plugins"));
+    expect(screen.getByText("Sidebar Panels")).toBeInTheDocument();
+  });
+
   // Regression coverage: the Sessions sidebar tab used to render a bare-bones
   // inline flat list (no folders, search, favorites, context menu, or
   // "Import" action) instead of the fully built SessionTree component, and
