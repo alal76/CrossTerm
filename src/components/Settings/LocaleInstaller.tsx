@@ -1,7 +1,9 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
+import { invoke } from '@tauri-apps/api/core';
 import { Globe, Upload, Eye, Check, X } from 'lucide-react';
 import clsx from 'clsx';
+import { showToast } from '@/components/Shared/Toast';
 import type { LocaleInfo } from '@/types';
 
 interface LocaleInstallerProps {
@@ -18,6 +20,17 @@ export default function LocaleInstaller({
   const { t } = useTranslation();
   const [preview, setPreview] = useState<Record<string, string> | null>(null);
   const [previewName, setPreviewName] = useState('');
+  const [targetLocale, setTargetLocale] = useState('');
+  const [installing, setInstalling] = useState(false);
+
+  // Default the target locale to whatever best matches the uploaded
+  // filename (e.g. "de.json" -> "de"), falling back to the first installed
+  // locale once the file is previewed.
+  useEffect(() => {
+    if (!preview) return;
+    const byFilename = installedLocales.find((l) => l.code === previewName);
+    setTargetLocale(byFilename?.code ?? installedLocales[0]?.code ?? '');
+  }, [preview, previewName, installedLocales]);
 
   const handleFileSelect = useCallback(async () => {
     try {
@@ -38,12 +51,27 @@ export default function LocaleInstaller({
     }
   }, []);
 
-  const handleInstall = useCallback(() => {
-    if (!preview) return;
-    // Stub: In production, save to i18n directory and register with i18next
-    setPreview(null);
-    setPreviewName('');
-  }, [preview]);
+  const handleInstall = useCallback(async () => {
+    if (!preview || !targetLocale) return;
+    setInstalling(true);
+    try {
+      // l10n_import_translations only accepts overrides for one of the
+      // built-in locales (there's no backend support for registering an
+      // entirely new locale code) — targetLocale picks which one this file's
+      // translations apply to.
+      const count = await invoke<number>('l10n_import_translations', {
+        locale: targetLocale,
+        data: JSON.stringify(preview),
+      });
+      showToast('success', `Imported ${count} translation${count === 1 ? '' : 's'} for ${targetLocale}.`);
+      setPreview(null);
+      setPreviewName('');
+    } catch (err) {
+      showToast('error', `Failed to install locale: ${String(err)}`);
+    } finally {
+      setInstalling(false);
+    }
+  }, [preview, targetLocale]);
 
   if (!open) return null;
 
@@ -88,13 +116,28 @@ export default function LocaleInstaller({
                   {t('locale.preview')}: {previewName}
                 </span>
                 <button
-                  onClick={handleInstall}
-                  className="flex items-center gap-1 px-3 py-1 rounded bg-accent-primary text-text-inverse text-xs"
+                  onClick={() => { void handleInstall(); }}
+                  disabled={installing || !targetLocale}
+                  className="flex items-center gap-1 px-3 py-1 rounded bg-accent-primary text-text-inverse text-xs disabled:opacity-50"
                 >
                   <Check size={12} />
-                  {t('plugin.install')}
+                  {installing ? t('actions.saving', 'Saving…') : t('locale.installButton')}
                 </button>
               </div>
+              {installedLocales.length > 0 && (
+                <label className="flex items-center gap-2 text-xs text-text-secondary">
+                  {t('locale.applyTo')}
+                  <select
+                    value={targetLocale}
+                    onChange={(e) => setTargetLocale(e.target.value)}
+                    className="flex-1 px-2 py-1 rounded bg-surface-sunken border border-border-default text-text-primary"
+                  >
+                    {installedLocales.map((l) => (
+                      <option key={l.code} value={l.code}>{l.native_name} ({l.code})</option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <div className="max-h-48 overflow-y-auto text-xs font-mono text-text-secondary bg-surface-sunken rounded p-2">
                 {Object.entries(preview).slice(0, 20).map(([key, value]) => (
                   <div key={key}>

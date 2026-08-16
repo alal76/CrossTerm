@@ -31,7 +31,7 @@ import {
 import { useAppStore } from "@/stores/appStore";
 import { useFeatureFlagsStore } from "@/stores/featureFlagsStore";
 import { ThemeVariant } from "@/types";
-import type { BellStyle, CursorStyle, ThemeFile, ThemeTokens } from "@/types";
+import type { BellStyle, CursorStyle, ThemeFile, ThemeTokens, LocaleInfo } from "@/types";
 import FieldHelp from "@/components/Help/FieldHelp";
 import SecuritySettings from "@/components/Settings/SecuritySettings";
 import ProfileSync from "@/components/Settings/ProfileSync";
@@ -413,6 +413,14 @@ export default function SettingsPanel() {
     localStorage.setItem("ct_rtl_direction", direction);
   }, []);
   const [showLocaleInstaller, setShowLocaleInstaller] = useState(false);
+  const [localeList, setLocaleList] = useState<LocaleInfo[]>([]);
+
+  useEffect(() => {
+    if (!showLocaleInstaller) return;
+    invoke<LocaleInfo[]>("l10n_list_locales")
+      .then((locales) => setLocaleList(Array.isArray(locales) ? locales : []))
+      .catch(() => setLocaleList([]));
+  }, [showLocaleInstaller]);
   const [pluginView, setPluginView] = useState<"installed" | "discover">("installed");
 
   // OIDC SSO provider configuration (Security category)
@@ -1019,7 +1027,11 @@ export default function SettingsPanel() {
         </div>
 
         {showLocaleInstaller && (
-          <LocaleInstaller open={showLocaleInstaller} onClose={() => setShowLocaleInstaller(false)} />
+          <LocaleInstaller
+            open={showLocaleInstaller}
+            onClose={() => setShowLocaleInstaller(false)}
+            installedLocales={localeList}
+          />
         )}
       </div>
     );

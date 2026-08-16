@@ -1076,6 +1076,8 @@
     "install": "Install Community Locale",
     "import": "Import from File",
     "preview": "Preview",
-    "installed": "Installed Locales"
+    "installed": "Installed Locales",
+    "installButton": "Install",
+    "applyTo": "Apply to:"
   }
 }
