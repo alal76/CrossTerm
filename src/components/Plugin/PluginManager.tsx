@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useTranslation } from 'react-i18next';
-import { Puzzle, ToggleLeft, ToggleRight, Trash2, Upload, Shield, AlertCircle } from 'lucide-react';
+import { Puzzle, ToggleLeft, ToggleRight, Trash2, Upload, Shield, AlertCircle, Info } from 'lucide-react';
 import clsx from 'clsx';
 import type { PluginInfo, PluginPermission } from '@/types';
 
@@ -111,6 +111,19 @@ export default function PluginManager() {
           {error}
         </div>
       )}
+
+      {/* Sandboxed WASM execution (lifecycle hooks, output interception,
+          contributed commands — see the Plugin Cookbook / Plugin API Guide
+          in Help) isn't implemented yet. Install/enable here only registers
+          the plugin's manifest and permissions; it doesn't run any plugin
+          code. Said plainly instead of letting "Enabled" imply it does. */}
+      <div className="mb-3 px-3 py-2 rounded bg-accent-secondary/10 text-text-secondary text-xs flex items-center gap-2">
+        <Info size={13} className="shrink-0 text-accent-secondary" />
+        {t(
+          'plugin.executionNotice',
+          "Plugins install and can be enabled here, but sandboxed execution (hooks, output interception) isn't implemented yet — enabling a plugin registers it without running its code.",
+        )}
+      </div>
 
       {/* Plugin Grid */}
       {plugins.length === 0 ? (

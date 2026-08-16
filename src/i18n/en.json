@@ -992,7 +992,8 @@
     "update": "Update",
     "cookbook": "Plugin Cookbook",
     "gettingStarted": "Getting Started",
-    "sidebar": "Sidebar Panels"
+    "sidebar": "Sidebar Panels",
+    "executionNotice": "Plugins install and can be enabled here, but sandboxed execution (hooks, output interception) isn't implemented yet — enabling a plugin registers it without running its code."
   },
   "macro": {
     "editor": "Macro Editor",

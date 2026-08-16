@@ -50,6 +50,16 @@ describe("PluginManager", () => {
     expect(await screen.findByText(/No plugins installed/)).toBeInTheDocument();
   });
 
+  // Regression coverage: enabling a plugin here only registers its manifest
+  // — plugin_load is a stub and nothing dispatches real events to it — but
+  // the UI previously gave no indication of that, letting "Enabled" imply
+  // the plugin actually runs.
+  it("shows an honest notice that plugin execution isn't implemented yet", async () => {
+    mockInvoke.mockResolvedValue([]);
+    render(<PluginManager />);
+    expect(await screen.findByText(/sandboxed execution.*isn.t implemented yet/)).toBeInTheDocument();
+  });
+
   it("shows an error message when loading fails", async () => {
     mockInvoke.mockRejectedValue(new Error("registry unavailable"));
     render(<PluginManager />);
