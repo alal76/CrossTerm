@@ -475,6 +475,9 @@ jobs:
         working-directory: src-tauri
         run: cargo install cargo-tarpaulin --locked
 
+      - name: Create stub frontend dist for proc macro
+        run: mkdir -p dist && printf '<!DOCTYPE html><html><body></body></html>' > dist/index.html
+
       - name: Rust coverage (tarpaulin)
         working-directory: src-tauri
         run: |
