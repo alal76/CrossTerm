@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 import { invoke } from "@tauri-apps/api/core";
 import { ConnectionStatus } from "@/types";
 import type { Session, Tab, SplitPane, SmartGroup, FilterExpr } from "@/types";
+import { showToast } from "@/components/Shared/Toast";
 
 interface SessionState {
   sessions: Session[];
@@ -105,20 +106,45 @@ export const useSessionStore = create<SessionState>()(
         autoReconnect: session.autoReconnect,
         keepAliveIntervalSeconds: session.keepAliveIntervalSeconds,
       },
-    }).catch(() => {/* session will reload on next launch via loadSessions */});
+    }).catch((err) => {
+      // The optimistic add never actually persisted — remove it rather than
+      // leaving a phantom session that silently vanishes on next launch.
+      set((state) => ({ sessions: state.sessions.filter((s) => s.id !== session.id) }));
+      showToast("error", `Failed to save session "${session.name}": ${String(err)}`);
+    });
   },
 
   removeSession: (id) => {
+    const before = get();
+    const removedSession = before.sessions.find((s) => s.id === id);
+    const removedTabs = before.openTabs.filter((t) => t.sessionId === id);
+    const wasFavorite = before.favorites.includes(id);
+    const wasSelected = before.selectedSessionIds.includes(id);
+
     set((state) => ({
       sessions: state.sessions.filter((s) => s.id !== id),
       openTabs: state.openTabs.filter((t) => t.sessionId !== id),
       favorites: state.favorites.filter((fid) => fid !== id),
       selectedSessionIds: state.selectedSessionIds.filter((sid) => sid !== id),
     }));
-    invoke("session_delete", { id }).catch(() => {});
+    invoke("session_delete", { id }).catch((err) => {
+      // Deletion never actually persisted — restore it instead of letting
+      // the user believe it's gone when it'll reappear on next launch.
+      if (removedSession) {
+        set((state) => ({
+          sessions: [...state.sessions, removedSession],
+          openTabs: [...state.openTabs, ...removedTabs],
+          favorites: wasFavorite ? [...state.favorites, id] : state.favorites,
+          selectedSessionIds: wasSelected ? [...state.selectedSessionIds, id] : state.selectedSessionIds,
+        }));
+      }
+      const sessionLabel = removedSession ? `"${removedSession.name}"` : "session";
+      showToast("error", `Failed to delete ${sessionLabel}: ${String(err)}`);
+    });
   },
 
   updateSession: (id, updates) => {
+    const previous = get().sessions.find((s) => s.id === id);
     set((state) => ({
       sessions: state.sessions.map((s) =>
         s.id === id ? { ...s, ...updates, updatedAt: new Date().toISOString() } : s
@@ -135,7 +161,16 @@ export const useSessionStore = create<SessionState>()(
     if (updates.notes !== undefined) request.notes = updates.notes;
     if (updates.autoReconnect !== undefined) request.autoReconnect = updates.autoReconnect;
     if (updates.keepAliveIntervalSeconds !== undefined) request.keepAliveIntervalSeconds = updates.keepAliveIntervalSeconds;
-    invoke("session_update", { id, request }).catch(() => {});
+    invoke("session_update", { id, request }).catch((err) => {
+      // The optimistic edit never actually persisted — revert it instead of
+      // leaving the UI showing changes that'll silently disappear later.
+      if (previous) {
+        set((state) => ({
+          sessions: state.sessions.map((s) => (s.id === id ? previous : s)),
+        }));
+      }
+      showToast("error", `Failed to save changes to "${previous?.name ?? id}": ${String(err)}`);
+    });
   },
 
   openTab: (session) =>

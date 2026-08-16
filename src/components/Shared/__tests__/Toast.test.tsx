@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import "@/i18n";
-import { ToastProvider, useToast } from "@/components/Shared/Toast";
+import { ToastProvider, useToast, showToast } from "@/components/Shared/Toast";
 
 // Helper component to trigger toasts
 function ToastTrigger({ type, message }: { readonly type: "success" | "info" | "warning" | "error"; readonly message: string }) {
@@ -80,5 +80,20 @@ describe("Toast", () => {
 
     // Error toast should still be visible
     expect(screen.getByText("Persistent error")).toBeInTheDocument();
+  });
+
+  // Regression coverage: non-component code (e.g. a zustand store action)
+  // has no React context to call useToast() from. showToast() is the
+  // imperative bridge that ToastProvider registers itself with on mount.
+  it("showToast() surfaces a toast from outside the React tree once a ToastProvider is mounted", () => {
+    renderWithProvider(<div />);
+
+    act(() => { showToast("error", "Failed to save session"); });
+
+    expect(screen.getByText("Failed to save session")).toBeInTheDocument();
+  });
+
+  it("showToast() is a safe no-op before any ToastProvider has mounted", () => {
+    expect(() => showToast("error", "no provider yet")).not.toThrow();
   });
 });

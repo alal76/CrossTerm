@@ -52,6 +52,19 @@ export function useToast() {
   return ctx;
 }
 
+// ── Imperative bridge ──
+// Zustand stores and other non-component code can't call the useToast()
+// hook. ToastProvider registers itself here on mount so that code can still
+// surface a toast (e.g. a session save that failed to persist) without
+// threading a callback through every store action. No-ops before the
+// provider mounts, which in practice never happens since it wraps the app
+// root in main.tsx.
+let imperativeToast: ((type: ToastType, message: string) => void) | null = null;
+
+export function showToast(type: ToastType, message: string) {
+  imperativeToast?.(type, message);
+}
+
 // ── Single Toast ──
 
 function ToastCard({
@@ -144,6 +157,13 @@ export function ToastProvider({ children }: Readonly<{ children: React.ReactNode
   }, []);
 
   const visible = toasts.slice(-MAX_VISIBLE);
+
+  useEffect(() => {
+    imperativeToast = toast;
+    return () => {
+      imperativeToast = null;
+    };
+  }, [toast]);
 
   return (
     <ToastContext.Provider value={useMemo(() => ({ toast, dismiss }), [toast, dismiss])}>

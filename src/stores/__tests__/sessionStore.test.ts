@@ -81,6 +81,20 @@ describe("sessionStore", () => {
 
       expect(useSessionStore.getState().sessions).toHaveLength(2);
     });
+
+    // Regression: a failed session_create used to leave the optimistically-added
+    // session in the store forever, silently reverting only on next launch.
+    it("removes the optimistically-added session if session_create fails", async () => {
+      mockInvoke.mockRejectedValueOnce(new Error("disk full"));
+      const session = makeSession({ id: "fail-1" });
+
+      useSessionStore.getState().addSession(session);
+      expect(useSessionStore.getState().sessions).toHaveLength(1);
+
+      await vi.waitFor(() => {
+        expect(useSessionStore.getState().sessions).toHaveLength(0);
+      });
+    });
   });
 
   describe("removeSession", () => {
@@ -113,6 +127,30 @@ describe("sessionStore", () => {
       useSessionStore.getState().removeSession("del-1");
 
       expect(mockInvoke).toHaveBeenCalledWith("session_delete", { id: "del-1" });
+    });
+
+    // Regression: a failed session_delete used to leave the session removed
+    // from the UI even though it still existed on disk, until it silently
+    // reappeared (or didn't) on next launch.
+    it("restores the session, its tab, and favorite status if session_delete fails", async () => {
+      const session = makeSession({ id: "del-fail" });
+      const store = useSessionStore.getState();
+      store.addSession(session);
+      store.openTab(session);
+      store.toggleFavorite("del-fail");
+
+      mockInvoke.mockRejectedValueOnce(new Error("vault locked"));
+      useSessionStore.getState().removeSession("del-fail");
+
+      expect(useSessionStore.getState().sessions).toHaveLength(0);
+
+      await vi.waitFor(() => {
+        expect(useSessionStore.getState().sessions).toHaveLength(1);
+      });
+      const state = useSessionStore.getState();
+      expect(state.sessions[0].id).toBe("del-fail");
+      expect(state.openTabs).toHaveLength(1);
+      expect(state.favorites).toContain("del-fail");
     });
   });
 
@@ -276,6 +314,22 @@ describe("sessionStore", () => {
           request: expect.objectContaining({ name: "New Name" }),
         })
       );
+    });
+
+    // Regression: a failed session_update used to leave the optimistic edit
+    // showing in the UI even though it was never actually saved.
+    it("reverts the edit if session_update fails", async () => {
+      const session = makeSession({ id: "upd-fail", name: "Original" });
+      useSessionStore.getState().addSession(session);
+
+      mockInvoke.mockRejectedValueOnce(new Error("permission denied"));
+      useSessionStore.getState().updateSession("upd-fail", { name: "Renamed" });
+
+      expect(useSessionStore.getState().sessions[0].name).toBe("Renamed");
+
+      await vi.waitFor(() => {
+        expect(useSessionStore.getState().sessions[0].name).toBe("Original");
+      });
     });
   });
 
