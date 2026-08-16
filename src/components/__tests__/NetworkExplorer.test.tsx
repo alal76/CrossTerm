@@ -430,6 +430,80 @@ describe('NetworkExplorer', () => {
     expect(screen.getByText(/_ssh\._tcp\.local\./)).toBeInTheDocument();
   });
 
+  it('migrates a friendly name from the IP key to the MAC key once enrichment resolves a MAC (regression: label was silently lost on reconnect)', async () => {
+    // Reproduces a real regression: a device is renamed while its row still
+    // only has an IP (before the async MAC/hostname resolver finishes), so
+    // the label saves keyed by IP. Once enrichment resolves a MAC, the
+    // device's lookup key switches to that MAC — without a migration, the
+    // label becomes permanently unreachable under the old IP key, which
+    // looked like "the custom name doesn't persist across sessions".
+    let savedSettings: Record<string, unknown> = {};
+    mockInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === 'network_local_subnets') return Promise.resolve([]);
+      if (cmd === 'network_explore_start') return Promise.resolve('scan-id-123');
+      if (cmd === 'settings_get') return Promise.resolve(savedSettings);
+      if (cmd === 'settings_update') {
+        savedSettings = (args as { settings?: Record<string, unknown> } | undefined)?.settings ?? savedSettings;
+        return Promise.resolve(undefined);
+      }
+      return Promise.resolve(undefined);
+    });
+    renderWithToast(<NetworkExplorer />);
+    fireEvent.change(screen.getByPlaceholderText(/192\.168/), { target: { value: '10.0.0.0/28' } });
+    fireEvent.click(screen.getByTestId('scan-start-btn'));
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith('network_explore_start', expect.anything()));
+
+    const bareResult: ExploreResult = {
+      ip: '192.168.1.80',
+      hostname: undefined,
+      mac_address: undefined,
+      mac_vendor: undefined,
+      os_guess: 'Linux/macOS/BSD-like (TTL 64)',
+      response_time_ms: 12,
+      suggested_session_type: 'ssh',
+      ttl: 64,
+      open_ports: [{ port: 22, service_name: 'ssh', protocol: 'tcp' }],
+      mdns: [],
+      evidence: [],
+    };
+    act(() => {
+      handlers['network:explore_host_found']({ payload: { scan_id: 'scan-id-123', result: bareResult } });
+    });
+    await screen.findByText('192.168.1.80');
+
+    // Rename the device before its MAC has resolved.
+    fireEvent.click(screen.getByTitle('Click to set a friendly name'));
+    const input = document.querySelector<HTMLInputElement>('input.border-accent-primary')!;
+    fireEvent.change(input, { target: { value: 'Garage Pi' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() =>
+      expect(mockInvoke).toHaveBeenCalledWith('settings_update', {
+        settings: expect.objectContaining({ network_device_labels: { '192.168.1.80': 'Garage Pi' } }),
+      }),
+    );
+    expect(await screen.findByText('Garage Pi')).toBeInTheDocument();
+
+    // Enrichment now resolves a MAC for the same host.
+    act(() => {
+      handlers['network:explore_host_enriched']({
+        payload: {
+          scan_id: 'scan-id-123',
+          result: { ...bareResult, mac_address: 'AA:BB:CC:DD:EE:FF', mac_vendor: 'Raspberry Pi Foundation' },
+        },
+      });
+    });
+
+    // The label must survive the key switch — and settings must be rewritten
+    // keyed by MAC, with the stale IP entry removed, not just left in memory.
+    expect(await screen.findByText('Garage Pi')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(mockInvoke).toHaveBeenCalledWith('settings_update', {
+        settings: expect.objectContaining({ network_device_labels: { 'AA:BB:CC:DD:EE:FF': 'Garage Pi' } }),
+      }),
+    );
+  });
+
   it('loads a saved friendly name from settings and lets it be edited inline', async () => {
     const existingSettings = {
       theme: 'dark',

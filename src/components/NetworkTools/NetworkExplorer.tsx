@@ -332,6 +332,14 @@ export default function NetworkExplorer() {
   const [editingLabelValue, setEditingLabelValue] = useState('');
   const settingsRef = useRef<Record<string, unknown> | null>(null);
   const cancelLabelEditRef = useRef(false);
+  // Mirrors `deviceLabels` for the listener-registration effect below, which
+  // runs once on mount ([] deps) and would otherwise close over a stale,
+  // always-empty `deviceLabels` when migrating a label's key (see the
+  // explore_host_enriched handler).
+  const deviceLabelsRef = useRef<Record<string, string>>({});
+  useEffect(() => {
+    deviceLabelsRef.current = deviceLabels;
+  }, [deviceLabels]);
 
   useEffect(() => {
     invoke<Record<string, unknown>>('settings_get')
@@ -375,6 +383,14 @@ export default function NetworkExplorer() {
   // records by IP here so a host row picks up its mDNS data (and derived
   // hostname) whichever event lands first.
   const mdnsRecordsRef = useRef<Record<string, MdnsRecord[]>>({});
+  // Mirrors `results` for the enrichment handler below: a setState updater
+  // function doesn't run synchronously, so code right after `setResults(...)`
+  // can't rely on reading the previous row from inside it — this ref gives a
+  // synchronously-readable snapshot of the prior row instead.
+  const resultsRef = useRef<ExploreResult[]>([]);
+  useEffect(() => {
+    resultsRef.current = results;
+  }, [results]);
 
   // Auto-detect local subnets on mount
   useEffect(() => {
@@ -419,6 +435,18 @@ export default function NetworkExplorer() {
       'network:explore_host_enriched',
       (event) => {
         const enriched = event.payload.result;
+        // A device's label key switches from its IP to its MAC as soon as a
+        // MAC first resolves (see deviceLabelKey below) — enrichment is what
+        // resolves it, arriving after the fast host-found pass. If a label
+        // was saved while the row still only had an IP, it must move to the
+        // MAC key now or it becomes permanently unreachable under the old key.
+        // Read the prior row from the ref (not `results`/a setResults updater)
+        // since both are unavailable synchronously at this point.
+        const prevRow = resultsRef.current.find((r) => r.ip === enriched.ip);
+        const labelMigration =
+          prevRow && !prevRow.mac_address && enriched.mac_address
+            ? { from: prevRow.ip, to: enriched.mac_address }
+            : null;
         setResults((prev) =>
           prev.map((r) =>
             r.ip === enriched.ip
@@ -431,6 +459,27 @@ export default function NetworkExplorer() {
               : r
           )
         );
+        if (labelMigration) {
+          const { from, to } = labelMigration;
+          const current = deviceLabelsRef.current;
+          if (current[from] && !current[to]) {
+            const next = { ...current };
+            next[to] = next[from];
+            delete next[from];
+            deviceLabelsRef.current = next;
+            setDeviceLabels(next);
+            (async () => {
+              try {
+                const base = settingsRef.current ?? (await invoke<Record<string, unknown>>('settings_get'));
+                const updated = { ...base, network_device_labels: next };
+                settingsRef.current = updated;
+                await invoke('settings_update', { settings: updated });
+              } catch {
+                // Best-effort background migration; a manual rename will retry the write.
+              }
+            })();
+          }
+        }
       }
     );
 
