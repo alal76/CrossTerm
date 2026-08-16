@@ -144,4 +144,47 @@ describe("SftpBrowser", () => {
 
     expect(screen.getByText("No connection")).toBeInTheDocument();
   });
+
+  // Regression coverage: SftpToolbar, FilePreview, and FolderSyncWizard were
+  // all fully built and tested but never mounted inside SftpBrowser — there
+  // was no way to preview a file or run a folder sync from the SFTP panel.
+  it("the toolbar's Preview button opens the real FilePreview for the selected file", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "sftp_open") return "sftp-session-1";
+      if (cmd === "sftp_list") return MOCK_ENTRIES;
+      if (cmd === "sftp_preview") {
+        return { path: "/README.md", content_type: "text/markdown", data: "# README", size: 8, truncated: false };
+      }
+      return undefined;
+    });
+
+    render(<SftpBrowser connectionId="conn-1" />);
+    await waitFor(() => expect(screen.getByText("README.md")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByText("README.md").closest("tr")!);
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+
+    await waitFor(() =>
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "sftp_preview",
+        expect.objectContaining({ path: "/README.md" }),
+      ),
+    );
+  });
+
+  it("the toolbar's Folder Sync button opens the real FolderSyncWizard", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "sftp_open") return "sftp-session-1";
+      if (cmd === "sftp_list") return MOCK_ENTRIES;
+      return undefined;
+    });
+
+    render(<SftpBrowser connectionId="conn-1" />);
+    await waitFor(() => expect(screen.getByText("README.md")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Folder Sync" }));
+
+    expect(await screen.findByPlaceholderText("/home/user/project")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("/var/www/project")).toBeInTheDocument();
+  });
 });

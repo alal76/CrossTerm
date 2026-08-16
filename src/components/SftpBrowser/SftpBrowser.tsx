@@ -18,6 +18,9 @@ import {
   WifiOff,
 } from "lucide-react";
 import { formatFileSize, formatDate } from "@/utils/formatters";
+import SftpToolbar from "@/components/SftpBrowser/SftpToolbar";
+import FilePreview from "@/components/SftpBrowser/FilePreview";
+import FolderSyncWizard from "@/components/SftpBrowser/FolderSyncWizard";
 
 interface SftpFileEntry {
   name: string;
@@ -95,6 +98,8 @@ export default function SftpBrowser({ connectionId }: SftpBrowserProps) {
   const [dragActive, setDragActive] = useState(false);
   const [localDropActive, setLocalDropActive] = useState(false);
   const [remoteDropActive, setRemoteDropActive] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  const [showSync, setShowSync] = useState(false);
 
   useEffect(() => {
     if (!connectionId) {
@@ -464,6 +469,12 @@ export default function SftpBrowser({ connectionId }: SftpBrowserProps) {
             <RefreshCw size={12} />
           </button>
         </div>
+        <SftpToolbar
+          onPreview={() => setShowPreview(true)}
+          onSync={() => setShowSync(true)}
+          previewDisabled={!selectedEntry || selectedEntry.is_dir}
+          syncDisabled={!sessionId}
+        />
 
         <div className="px-2 py-1.5 border-b border-border-subtle bg-surface-primary shrink-0">
           <Breadcrumb path={remotePath} onNavigate={setRemotePath} />
@@ -552,6 +563,18 @@ export default function SftpBrowser({ connectionId }: SftpBrowserProps) {
           </div>
         ) : null}
       </section>
+
+      {showPreview && sessionId && selectedEntry && !selectedEntry.is_dir && (
+        <FilePreview
+          sessionId={sessionId}
+          path={joinPath(remotePath, selectedEntry.name)}
+          onClose={() => setShowPreview(false)}
+          onDownload={() => { void handleDownload(); }}
+        />
+      )}
+      {showSync && sessionId && (
+        <FolderSyncWizard sessionId={sessionId} onClose={() => setShowSync(false)} />
+      )}
     </div>
   );
 }
