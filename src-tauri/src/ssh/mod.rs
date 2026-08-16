@@ -7,6 +7,7 @@ use russh::CryptoVec;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use thiserror::Error;
@@ -471,6 +472,17 @@ pub(crate) struct SshConnection {
     /// Cached content from the first drain, returned on subsequent drain calls
     /// (React StrictMode may call drain multiple times due to double-mount).
     drained_cache: Arc<std::sync::Mutex<Option<String>>>,
+    /// Unix timestamp (seconds) of the last data seen in either direction
+    /// (server output or a write sent via ssh_write). Updated lock-free from
+    /// the reader task; read by the health monitor to compute real idle time.
+    pub(crate) last_activity_secs: Arc<AtomicU64>,
+}
+
+fn now_unix_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 // ── State ───────────────────────────────────────────────────────────────
@@ -1001,6 +1013,8 @@ pub async fn ssh_connect(
     let conn_id_reader = connection_id.clone();
     let app_reader = app_handle.clone();
     let connections_ref = state.connections.clone();
+    let last_activity_secs: Arc<AtomicU64> = Arc::new(AtomicU64::new(now_unix_secs()));
+    let last_activity_reader = last_activity_secs.clone();
     tokio::spawn(async move {
         let mut ch = channel;
         loop {
@@ -1008,6 +1022,7 @@ pub async fn ssh_connect(
                 msg = ch.wait() => {
                     match msg {
                         Some(ChannelMsg::Data { data }) => {
+                            last_activity_reader.store(now_unix_secs(), Ordering::Relaxed);
                             let text = String::from_utf8_lossy(&data).to_string();
                             // Buffer output if the frontend hasn't drained yet
                             let should_emit = {
@@ -1068,6 +1083,7 @@ pub async fn ssh_connect(
                             if ch.data(&data[..]).await.is_err() {
                                 break;
                             }
+                            last_activity_reader.store(now_unix_secs(), Ordering::Relaxed);
                         }
                         Some(SshCommand::Resize { cols, rows }) => {
                             let _ = ch.window_change(cols, rows, 0, 0).await;
@@ -1104,6 +1120,7 @@ pub async fn ssh_connect(
         remote_forwards,
         output_buffer,
         drained_cache: Arc::new(std::sync::Mutex::new(None)),
+        last_activity_secs,
     };
 
     {
@@ -1805,31 +1822,38 @@ pub enum SessionHealthStatus {
     Dropped,
 }
 
-/// Returns a `Vec<SessionHealth>` snapshot for all currently active connections.
-///
-/// Health is derived from `SshConnectionInfo::latency_ms` (as a rough proxy for
-/// last observed activity).  Because the SSH connection struct does not yet carry
-/// an explicit `last_activity` timestamp or `missed_keepalives` counter, we use
-/// `latency_ms` to illustrate the shape and return safe placeholder values for
-/// the fields that are not yet tracked.  Future work can replace these with real
-/// per-connection activity timestamps.
+/// Health thresholds shared by `ssh_get_connection_health` and the background
+/// monitor started by `ssh_start_health_monitor`, applied to real elapsed
+/// time since the last data seen in either direction on the connection.
+fn health_status_for_elapsed(elapsed_secs: u64) -> SessionHealthStatus {
+    if elapsed_secs > 60 {
+        SessionHealthStatus::Dropped
+    } else if elapsed_secs > 30 {
+        SessionHealthStatus::Degraded
+    } else {
+        SessionHealthStatus::Ok
+    }
+}
+
+/// Returns a `Vec<SessionHealth>` snapshot for all currently active connections,
+/// using each connection's real `last_activity_secs` (updated on every read or
+/// write on the channel) rather than a placeholder.
 #[tauri::command]
 pub async fn ssh_get_connection_health(
     state: tauri::State<'_, SshState>,
 ) -> Result<Vec<SessionHealth>, SshError> {
     let connections = state.connections.read().await;
     let mut results = Vec::new();
+    let now = now_unix_secs();
 
     for conn_arc in connections.values() {
         let conn = conn_arc.lock().await;
-        // Placeholder: no real last-activity tracking yet, so last_seen_secs = 0.
-        // The status and missed_keepalives fields will be meaningful once
-        // per-connection activity timestamps are added.
+        let elapsed_secs = now.saturating_sub(conn.last_activity_secs.load(Ordering::Relaxed));
         let health = SessionHealth {
             connection_id: conn.info.connection_id.clone(),
-            status: SessionHealthStatus::Ok,
+            status: health_status_for_elapsed(elapsed_secs),
             latency_ms: conn.info.latency_ms,
-            last_seen_secs: 0,
+            last_seen_secs: elapsed_secs,
             missed_keepalives: 0,
         };
         results.push(health);
@@ -1841,14 +1865,12 @@ pub async fn ssh_get_connection_health(
 /// Spawns a background task that emits `session_health` Tauri events every 15 seconds
 /// for all active SSH connections.
 ///
-/// Health thresholds (using `last_seen_secs` once activity tracking is in place):
+/// Health thresholds (based on real elapsed time since the connection's
+/// `last_activity_secs` was last updated by either a server read or a
+/// client write):
 /// - `Ok`       – last activity ≤ 30 s ago
 /// - `Degraded` – last activity > 30 s and ≤ 60 s ago
 /// - `Dropped`  – last activity > 60 s ago
-///
-/// For now, `last_seen_secs` is a placeholder (0) because per-connection activity
-/// timestamps are not yet stored on `SshConnection`.  The task still emits health
-/// events so the frontend wiring can be validated end-to-end.
 #[tauri::command]
 pub async fn ssh_start_health_monitor(
     app_handle: AppHandle,
@@ -1863,25 +1885,15 @@ pub async fn ssh_start_health_monitor(
             interval.tick().await;
 
             let connections = connections_ref.read().await;
+            let now = now_unix_secs();
             for conn_arc in connections.values() {
                 let conn = conn_arc.lock().await;
 
-                // Placeholder activity tracking: once SshConnection gains a
-                // `last_activity: Instant` field, replace `elapsed_secs` below
-                // with `conn.last_activity.elapsed().as_secs()`.
-                let elapsed_secs: u64 = 0;
-
-                let status = if elapsed_secs > 60 {
-                    SessionHealthStatus::Dropped
-                } else if elapsed_secs > 30 {
-                    SessionHealthStatus::Degraded
-                } else {
-                    SessionHealthStatus::Ok
-                };
+                let elapsed_secs = now.saturating_sub(conn.last_activity_secs.load(Ordering::Relaxed));
 
                 let health = SessionHealth {
                     connection_id: conn.info.connection_id.clone(),
-                    status,
+                    status: health_status_for_elapsed(elapsed_secs),
                     latency_ms: conn.info.latency_ms,
                     last_seen_secs: elapsed_secs,
                     missed_keepalives: 0,
@@ -2803,23 +2815,22 @@ mod tests {
 
     #[test]
     fn test_session_health_threshold_logic() {
-        // Mirror the threshold logic from ssh_start_health_monitor so it stays in sync.
-        let classify = |elapsed_secs: u64| -> SessionHealthStatus {
-            if elapsed_secs > 60 {
-                SessionHealthStatus::Dropped
-            } else if elapsed_secs > 30 {
-                SessionHealthStatus::Degraded
-            } else {
-                SessionHealthStatus::Ok
-            }
-        };
+        // Calls the real function shared by ssh_get_connection_health and
+        // ssh_start_health_monitor, not a re-declared mirror of it.
+        assert_eq!(health_status_for_elapsed(0), SessionHealthStatus::Ok);
+        assert_eq!(health_status_for_elapsed(30), SessionHealthStatus::Ok);
+        assert_eq!(health_status_for_elapsed(31), SessionHealthStatus::Degraded);
+        assert_eq!(health_status_for_elapsed(60), SessionHealthStatus::Degraded);
+        assert_eq!(health_status_for_elapsed(61), SessionHealthStatus::Dropped);
+        assert_eq!(health_status_for_elapsed(u64::MAX), SessionHealthStatus::Dropped);
+    }
 
-        assert_eq!(classify(0), SessionHealthStatus::Ok);
-        assert_eq!(classify(30), SessionHealthStatus::Ok);
-        assert_eq!(classify(31), SessionHealthStatus::Degraded);
-        assert_eq!(classify(60), SessionHealthStatus::Degraded);
-        assert_eq!(classify(61), SessionHealthStatus::Dropped);
-        assert_eq!(classify(u64::MAX), SessionHealthStatus::Dropped);
+    #[test]
+    fn test_now_unix_secs_is_recent_and_monotonic_nondecreasing() {
+        let a = now_unix_secs();
+        assert!(a > 1_700_000_000, "should be a real recent Unix timestamp, got {a}");
+        let b = now_unix_secs();
+        assert!(b >= a, "time should not go backwards: {a} then {b}");
     }
 
     // ── SshError variant coverage ────────────────────────────────────────
