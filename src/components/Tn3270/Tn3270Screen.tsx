@@ -51,16 +51,31 @@ export default function Tn3270Screen({ sessionId, config }: Tn3270ScreenProps) {
 
   useEffect(() => {
     let cancelled = false;
+    let unlistenScreen: (() => void) | null = null;
     setStatus("connecting");
     setError(null);
 
     invoke<string>("tn3270_connect", { config })
-      .then((id) => {
+      .then(async (id) => {
         if (cancelled) {
           invoke("tn3270_disconnect", { id }).catch(() => {});
           return;
         }
         connectionIdRef.current = id;
+        // Attach the listener before flipping to "connected" — doing it in a
+        // separate effect keyed on connectionId left a window (one render
+        // wide) where the grid was visible but tn3270:screen events would
+        // be silently dropped.
+        const unlisten = await listen<Tn3270ScreenData>("tn3270:screen", (event) => {
+          if (event.payload.session_id === id) {
+            setScreen(event.payload);
+          }
+        });
+        if (cancelled) {
+          unlisten();
+          return;
+        }
+        unlistenScreen = unlisten;
         setConnectionId(id);
         setStatus("connected");
       })
@@ -73,24 +88,13 @@ export default function Tn3270Screen({ sessionId, config }: Tn3270ScreenProps) {
 
     return () => {
       cancelled = true;
+      unlistenScreen?.();
       const id = connectionIdRef.current;
       if (id) invoke("tn3270_disconnect", { id }).catch(() => {});
       connectionIdRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, config]);
-
-  useEffect(() => {
-    if (!connectionId) return;
-    const unlisten = listen<Tn3270ScreenData>("tn3270:screen", (event) => {
-      if (event.payload.session_id === connectionId) {
-        setScreen(event.payload);
-      }
-    });
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, [connectionId]);
 
   const rows = useMemo(() => {
     if (!screen) return [];

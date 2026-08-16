@@ -12,7 +12,6 @@ interface DockerLogsViewerProps {
 const MAX_LINES = 2000;
 
 export default function DockerLogsViewer({ sessionId, config }: DockerLogsViewerProps) {
-  const [connectionId, setConnectionId] = useState<string | null>(null);
   const connectionIdRef = useRef<string | null>(null);
   const [status, setStatus] = useState<"connecting" | "connected" | "error">("connecting");
   const [error, setError] = useState<string | null>(null);
@@ -21,17 +20,33 @@ export default function DockerLogsViewer({ sessionId, config }: DockerLogsViewer
 
   useEffect(() => {
     let cancelled = false;
+    let unlistenLine: (() => void) | null = null;
     setStatus("connecting");
     setError(null);
 
     invoke<string>("docker_logs_connect", { config })
-      .then((id) => {
+      .then(async (id) => {
         if (cancelled) {
           invoke("docker_logs_disconnect", { id }).catch(() => {});
           return;
         }
         connectionIdRef.current = id;
-        setConnectionId(id);
+        // Attach the listener before flipping to "connected" — the backend
+        // starts streaming as soon as connect resolves, so a separate
+        // effect keyed on connectionId left a window where lines could
+        // arrive before anything was listening for them.
+        const unlisten = await listen<DockerLogLine>("docker_logs:line", (event) => {
+          if (event.payload.session_id !== id) return;
+          setLines((prev) => {
+            const next = [...prev, event.payload];
+            return next.length > MAX_LINES ? next.slice(next.length - MAX_LINES) : next;
+          });
+        });
+        if (cancelled) {
+          unlisten();
+          return;
+        }
+        unlistenLine = unlisten;
         setStatus("connected");
       })
       .catch((e) => {
@@ -43,26 +58,13 @@ export default function DockerLogsViewer({ sessionId, config }: DockerLogsViewer
 
     return () => {
       cancelled = true;
+      unlistenLine?.();
       const id = connectionIdRef.current;
       if (id) invoke("docker_logs_disconnect", { id }).catch(() => {});
       connectionIdRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, config]);
-
-  useEffect(() => {
-    if (!connectionId) return;
-    const unlisten = listen<DockerLogLine>("docker_logs:line", (event) => {
-      if (event.payload.session_id !== connectionId) return;
-      setLines((prev) => {
-        const next = [...prev, event.payload];
-        return next.length > MAX_LINES ? next.slice(next.length - MAX_LINES) : next;
-      });
-    });
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, [connectionId]);
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ block: "end" });

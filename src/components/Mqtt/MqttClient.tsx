@@ -38,16 +38,33 @@ export default function MqttClient({ sessionId, config }: MqttClientProps) {
 
   useEffect(() => {
     let cancelled = false;
+    let unlistenMessage: (() => void) | null = null;
     setStatus("connecting");
     setError(null);
 
     invoke<string>("mqtt_connect", { config })
-      .then((id) => {
+      .then(async (id) => {
         if (cancelled) {
           invoke("mqtt_disconnect", { id }).catch(() => {});
           return;
         }
         connectionIdRef.current = id;
+        // Attach the listener before flipping to "connected" — the broker
+        // can start delivering messages as soon as connect resolves, so a
+        // separate effect keyed on connectionId left a window where
+        // messages could arrive before anything was listening for them.
+        const unlisten = await listen<MqttMessage>("mqtt:message", (event) => {
+          if (event.payload.session_id !== id) return;
+          setMessages((prev) => {
+            const next = [...prev, event.payload];
+            return next.length > MAX_LOG ? next.slice(next.length - MAX_LOG) : next;
+          });
+        });
+        if (cancelled) {
+          unlisten();
+          return;
+        }
+        unlistenMessage = unlisten;
         setConnectionId(id);
         setStatus("connected");
       })
@@ -60,26 +77,13 @@ export default function MqttClient({ sessionId, config }: MqttClientProps) {
 
     return () => {
       cancelled = true;
+      unlistenMessage?.();
       const id = connectionIdRef.current;
       if (id) invoke("mqtt_disconnect", { id }).catch(() => {});
       connectionIdRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, config]);
-
-  useEffect(() => {
-    if (!connectionId) return;
-    const unlisten = listen<MqttMessage>("mqtt:message", (event) => {
-      if (event.payload.session_id !== connectionId) return;
-      setMessages((prev) => {
-        const next = [...prev, event.payload];
-        return next.length > MAX_LOG ? next.slice(next.length - MAX_LOG) : next;
-      });
-    });
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, [connectionId]);
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ block: "end" });
