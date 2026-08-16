@@ -11,10 +11,12 @@ import { ThemeVariant } from "@/types";
 // Mock Tauri plugin-dialog and plugin-fs used by SettingsPanel
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn(),
+  save: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/plugin-fs", () => ({
   readTextFile: vi.fn(),
+  writeTextFile: vi.fn(),
 }));
 
 function resetStore() {
@@ -147,6 +149,31 @@ describe("SettingsPanel", () => {
     await user.click(screen.getByRole("button", { name: /Language/ }));
     expect(screen.getByText("Interface language")).toBeInTheDocument();
     expect(screen.getByText("Enable RTL text support")).toBeInTheDocument();
+  });
+
+  // Regression coverage: the Export Audit Log button discarded the CSV
+  // string returned by the backend instead of ever saving it — clicking it
+  // produced zero visible result.
+  it("Advanced category's Export Audit Log button saves the real CSV to disk", async () => {
+    const user = userEvent.setup();
+    const { save } = await import("@tauri-apps/plugin-dialog");
+    const { writeTextFile } = await import("@tauri-apps/plugin-fs");
+    vi.mocked(save).mockResolvedValue("/tmp/crossterm-audit-log.csv");
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "audit_log_export_csv") return Promise.resolve("timestamp,event\n2026-01-01,VaultUnlock\n");
+      return Promise.resolve(undefined);
+    });
+    render(<ToastProvider><SettingsPanel /></ToastProvider>);
+
+    await user.click(screen.getByRole("button", { name: /Advanced/ }));
+    await user.click(screen.getByText("Export Audit Log"));
+
+    await vi.waitFor(() => {
+      expect(writeTextFile).toHaveBeenCalledWith(
+        "/tmp/crossterm-audit-log.csv",
+        "timestamp,event\n2026-01-01,VaultUnlock\n",
+      );
+    });
   });
 
   // Regression coverage: SsoConfigForm and SsoProviderList were fully built

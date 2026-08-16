@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
-import { readTextFile } from "@tauri-apps/plugin-fs";
+import { open, save } from "@tauri-apps/plugin-dialog";
+import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import clsx from "clsx";
 import {
   Settings,
@@ -45,6 +45,7 @@ import PluginManager from "@/components/Plugin/PluginManager";
 import PluginRegistry from "@/components/Plugin/PluginRegistry";
 import { SsoConfigForm, SsoProviderList } from "@/components/Vault/SsoButton";
 import type { OidcConfig } from "@/components/Vault/SsoButton";
+import { showToast } from "@/components/Shared/Toast";
 
 import darkTheme from "@/themes/dark.json";
 import lightTheme from "@/themes/light.json";
@@ -441,6 +442,22 @@ export default function SettingsPanel() {
       setDeletingSsoProvider(null);
     }
   }, [loadSsoConfigs]);
+
+  const handleExportAuditLog = useCallback(async () => {
+    try {
+      const csv = await invoke<string>("audit_log_export_csv");
+      const dest = await save({
+        title: "Export Audit Log",
+        defaultPath: "crossterm-audit-log.csv",
+        filters: [{ name: "CSV", extensions: ["csv"] }],
+      });
+      if (!dest) return;
+      await writeTextFile(dest, csv);
+      showToast("success", "Audit log exported.");
+    } catch (err) {
+      showToast("error", `Failed to export audit log: ${String(err)}`);
+    }
+  }, []);
 
   // Experimental feature flags (used in renderExperimental)
   const featureFlags = useFeatureFlagsStore();
@@ -1090,7 +1107,7 @@ export default function SettingsPanel() {
         </div>
         <div className="mt-3">
           <button
-            onClick={() => { void invoke("audit_log_export_csv").catch(() => {}); }}
+            onClick={() => { void handleExportAuditLog(); }}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-border-default hover:bg-surface-secondary text-text-secondary transition-colors"
           >
             <RefreshCw size={12} /> Export Audit Log
