@@ -295,7 +295,15 @@ jobs:
 
       - name: Run integration tests
         working-directory: src-tauri
-        run: cargo test --features integration -- --ignored --test-threads=1
+        # debug_live_tailscale_peers and dump_full_scan_debug are manual,
+        # local-only debugging tools (the former asserts against a real
+        # Tailscale mesh's actual peers; the latter scans a real subnet and
+        # dumps results to disk for inspection) that happen to share the
+        # #[ignore] marker with the genuine container-backed integration
+        # tests this job runs — excluded by name rather than by a marker
+        # change, since both are meant to keep being run manually (see the
+        # doc comment on each for the exact invocation).
+        run: cargo test --features integration -- --ignored --test-threads=1 --skip debug_live_tailscale_peers --skip dump_full_scan_debug
 
       - name: Tear down containers
         if: always()
