@@ -9,12 +9,14 @@ import { listen } from "@tauri-apps/api/event";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { ConnectionStatus } from "@/types";
 import ReconnectOverlay from "@/components/Shared/ReconnectOverlay";
+import SessionHealthCard from "@/components/Terminal/SessionHealthCard";
 import { getTerminalTheme, useHotTerminalTheme } from "@/utils/terminalTheme";
 import "@xterm/xterm/css/xterm.css";
 
 interface SshTerminalViewProps {
   readonly connectionId: string;
   readonly isActive: boolean;
+  readonly sessionName?: string;
 }
 
 // Shape of the session_health Tauri event payload
@@ -25,7 +27,7 @@ interface SessionHealth {
   lastSeenSecs: number;
 }
 
-export default function SshTerminalView({ connectionId, isActive }: SshTerminalViewProps) {
+export default function SshTerminalView({ connectionId, isActive, sessionName }: SshTerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -224,6 +226,17 @@ export default function SshTerminalView({ connectionId, isActive }: SshTerminalV
           updateTerminalStatus(connectionId, ConnectionStatus.Disconnected);
         }}
       />
+      {healthStatus !== "dropped" && (
+        <div className="absolute bottom-3 left-3 z-10">
+          <SessionHealthCard
+            sessionId={connectionId}
+            sessionName={sessionName ?? connectionId}
+            status={healthStatus}
+            latencyMs={healthLatency ?? undefined}
+            reconnectCount={reconnectAttempt}
+          />
+        </div>
+      )}
     </div>
   );
 }

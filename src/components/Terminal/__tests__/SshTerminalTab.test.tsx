@@ -427,4 +427,33 @@ describe("SshTerminalTab", () => {
       expect(screen.queryByText("Start Recording")).not.toBeInTheDocument();
     });
   });
+
+  // Regression coverage: CommandAssistant was fully built and tested but had
+  // no mount point in the running terminal — there was no way to open it or
+  // to insert its suggested command into the session.
+  describe("AI command assistant (CommandAssistant)", () => {
+    it("opens the assistant and inserts a suggested command via ssh_write", async () => {
+      mockInvoke.mockImplementation((cmd: string) => {
+        if (cmd === "ssh_connect") return Promise.resolve("conn-1");
+        if (cmd === "ai_check_available") return Promise.resolve(true);
+        if (cmd === "ai_suggest_command") {
+          return Promise.resolve([
+            { command: "ls -la", explanation: "List all files", risk_level: "safe" },
+          ]);
+        }
+        return Promise.resolve(undefined);
+      });
+      render(<SshTerminalTab {...baseProps} />);
+      await waitFor(() => expect(screen.getByTestId("ssh-terminal-view")).toBeInTheDocument());
+
+      fireEvent.click(screen.getByText("AI Assistant"));
+      const input = await screen.findByPlaceholderText(/Ask AI/);
+      fireEvent.change(input, { target: { value: "find large files" } });
+      fireEvent.click(screen.getByText("Suggest"));
+
+      fireEvent.click(await screen.findByText("Insert"));
+
+      expect(mockInvoke).toHaveBeenCalledWith("ssh_write", { connectionId: "conn-1", data: "ls -la" });
+    });
+  });
 });

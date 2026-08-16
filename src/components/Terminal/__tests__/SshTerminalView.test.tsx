@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, act } from "@testing-library/react";
+import { render, act, screen } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useTerminalStore } from "@/stores/terminalStore";
@@ -153,6 +153,26 @@ describe("SshTerminalView", () => {
       });
     });
     expect(container.textContent).not.toContain("Connection lost");
+  });
+
+  // Regression coverage: SessionHealthCard was fully built and tested but
+  // never rendered — health/latency data was tracked internally only to
+  // drive the (rare) dropped-connection overlay, with no always-visible
+  // status indicator for the common ok/degraded cases.
+  it("renders the SessionHealthCard status badge with live latency", async () => {
+    render(<SshTerminalView connectionId="conn-1" isActive sessionName="alice@example.com" />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("alice@example.com")).toBeInTheDocument();
+
+    act(() => {
+      listenCallbacks.get("session_health")?.({
+        payload: { sessionId: "conn-1", status: "degraded", latencyMs: 250, lastSeenSecs: 5 },
+      });
+    });
+    expect(screen.getByText("250ms")).toBeInTheDocument();
   });
 
   it("reconnect handler calls ssh_connect and increments the attempt count", async () => {

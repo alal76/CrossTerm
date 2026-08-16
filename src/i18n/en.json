@@ -297,7 +297,8 @@
     "retry": "Retry",
     "clearTerminal": "Clear Terminal",
     "search": "Search",
-    "processExited": "Process exited with code {{code}}"
+    "processExited": "Process exited with code {{code}}",
+    "aiAssistant": "AI Assistant"
   },
   "settings": {
     "title": "Settings",
@@ -869,7 +870,8 @@
     "exportMp4": "Export as MP4",
     "noRecordings": "No recordings yet. Start recording a terminal session to see it here.",
     "library": "Recordings",
-    "selectToPlay": "Select a recording to play it back."
+    "selectToPlay": "Select a recording to play it back.",
+    "jumpToTimestamp": "Jump to timestamp"
   },
   "cloud": {
     "dashboard": "Cloud Dashboard",

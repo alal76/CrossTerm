@@ -57,7 +57,7 @@ describe("RecordingPlayer", () => {
   it("appends streamed frame data to the output", async () => {
     mockInvoke.mockResolvedValue(playbackState());
     render(<RecordingPlayer recording={recording} />);
-    fireEvent.click(screen.getAllByRole("button")[0]);
+    fireEvent.click(screen.getByRole("button", { name: "" }));
     await waitFor(() => expect(mockInvoke).toHaveBeenCalled());
 
     handlers["recording:playback_frame"]({
@@ -94,6 +94,38 @@ describe("RecordingPlayer", () => {
 
     await waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith("recording_playback_seek", { recordingId: "rec-1", position: 5 });
+    });
+  });
+
+  // Regression coverage: TimestampJumper was fully built and tested but had
+  // no mount point — there was no way to jump to a wall-clock time within a
+  // recording's playback.
+  it("jumps to a wall-clock timestamp via the built-in TimestampJumper", async () => {
+    mockInvoke.mockResolvedValue(playbackState({ position: 10 }));
+    render(<RecordingPlayer recording={recording} />);
+
+    const targetStr = "2026-01-01T00:00:10";
+    fireEvent.click(screen.getByTitle("Jump to timestamp"));
+    const input = document.getElementById("timestamp-jumper-input") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: targetStr } });
+    fireEvent.click(screen.getByRole("button", { name: /^jump$/i }));
+
+    // The component converts the local datetime-local value into a
+    // recording-relative position using recording.created_at as the anchor —
+    // compute the expected value the same way so this isn't timezone-flaky.
+    const expectedPosition = Math.max(
+      0,
+      Math.min(
+        recording.duration_secs,
+        new Date(targetStr).getTime() / 1000 - new Date(recording.created_at).getTime() / 1000,
+      ),
+    );
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("recording_playback_seek", {
+        recordingId: "rec-1",
+        position: expectedPosition,
+      });
     });
   });
 

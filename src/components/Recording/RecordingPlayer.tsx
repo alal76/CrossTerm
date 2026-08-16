@@ -3,7 +3,8 @@ import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { clsx } from 'clsx';
-import { Play, Pause, Download } from 'lucide-react';
+import { Play, Pause, Download, Clock } from 'lucide-react';
+import TimestampJumper from '@/components/Terminal/TimestampJumper';
 import type { RecordingInfo, PlaybackState } from '@/types';
 
 interface RecordingPlayerProps {
@@ -18,6 +19,7 @@ export default function RecordingPlayer({
   const { t } = useTranslation();
   const [playback, setPlayback] = useState<PlaybackState | null>(null);
   const [output, setOutput] = useState('');
+  const [showJumper, setShowJumper] = useState(false);
   const outputRef = useRef<HTMLPreElement>(null);
 
   useEffect(() => {
@@ -114,20 +116,42 @@ export default function RecordingPlayer({
     [recording.id]
   );
 
+  const handleJumpToTimestamp = useCallback(
+    (target: Date) => {
+      const anchorSecs = new Date(recording.created_at).getTime() / 1000;
+      const position = Math.max(0, Math.min(recording.duration_secs, target.getTime() / 1000 - anchorSecs));
+      void handleSeek(position);
+      setShowJumper(false);
+    },
+    [recording.created_at, recording.duration_secs, handleSeek],
+  );
+
   const currentPosition = playback?.position ?? 0;
   const isPlaying = playback?.playing ?? false;
   const currentSpeed = playback?.speed ?? 1;
 
   return (
-    <div className="flex flex-col gap-3 rounded-md border border-border-default bg-surface-primary p-4">
+    <div className="relative flex flex-col gap-3 rounded-md border border-border-default bg-surface-primary p-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-text-primary">
           {recording.title ?? recording.id}
         </h3>
-        <span className="text-xs text-text-secondary">
-          {recording.width}×{recording.height}
-        </span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowJumper((v) => !v)}
+            title={t('recording.jumpToTimestamp')}
+            className="rounded p-1 text-text-secondary hover:bg-surface-elevated hover:text-text-primary"
+          >
+            <Clock size={13} />
+          </button>
+          <span className="text-xs text-text-secondary">
+            {recording.width}×{recording.height}
+          </span>
+        </div>
       </div>
+      {showJumper && (
+        <TimestampJumper onJump={handleJumpToTimestamp} onClose={() => setShowJumper(false)} />
+      )}
 
       <pre
         ref={outputRef}

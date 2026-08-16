@@ -10,13 +10,14 @@ import {
   type SshBannerEvent,
   type SshAuthSuccessEvent,
 } from "@/types";
-import { Loader2, KeyRound, Save, Terminal, AlertTriangle } from "lucide-react";
+import { Loader2, KeyRound, Save, Terminal, AlertTriangle, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import clsx from "clsx";
 import SshTerminalView from "./SshTerminalView";
 import ReconnectOverlay from "./ReconnectOverlay";
 import ComplianceBanner from "@/components/Shared/ComplianceBanner";
 import RecordingControls from "@/components/Recording/RecordingControls";
+import CommandAssistant from "./CommandAssistant";
 
 interface SshAuthPayload {
   type: "password" | "private_key" | "none";
@@ -139,6 +140,15 @@ export default function SshTerminalTab({
   const handleManualRecordingIdChange = useCallback((id: string | null) => {
     recordingIdRef.current = id;
   }, []);
+
+  // ── AI command assistant ──
+  const [showAssistant, setShowAssistant] = useState(false);
+  const handleInsertCommand = useCallback(
+    (command: string) => {
+      invoke("ssh_write", { connectionId, data: command }).catch(() => {});
+    },
+    [connectionId],
+  );
 
   // ── Listen for auth prompts from backend ──
   useEffect(() => {
@@ -736,7 +746,7 @@ export default function SshTerminalTab({
         allowUserDisable={recordingAllowDisable}
         onDisableRecording={stopRecording}
       />
-      <SshTerminalView connectionId={connectionId} isActive={isActive} />
+      <SshTerminalView connectionId={connectionId} isActive={isActive} sessionName={`${username}@${host}`} />
       {!recordingActive && (
         <div className="absolute bottom-3 right-3 z-20 bg-surface-elevated border border-border-default rounded-lg shadow-lg px-2 py-1">
           <RecordingControls
@@ -744,6 +754,25 @@ export default function SshTerminalTab({
             width={80}
             height={24}
             onRecordingIdChange={handleManualRecordingIdChange}
+          />
+        </div>
+      )}
+      {!showAssistant && (
+        <button
+          onClick={() => setShowAssistant(true)}
+          title={t("terminal.aiAssistant")}
+          className="absolute top-10 left-3 z-20 flex items-center gap-1 rounded-lg bg-surface-elevated border border-border-default shadow-lg px-2 py-1 text-xs text-text-secondary hover:text-text-primary transition-colors"
+        >
+          <Sparkles size={12} className="text-blue-400" />
+          {t("terminal.aiAssistant")}
+        </button>
+      )}
+      {showAssistant && (
+        <div className="absolute bottom-0 inset-x-0 z-20">
+          <CommandAssistant
+            sessionId={sessionId}
+            onInsertCommand={handleInsertCommand}
+            onClose={() => setShowAssistant(false)}
           />
         </div>
       )}
