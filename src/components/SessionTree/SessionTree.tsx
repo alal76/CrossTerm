@@ -30,6 +30,7 @@ import { useTranslation } from "react-i18next";
 import { useSessionStore } from "@/stores/sessionStore";
 import { SessionType, ConnectionStatus } from "@/types";
 import type { Session, SmartGroup, FilterExpr } from "@/types";
+import SmartGroupBuilder from "@/components/SessionTree/SmartGroupBuilder";
 
 // ── Helpers ──
 
@@ -417,8 +418,6 @@ function SmartGroupsSection({
 }) {
   const [collapsed, setCollapsed] = useState(true);
 
-  if (groups.length === 0) return null;
-
   return (
     <div className="mb-2">
       {/* Section header */}
@@ -453,6 +452,9 @@ function SmartGroupsSection({
       </div>
 
       {/* Group rows */}
+      {!collapsed && groups.length === 0 && (
+        <p className="px-3 py-1 text-[11px] text-text-disabled">No smart groups yet.</p>
+      )}
       {!collapsed && (
         <div className="space-y-0.5 px-1">
           {groups.map((group) => {
@@ -610,6 +612,9 @@ export default function SessionTree({
   const storeSetActiveSmartGroup = useSessionStore(
     (s) => (s as unknown as { setActiveSmartGroup?: (id: string | null) => void }).setActiveSmartGroup
   );
+  const storeCreateSmartGroup = useSessionStore(
+    (s) => (s as unknown as { createSmartGroup?: (name: string, filter: FilterExpr) => SmartGroup }).createSmartGroup
+  );
 
   // Local fallback selection state (used when store doesn't have Phase 2 yet)
   const [localSelectedIds, setLocalSelectedIds] = useState<string[]>([]);
@@ -733,11 +738,19 @@ export default function SessionTree({
     }
   }, [storeSetActiveSmartGroup]);
 
+  const [showSmartGroupBuilder, setShowSmartGroupBuilder] = useState(false);
+
   const handleAddSmartGroup = useCallback(() => {
-    // Smart group builder deferred — show a minimal toast-like browser alert
-    // until the builder UI is shipped in a later phase.
-    globalThis.alert("Smart group builder coming soon");
+    setShowSmartGroupBuilder(true);
   }, []);
+
+  const handleCreateSmartGroup = useCallback(
+    (name: string, filter: FilterExpr) => {
+      storeCreateSmartGroup?.(name, filter);
+      setShowSmartGroupBuilder(false);
+    },
+    [storeCreateSmartGroup]
+  );
 
   // ── Session click handler (multi-select aware) ──
 
@@ -1110,16 +1123,16 @@ export default function SessionTree({
       )}
 
       <div className="flex-1 overflow-y-auto px-1 pb-2 min-h-0">
-        {/* Smart Groups section — above the main list */}
-        {storeSmartGroups.length > 0 && (
-          <SmartGroupsSection
-            groups={storeSmartGroups}
-            activeGroupId={activeSmartGroupId}
-            onSelectGroup={handleSelectSmartGroup}
-            onClearGroup={handleClearSmartGroup}
-            onAddGroup={handleAddSmartGroup}
-          />
-        )}
+        {/* Smart Groups section — above the main list. Always rendered (not
+            gated on groups.length) so there's a way to create the first
+            group, not just manage existing ones. */}
+        <SmartGroupsSection
+          groups={storeSmartGroups}
+          activeGroupId={activeSmartGroupId}
+          onSelectGroup={handleSelectSmartGroup}
+          onClearGroup={handleClearSmartGroup}
+          onAddGroup={handleAddSmartGroup}
+        />
 
         {/* Recently Connected */}
         {recentlyConnected.length > 0 && !searchQuery && !activeSmartGroup && (
@@ -1281,6 +1294,13 @@ export default function SessionTree({
           y={contextMenu.y}
           items={contextMenuItems}
           onClose={() => setContextMenu(null)}
+        />
+      )}
+
+      {showSmartGroupBuilder && (
+        <SmartGroupBuilder
+          onClose={() => setShowSmartGroupBuilder(false)}
+          onCreate={handleCreateSmartGroup}
         />
       )}
     </div>

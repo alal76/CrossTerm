@@ -338,4 +338,70 @@ describe("SessionTree", () => {
     await userEvent.click(screen.getByText("Import"));
     expect(onImport).toHaveBeenCalled();
   });
+
+  // Regression coverage: handleAddSmartGroup used to call
+  // globalThis.alert("Smart group builder coming soon") instead of actually
+  // creating anything, even though the store's createSmartGroup/
+  // evaluateFilterExpr/SmartGroupsSection display were all already fully
+  // built and wired — the entire feature was dead behind one stub click
+  // handler. The "+ New smart group" trigger was also only reachable once a
+  // group already existed (SmartGroupsSection returned null when empty),
+  // so there was no way to create the first one at all.
+  describe("smart groups", () => {
+    beforeEach(() => {
+      useSessionStore.setState({ smartGroups: [], activeSmartGroupId: null });
+    });
+
+    it("shows the New smart group trigger even with zero groups", () => {
+      useSessionStore.setState({ sessions: [makeSession({ id: "s1" })] });
+      render(<SessionTree />);
+      expect(screen.getByTitle("New smart group")).toBeInTheDocument();
+    });
+
+    it("creating a smart group filters the session list by its condition", async () => {
+      useSessionStore.setState({
+        sessions: [
+          makeSession({ id: "s1", name: "Prod SSH", group: "" }),
+          makeSession({ id: "s2", name: "Other Box", group: "" }),
+        ],
+      });
+      render(<SessionTree />);
+
+      fireEvent.click(screen.getByTitle("New smart group"));
+      expect(screen.getByText("New Smart Group")).toBeInTheDocument();
+
+      fireEvent.change(screen.getByPlaceholderText("e.g. Production SSH"), {
+        target: { value: "Prod only" },
+      });
+      fireEvent.change(screen.getByPlaceholderText("value…"), { target: { value: "Prod" } });
+      fireEvent.click(screen.getByText("Create"));
+
+      expect(useSessionStore.getState().smartGroups).toHaveLength(1);
+      expect(useSessionStore.getState().smartGroups[0].name).toBe("Prod only");
+
+      // The section starts collapsed — expand it to reach the new group row.
+      fireEvent.click(screen.getByText("Smart Groups"));
+      fireEvent.click(screen.getByText("Prod only"));
+      expect(screen.getByText("Prod SSH")).toBeInTheDocument();
+      expect(screen.queryByText("Other Box")).not.toBeInTheDocument();
+    });
+
+    it("shows a validation error when creating without a name", () => {
+      useSessionStore.setState({ sessions: [makeSession({ id: "s1" })] });
+      render(<SessionTree />);
+      fireEvent.click(screen.getByTitle("New smart group"));
+      fireEvent.click(screen.getByText("Create"));
+      expect(screen.getByText("Name is required.")).toBeInTheDocument();
+      expect(useSessionStore.getState().smartGroups).toHaveLength(0);
+    });
+
+    it("Cancel closes the builder without creating a group", () => {
+      useSessionStore.setState({ sessions: [makeSession({ id: "s1" })] });
+      render(<SessionTree />);
+      fireEvent.click(screen.getByTitle("New smart group"));
+      fireEvent.click(screen.getByText("Cancel"));
+      expect(screen.queryByText("New Smart Group")).not.toBeInTheDocument();
+      expect(useSessionStore.getState().smartGroups).toHaveLength(0);
+    });
+  });
 });
