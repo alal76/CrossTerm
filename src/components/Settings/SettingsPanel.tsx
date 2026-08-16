@@ -43,6 +43,8 @@ import LocaleSelector from "@/components/Settings/LocaleSelector";
 import LocaleInstaller from "@/components/Settings/LocaleInstaller";
 import PluginManager from "@/components/Plugin/PluginManager";
 import PluginRegistry from "@/components/Plugin/PluginRegistry";
+import { SsoConfigForm, SsoProviderList } from "@/components/Vault/SsoButton";
+import type { OidcConfig } from "@/components/Vault/SsoButton";
 
 import darkTheme from "@/themes/dark.json";
 import lightTheme from "@/themes/light.json";
@@ -411,6 +413,34 @@ export default function SettingsPanel() {
   }, []);
   const [showLocaleInstaller, setShowLocaleInstaller] = useState(false);
   const [pluginView, setPluginView] = useState<"installed" | "discover">("installed");
+
+  // OIDC SSO provider configuration (Security category)
+  const [ssoConfigs, setSsoConfigs] = useState<OidcConfig[]>([]);
+  const [showSsoForm, setShowSsoForm] = useState(false);
+  const [deletingSsoProvider, setDeletingSsoProvider] = useState<string | null>(null);
+
+  const loadSsoConfigs = useCallback(async () => {
+    try {
+      const configs = await invoke<OidcConfig[]>("auth_list_oidc_configs");
+      setSsoConfigs(Array.isArray(configs) ? configs : []);
+    } catch {
+      // ignore — Security category will just show an empty list
+    }
+  }, []);
+
+  useEffect(() => {
+    loadSsoConfigs();
+  }, [loadSsoConfigs]);
+
+  const handleSsoDelete = useCallback(async (providerName: string) => {
+    setDeletingSsoProvider(providerName);
+    try {
+      await invoke("auth_delete_oidc_config", { providerName });
+      await loadSsoConfigs();
+    } finally {
+      setDeletingSsoProvider(null);
+    }
+  }, [loadSsoConfigs]);
 
   // Experimental feature flags (used in renderExperimental)
   const featureFlags = useFeatureFlagsStore();
@@ -889,6 +919,33 @@ export default function SettingsPanel() {
         <SectionHeading>Advanced Security</SectionHeading>
         <div className="py-2">
           <SecuritySettings />
+        </div>
+
+        <SectionHeading>Single Sign-On</SectionHeading>
+        <div className="py-2">
+          {showSsoForm ? (
+            <div>
+              <button
+                onClick={() => setShowSsoForm(false)}
+                className="mb-3 text-xs text-text-secondary hover:text-text-primary transition-colors"
+              >
+                {t("actions.cancel")}
+              </button>
+              <SsoConfigForm
+                onSaved={() => {
+                  setShowSsoForm(false);
+                  loadSsoConfigs();
+                }}
+              />
+            </div>
+          ) : (
+            <SsoProviderList
+              configs={ssoConfigs}
+              deleting={deletingSsoProvider}
+              onDelete={handleSsoDelete}
+              onAdd={() => setShowSsoForm(true)}
+            />
+          )}
         </div>
       </div>
     );

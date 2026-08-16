@@ -149,6 +149,44 @@ describe("SettingsPanel", () => {
     expect(screen.getByText("Enable RTL text support")).toBeInTheDocument();
   });
 
+  // Regression coverage: SsoConfigForm and SsoProviderList were fully built
+  // and tested but never mounted anywhere in Settings, so there was no way
+  // to configure an OIDC SSO provider at all.
+  it("Security category lists, adds, and deletes OIDC SSO providers", async () => {
+    const user = userEvent.setup();
+    let configs: Array<{ provider_name: string; client_id: string }> = [];
+    vi.mocked(invoke).mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "auth_list_oidc_configs") return Promise.resolve(configs);
+      if (cmd === "auth_save_oidc_config") {
+        const { config } = args as { config: { provider_name: string; client_id: string } };
+        configs = [...configs, config];
+        return Promise.resolve(undefined);
+      }
+      if (cmd === "auth_delete_oidc_config") {
+        const { providerName } = args as { providerName: string };
+        configs = configs.filter((c) => c.provider_name !== providerName);
+        return Promise.resolve(undefined);
+      }
+      return Promise.resolve(undefined);
+    });
+    render(<ToastProvider><SettingsPanel /></ToastProvider>);
+
+    await user.click(screen.getByRole("button", { name: /Security/ }));
+    expect(await screen.findByText("No OIDC providers configured.")).toBeInTheDocument();
+
+    await user.click(screen.getByText("Add provider"));
+    await user.type(screen.getByPlaceholderText("e.g. Okta"), "Okta");
+    await user.type(screen.getByPlaceholderText("0oa1b2c3d4e5f6g7h8i9"), "client-1");
+    await user.type(screen.getByPlaceholderText("https://your-idp.example.com/oauth2/authorize"), "https://idp.example.com/authorize");
+    await user.type(screen.getByPlaceholderText("https://your-idp.example.com/oauth2/token"), "https://idp.example.com/token");
+    await user.click(screen.getByText("Save provider"));
+
+    expect(await screen.findByText("Okta")).toBeInTheDocument();
+
+    await user.click(screen.getByTitle("Remove Okta"));
+    await screen.findByText("No OIDC providers configured.");
+  });
+
   // Regression coverage: PluginManager and PluginRegistry were fully built
   // and tested but never mounted anywhere — the whole plugin system was
   // unreachable from Settings.
