@@ -50,6 +50,8 @@ import { useSessionStore } from '@/stores/sessionStore';
 import { useToast } from '@/components/Shared/Toast';
 import WifiScanner from '@/components/NetworkTools/WifiScanner';
 import AircrackPanel from '@/components/NetworkTools/AircrackPanel';
+import NetworkScanner from '@/components/NetworkTools/NetworkScanner';
+import WakeOnLan from '@/components/NetworkTools/WakeOnLan';
 
 interface ConnectionAttempt {
   id: string;
@@ -300,7 +302,7 @@ export default function NetworkExplorer() {
   const { t } = useTranslation();
   const { addSession, openTab } = useSessionStore();
   const { toast } = useToast();
-  const [toolTab, setToolTab] = useState<'explore' | 'wifi' | 'aircrack'>('explore');
+  const [toolTab, setToolTab] = useState<'explore' | 'wifi' | 'aircrack' | 'scan' | 'wol'>('explore');
   const [cidr, setCidr] = useState('');
   const [scanning, setScanning] = useState(false);
   const [results, setResults] = useState<ExploreResult[]>([]);
@@ -873,12 +875,42 @@ export default function NetworkExplorer() {
           <ShieldAlert size={14} />
           {t('network.aircrackTab')}
         </button>
+        <button
+          onClick={() => setToolTab('scan')}
+          className={clsx(
+            'flex items-center gap-1.5 border-b-2 px-3 py-1.5 text-xs font-medium transition-colors',
+            toolTab === 'scan'
+              ? 'border-interactive-default text-text-primary'
+              : 'border-transparent text-text-secondary hover:text-text-primary'
+          )}
+        >
+          <Search size={14} />
+          Quick Scan
+        </button>
+        <button
+          onClick={() => setToolTab('wol')}
+          className={clsx(
+            'flex items-center gap-1.5 border-b-2 px-3 py-1.5 text-xs font-medium transition-colors',
+            toolTab === 'wol'
+              ? 'border-interactive-default text-text-primary'
+              : 'border-transparent text-text-secondary hover:text-text-primary'
+          )}
+        >
+          <Radio size={14} />
+          Wake on LAN
+        </button>
       </div>
 
       {toolTab === 'wifi' ? (
         <WifiScanner />
       ) : toolTab === 'aircrack' ? (
         <AircrackPanel />
+      ) : toolTab === 'scan' ? (
+        <NetworkScanner />
+      ) : toolTab === 'wol' ? (
+        <div className="flex-1 overflow-y-auto p-4">
+          <WakeOnLan />
+        </div>
       ) : (
         <div className="flex flex-col gap-3 p-3 flex-1 overflow-y-auto">
           {/* Header */}

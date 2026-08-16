@@ -130,6 +130,19 @@ describe('NetworkExplorer', () => {
     ).toBeInTheDocument();
   });
 
+  // Regression coverage: NetworkScanner.tsx and WakeOnLan.tsx were fully
+  // built and tested but had no tab to render under in NetworkExplorer.
+  it('Quick Scan and Wake on LAN tabs render the real NetworkScanner and WakeOnLan components', () => {
+    renderWithToast(<NetworkExplorer />);
+
+    fireEvent.click(screen.getByText('Quick Scan'));
+    expect(screen.getByText('Network Scanner')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Wake on LAN'));
+    expect(screen.getByText('Wake-on-LAN')).toBeInTheDocument();
+    expect(screen.getByText('MAC Address')).toBeInTheDocument();
+  });
+
   it('accepts extra ports input', () => {
     renderWithToast(<NetworkExplorer />);
     fireEvent.click(screen.getByText('Service Filters'));
