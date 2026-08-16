@@ -31,6 +31,7 @@ import {
   GitCompare,
   FileCode,
   Film,
+  Server,
   KeyRound,
   Bell,
   ExternalLink,
@@ -93,6 +94,7 @@ import CloudDashboard from "@/components/Cloud/CloudDashboard";
 import CodeEditor from "@/components/Editor/CodeEditor";
 import MacrosPanel from "@/components/Macros/MacrosPanel";
 import RecordingsPanel from "@/components/Recording/RecordingsPanel";
+import FtpBrowser from "@/components/Ftp/FtpBrowser";
 import DiffViewer from "@/components/Editor/DiffViewer";
 import RemoteFileBrowser from "@/components/RemoteFiles/RemoteFileBrowser";
 import VaultUnlock from "@/components/Vault/VaultUnlock";
@@ -566,6 +568,7 @@ function NewTabDropdown({
   onOpenDiffViewer,
   onOpenMacros,
   onOpenRecordings,
+  onOpenFtp,
   onOpenCredentials,
   onLockVault,
   onDeleteVault,
@@ -584,6 +587,7 @@ function NewTabDropdown({
   readonly onOpenDiffViewer: () => void;
   readonly onOpenMacros: () => void;
   readonly onOpenRecordings: () => void;
+  readonly onOpenFtp: () => void;
   readonly onOpenCredentials: () => void;
   readonly onLockVault: () => void;
   readonly onDeleteVault: () => void;
@@ -675,6 +679,10 @@ function NewTabDropdown({
         <Film size={13} className="shrink-0 text-text-disabled" />
         {t("recording.library")}
       </button>
+      <button onClick={() => { onOpenFtp(); onClose(); }} className={menuItemCls}>
+        <Server size={13} className="shrink-0 text-text-disabled" />
+        FTP
+      </button>
       <div className="h-px bg-border-subtle mx-2 my-1" />
       <div className="px-3 pt-1 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-text-disabled">
         Vault
@@ -714,6 +722,7 @@ function TabBar({
   onOpenDiffViewer,
   onOpenMacros,
   onOpenRecordings,
+  onOpenFtp,
   onOpenCredentials,
   onLockVault,
   onDeleteVault,
@@ -730,6 +739,7 @@ function TabBar({
   readonly onOpenDiffViewer: () => void;
   readonly onOpenMacros: () => void;
   readonly onOpenRecordings: () => void;
+  readonly onOpenFtp: () => void;
   readonly onOpenCredentials: () => void;
   readonly onLockVault: () => void;
   readonly onDeleteVault: () => void;
@@ -890,6 +900,7 @@ function TabBar({
             onOpenDiffViewer={onOpenDiffViewer}
             onOpenMacros={onOpenMacros}
             onOpenRecordings={onOpenRecordings}
+            onOpenFtp={onOpenFtp}
             onOpenCredentials={onOpenCredentials}
             onLockVault={onLockVault}
             onDeleteVault={onDeleteVault}
@@ -1226,6 +1237,17 @@ function SessionCanvas() {
               className={clsx("absolute inset-0 overflow-hidden", isActive ? "z-10" : "z-0 hidden")}
             >
               <RecordingsPanel />
+            </div>
+          );
+        }
+
+        if (tab.sessionType === SessionType.Ftp) {
+          return (
+            <div
+              key={tab.id}
+              className={clsx("absolute inset-0 overflow-hidden", isActive ? "z-10" : "z-0 hidden")}
+            >
+              <FtpBrowser />
             </div>
           );
         }
@@ -2007,6 +2029,24 @@ export default function App() {
     openTab(session);
   }, [addSession, openTab]);
 
+  const handleOpenFtpTab = useCallback(() => {
+    const now = new Date().toISOString();
+    const session: Session = {
+      id: crypto.randomUUID(),
+      name: "FTP",
+      type: SessionType.Ftp,
+      group: "",
+      tags: [],
+      connection: { host: "localhost", port: 0 },
+      createdAt: now,
+      updatedAt: now,
+      autoReconnect: false,
+      keepAliveIntervalSeconds: 0,
+    };
+    addSession(session);
+    openTab(session);
+  }, [addSession, openTab]);
+
   // Native menu callbacks are stored in a ref that is overwritten every render.
   // This pattern avoids the "stale closure" problem: buildNativeMenu runs once
   // (empty dep array) and captures `cb` (the ref object), but every action
@@ -2220,6 +2260,7 @@ export default function App() {
                 onOpenDiffViewer={handleOpenDiffViewerTab}
                 onOpenMacros={handleOpenMacrosTab}
                 onOpenRecordings={handleOpenRecordingsTab}
+                onOpenFtp={handleOpenFtpTab}
                 onOpenCredentials={() => setShowCredentialManager(true)}
                 onLockVault={() => lockAllVaults()}
                 onDeleteVault={() => setShowVaultDeleteDialog(true)}

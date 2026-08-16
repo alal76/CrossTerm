@@ -71,4 +71,19 @@ describe("HelpPanel", () => {
       screen.getByText("Getting Started with CrossTerm", { exact: false })
     ).toBeInTheDocument();
   });
+
+  // Regression coverage: PluginCookbook was fully built and tested but
+  // never mounted anywhere, including the Help panel it was designed for
+  // (it even links back to "the Plugin API Guide in the help section").
+  it("selecting the Plugin Cookbook article renders the real PluginCookbook component", async () => {
+    const user = userEvent.setup();
+    render(<HelpPanel open={true} onClose={onClose} />);
+
+    await user.click(screen.getByRole("button", { name: "Plugin Cookbook" }));
+
+    expect(screen.getByText("Lifecycle Hooks")).toBeInTheDocument();
+    expect(
+      screen.getByText("For full API documentation, see the Plugin API Guide in the help section.")
+    ).toBeInTheDocument();
+  });
 });

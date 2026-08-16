@@ -327,6 +327,7 @@ describe("App", () => {
       SessionType.DiffViewer,
       SessionType.Macros,
       SessionType.Recordings,
+      SessionType.Ftp,
     ];
     const allTypes = Object.values(SessionType).filter((t) => !nonConnectableTypes.includes(t));
     for (const type of allTypes) {
@@ -468,6 +469,19 @@ describe("App", () => {
     expect(await screen.findByText("demo")).toBeInTheDocument();
     fireEvent.click(screen.getByText("demo"));
     expect(await screen.findByText("Speed:")).toBeInTheDocument();
+  });
+
+  // Regression coverage: FtpBrowser was fully built and tested, and FTP was
+  // even a fully implemented backend protocol, but there was no
+  // SessionType.Ftp at all — FTP wasn't reachable or even selectable
+  // anywhere in the app.
+  it("FTP in the + menu opens a tab with the real FtpBrowser", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("New Tab"));
+    fireEvent.click(screen.getByText("FTP"));
+
+    expect(await screen.findByPlaceholderText("ftp.example.com")).toBeInTheDocument();
   });
 
   // Regression coverage for wiring RDP/VNC/Telnet/Serial into the tab

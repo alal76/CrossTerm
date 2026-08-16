@@ -1749,6 +1749,17 @@ Serial session data can be logged to a file in raw, hex, or timestamped formats.
 - **Permission denied (Linux)**: Add your user to the \`dialout\` group.`,
   },
   {
+    slug: "plugin-cookbook",
+    title: "Plugin Cookbook",
+    category: "developers",
+    order: 14,
+    keywords: ["plugin", "cookbook", "manifest", "wasm", "hooks", "kv store", "recipes"],
+    // Rendered by the interactive PluginCookbook component instead of this
+    // body — see the activeSlug special-case in HelpPanel.tsx. Kept
+    // non-empty so search-by-keyword still matches this article.
+    body: "Practical plugin manifest examples, lifecycle hooks, and key-value store recipes.",
+  },
+  {
     slug: "plugin-api-guide",
     title: "Plugin API Developer Guide",
     category: "developers",

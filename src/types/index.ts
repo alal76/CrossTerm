@@ -18,6 +18,7 @@ export enum SessionType {
   DiffViewer = "diff_viewer",
   Macros = "macros",
   Recordings = "recordings",
+  Ftp = "ftp",
   // Extended protocol breadth
   Mosh = "mosh",
   WinRM = "winrm",
