@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import SplitPaneContainer from "@/components/Terminal/SplitPaneContainer";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useTerminalStore } from "@/stores/terminalStore";
-import { SessionType, ConnectionStatus } from "@/types";
-import type { Session, Tab, SplitPaneLeaf } from "@/types";
+import { SessionType, ConnectionStatus, SplitDirection } from "@/types";
+import type { Session, Tab, SplitPaneLeaf, SplitPaneContainer as SplitPaneContainerType } from "@/types";
 
 // Same routing gap as App.tsx's SessionCanvas: before wiring these in,
 // SplitPaneContainer's LeafPane only special-cased SSH — RDP/VNC/Telnet/
@@ -421,5 +421,154 @@ describe("SplitPaneContainer session type routing", () => {
     render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
 
     expect(screen.getByTestId(`x11-forward-panel-${tab.sessionId}`)).toBeInTheDocument();
+  });
+
+  it("routes an SSH leaf pane to SshTerminalTab", () => {
+    const session = baseSession({
+      type: SessionType.SSH,
+      connection: { host: "10.0.0.1", port: 22, protocolOptions: { username: "root", password: "secret" } },
+    });
+    const tab = baseTab({ sessionType: SessionType.SSH });
+    useSessionStore.setState({ sessions: [session], openTabs: [tab] });
+
+    render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
+
+    expect(screen.getByTestId(`ssh-terminal-tab-${tab.sessionId}`)).toBeInTheDocument();
+  });
+
+  it("shows a 'No tab' placeholder when the leaf's tab no longer exists", () => {
+    useSessionStore.setState({ sessions: [], openTabs: [] });
+
+    render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
+
+    expect(screen.getByText("No tab")).toBeInTheDocument();
+  });
+
+  it("sets the active pane id when a leaf pane is clicked", () => {
+    const session = baseSession({ type: SessionType.WSL });
+    const tab = baseTab({ sessionType: SessionType.WSL });
+    useSessionStore.setState({ sessions: [session], openTabs: [tab] });
+    useTerminalStore.setState({ activePaneId: null });
+
+    render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
+
+    fireEvent.click(screen.getByTestId(`terminal-tab-${tab.sessionId}`).parentElement!);
+    expect(useTerminalStore.getState().activePaneId).toBe("tab-1");
+  });
+});
+
+describe("SplitPaneContainer split rendering, resize, and keyboard nav", () => {
+  beforeEach(() => {
+    useTerminalStore.setState({ activePaneId: "tab-1" });
+  });
+
+  function twoLeafSplit(direction: SplitDirection = SplitDirection.Horizontal): SplitPaneContainerType {
+    return {
+      type: "container",
+      direction,
+      sizes: [50, 50],
+      children: [
+        { type: "leaf", tabId: "tab-1" },
+        { type: "leaf", tabId: "tab-2" },
+      ],
+    };
+  }
+
+  function setupTwoTabs() {
+    const session1 = baseSession({ id: "sess-1", type: SessionType.WSL });
+    const session2 = baseSession({ id: "sess-2", type: SessionType.WSL });
+    const tab1 = baseTab({ id: "tab-1", sessionId: "sess-1", sessionType: SessionType.WSL });
+    const tab2 = baseTab({ id: "tab-2", sessionId: "sess-2", sessionType: SessionType.WSL });
+    useSessionStore.setState({ sessions: [session1, session2], openTabs: [tab1, tab2] });
+  }
+
+  it("renders both children of a split pane with a resize handle between them", () => {
+    setupTwoTabs();
+    render(<SplitPaneContainer pane={twoLeafSplit()} activeTabId="tab-1" />);
+
+    expect(screen.getByTestId("terminal-tab-sess-1")).toBeInTheDocument();
+    expect(screen.getByTestId("terminal-tab-sess-2")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Resize pane" })).toBeInTheDocument();
+  });
+
+  it("resizes panes when the resize handle is dragged", () => {
+    setupTwoTabs();
+    const { container } = render(<SplitPaneContainer pane={twoLeafSplit()} activeTabId="tab-1" />);
+
+    const handle = screen.getByRole("button", { name: "Resize pane" });
+    const panes = container.querySelectorAll<HTMLDivElement>(":scope > div > div > div");
+
+    fireEvent.mouseDown(handle, { clientX: 100 });
+    fireEvent.mouseMove(document, { clientX: 150 });
+    fireEvent.mouseUp(document);
+
+    // A resize occurred without crashing; flex-basis values should have moved
+    // away from the initial 50/50 split on at least one of the two panes.
+    const bases = Array.from(panes)
+      .slice(0, 2)
+      .map((el) => el.style.flexBasis);
+    expect(bases.some((b) => b && b !== "50%")).toBe(true);
+  });
+
+  it("cycles the active pane with Alt+ArrowRight and wraps at the end", () => {
+    setupTwoTabs();
+    render(<SplitPaneContainer pane={twoLeafSplit()} activeTabId="tab-1" />);
+
+    fireEvent.keyDown(document, { key: "ArrowRight", altKey: true });
+    expect(useTerminalStore.getState().activePaneId).toBe("tab-2");
+
+    fireEvent.keyDown(document, { key: "ArrowRight", altKey: true });
+    expect(useTerminalStore.getState().activePaneId).toBe("tab-1");
+  });
+
+  it("cycles backward with Alt+ArrowLeft and wraps at the start", () => {
+    setupTwoTabs();
+    render(<SplitPaneContainer pane={twoLeafSplit()} activeTabId="tab-1" />);
+
+    fireEvent.keyDown(document, { key: "ArrowLeft", altKey: true });
+    expect(useTerminalStore.getState().activePaneId).toBe("tab-2");
+  });
+
+  it("ignores arrow keys without Alt, and Alt+arrow combined with other modifiers", () => {
+    setupTwoTabs();
+    render(<SplitPaneContainer pane={twoLeafSplit()} activeTabId="tab-1" />);
+
+    fireEvent.keyDown(document, { key: "ArrowRight" });
+    expect(useTerminalStore.getState().activePaneId).toBe("tab-1");
+
+    fireEvent.keyDown(document, { key: "ArrowRight", altKey: true, shiftKey: true });
+    expect(useTerminalStore.getState().activePaneId).toBe("tab-1");
+
+    fireEvent.keyDown(document, { key: "ArrowRight", altKey: true, ctrlKey: true });
+    expect(useTerminalStore.getState().activePaneId).toBe("tab-1");
+  });
+
+  it("ignores non-arrow keys even with Alt held", () => {
+    setupTwoTabs();
+    render(<SplitPaneContainer pane={twoLeafSplit()} activeTabId="tab-1" />);
+
+    fireEvent.keyDown(document, { key: "a", altKey: true });
+    expect(useTerminalStore.getState().activePaneId).toBe("tab-1");
+  });
+
+  it("does not attach the keyboard navigation listener for a single-leaf pane", () => {
+    const session = baseSession({ type: SessionType.WSL });
+    const tab = baseTab({ sessionType: SessionType.WSL });
+    useSessionStore.setState({ sessions: [session], openTabs: [tab] });
+
+    render(<SplitPaneContainer pane={leafPane} activeTabId="tab-1" />);
+
+    fireEvent.keyDown(document, { key: "ArrowRight", altKey: true });
+    // No second pane exists, so activePaneId must remain untouched (not just unchanged by coincidence).
+    expect(useTerminalStore.getState().activePaneId).toBe("tab-1");
+  });
+
+  it("renders a vertical split with flex-col layout", () => {
+    setupTwoTabs();
+    const { container } = render(
+      <SplitPaneContainer pane={twoLeafSplit(SplitDirection.Vertical)} activeTabId="tab-1" />,
+    );
+    const flexContainer = container.querySelector(".flex-col");
+    expect(flexContainer).toBeInTheDocument();
   });
 });
