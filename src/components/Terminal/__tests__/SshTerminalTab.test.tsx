@@ -258,4 +258,120 @@ describe("SshTerminalTab", () => {
     fireEvent.click(screen.getByText("Dismiss"));
     expect(screen.queryByText("Save credentials to vault?")).not.toBeInTheDocument();
   });
+
+  describe("policy-driven recording", () => {
+    it("starts recording and shows the compliance banner when policy requires it and notify_user is set", async () => {
+      mockInvoke.mockImplementation((cmd: string) => {
+        if (cmd === "ssh_connect") return Promise.resolve("conn-1");
+        if (cmd === "policy_check_recording_required") return Promise.resolve(true);
+        if (cmd === "recording_start") return Promise.resolve("rec-1");
+        if (cmd === "policy_get") {
+          return Promise.resolve({ recording: { notify_user: true, allow_user_disable: true } });
+        }
+        return Promise.resolve(undefined);
+      });
+      render(<SshTerminalTab {...baseProps} />);
+
+      await waitFor(() =>
+        expect(mockInvoke).toHaveBeenCalledWith("recording_start", expect.objectContaining({ sessionId: "sess-1" })),
+      );
+      expect(await screen.findByText(/This session is being recorded/)).toBeInTheDocument();
+      expect(screen.getByText("Stop recording")).toBeInTheDocument();
+    });
+
+    it("does not show the banner when policy requires recording but notify_user is false", async () => {
+      mockInvoke.mockImplementation((cmd: string) => {
+        if (cmd === "ssh_connect") return Promise.resolve("conn-1");
+        if (cmd === "policy_check_recording_required") return Promise.resolve(true);
+        if (cmd === "recording_start") return Promise.resolve("rec-1");
+        if (cmd === "policy_get") {
+          return Promise.resolve({ recording: { notify_user: false, allow_user_disable: false } });
+        }
+        return Promise.resolve(undefined);
+      });
+      render(<SshTerminalTab {...baseProps} />);
+
+      await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("recording_start", expect.anything()));
+      expect(screen.queryByText(/This session is being recorded/)).not.toBeInTheDocument();
+    });
+
+    it("does not start recording when policy does not require it for this host", async () => {
+      mockInvoke.mockImplementation((cmd: string) => {
+        if (cmd === "ssh_connect") return Promise.resolve("conn-1");
+        if (cmd === "policy_check_recording_required") return Promise.resolve(false);
+        return Promise.resolve(undefined);
+      });
+      render(<SshTerminalTab {...baseProps} />);
+
+      await waitFor(() => expect(screen.getByTestId("ssh-terminal-view")).toBeInTheDocument());
+      expect(mockInvoke).not.toHaveBeenCalledWith("recording_start", expect.anything());
+    });
+
+    it("streams ssh:output into the active recording via recording_append", async () => {
+      mockInvoke.mockImplementation((cmd: string) => {
+        if (cmd === "ssh_connect") return Promise.resolve("conn-1");
+        if (cmd === "policy_check_recording_required") return Promise.resolve(true);
+        if (cmd === "recording_start") return Promise.resolve("rec-1");
+        if (cmd === "policy_get") return Promise.resolve({ recording: { notify_user: true, allow_user_disable: true } });
+        return Promise.resolve(undefined);
+      });
+      render(<SshTerminalTab {...baseProps} />);
+      await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("recording_start", expect.anything()));
+
+      act(() => {
+        listenCallbacks.get("ssh:output")?.({ payload: { connection_id: "conn-1", data: "ls -la\r\n" } });
+      });
+
+      await waitFor(() =>
+        expect(mockInvoke).toHaveBeenCalledWith("recording_append", { recordingId: "rec-1", data: "ls -la\r\n" }),
+      );
+    });
+
+    it("stops recording via the banner's Stop recording action", async () => {
+      mockInvoke.mockImplementation((cmd: string) => {
+        if (cmd === "ssh_connect") return Promise.resolve("conn-1");
+        if (cmd === "policy_check_recording_required") return Promise.resolve(true);
+        if (cmd === "recording_start") return Promise.resolve("rec-1");
+        if (cmd === "policy_get") return Promise.resolve({ recording: { notify_user: true, allow_user_disable: true } });
+        return Promise.resolve(undefined);
+      });
+      render(<SshTerminalTab {...baseProps} />);
+      await screen.findByText(/This session is being recorded/);
+
+      fireEvent.click(screen.getByText("Stop recording"));
+
+      await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("recording_stop", { recordingId: "rec-1" }));
+      expect(screen.queryByText(/This session is being recorded/)).not.toBeInTheDocument();
+    });
+
+    it("stops recording when the connection disconnects", async () => {
+      mockInvoke.mockImplementation((cmd: string) => {
+        if (cmd === "ssh_connect") return Promise.resolve("conn-1");
+        if (cmd === "policy_check_recording_required") return Promise.resolve(true);
+        if (cmd === "recording_start") return Promise.resolve("rec-1");
+        if (cmd === "policy_get") return Promise.resolve({ recording: { notify_user: true, allow_user_disable: true } });
+        return Promise.resolve(undefined);
+      });
+      render(<SshTerminalTab {...baseProps} />);
+      await screen.findByText(/This session is being recorded/);
+
+      act(() => {
+        listenCallbacks.get("ssh:disconnected")?.({ payload: { connection_id: "conn-1", reason: "timeout" } });
+      });
+
+      await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("recording_stop", { recordingId: "rec-1" }));
+    });
+
+    it("does not fail the connection when the policy check itself errors", async () => {
+      mockInvoke.mockImplementation((cmd: string) => {
+        if (cmd === "ssh_connect") return Promise.resolve("conn-1");
+        if (cmd === "policy_check_recording_required") return Promise.reject(new Error("policy backend unavailable"));
+        return Promise.resolve(undefined);
+      });
+      render(<SshTerminalTab {...baseProps} />);
+
+      expect(await screen.findByTestId("ssh-terminal-view")).toBeInTheDocument();
+      expect(mockInvoke).not.toHaveBeenCalledWith("recording_start", expect.anything());
+    });
+  });
 });

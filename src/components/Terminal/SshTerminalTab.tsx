@@ -15,6 +15,7 @@ import { useTranslation } from "react-i18next";
 import clsx from "clsx";
 import SshTerminalView from "./SshTerminalView";
 import ReconnectOverlay from "./ReconnectOverlay";
+import ComplianceBanner from "@/components/Shared/ComplianceBanner";
 
 interface SshAuthPayload {
   type: "password" | "private_key" | "none";
@@ -82,6 +83,53 @@ export default function SshTerminalTab({
   const [credUsername, setCredUsername] = useState(username);
   const [credPassword, setCredPassword] = useState("");
   const [credSubmitting, setCredSubmitting] = useState(false);
+
+  // ── Compliance recording (policy-driven) ──
+  // Recording is opt-in per PolicyPanel's "recording.enabled" +
+  // "require_recording_for" host patterns. When active, terminal output is
+  // streamed into the recording via ssh:output (below) so it isn't just an
+  // empty capture, and ComplianceBanner is shown when the policy also has
+  // notify_user set.
+  const recordingIdRef = useRef<string | null>(null);
+  const [recordingActive, setRecordingActive] = useState(false);
+  const [recordingNotify, setRecordingNotify] = useState(false);
+  const [recordingAllowDisable, setRecordingAllowDisable] = useState(false);
+
+  const startRecordingIfRequired = useCallback(async () => {
+    try {
+      const required = await invoke<boolean>("policy_check_recording_required", { hostname: host });
+      if (!required) return;
+      const id = await invoke<string>("recording_start", {
+        sessionId,
+        title: `${username}@${host}`,
+        width: 80,
+        height: 24,
+      });
+      recordingIdRef.current = id;
+      setRecordingActive(true);
+      try {
+        const policy = await invoke<{ recording: { notify_user: boolean; allow_user_disable: boolean } }>("policy_get");
+        setRecordingNotify(policy.recording.notify_user);
+        setRecordingAllowDisable(policy.recording.allow_user_disable);
+      } catch {
+        // Policy details are cosmetic (banner visibility only) — recording itself already started.
+      }
+    } catch {
+      // Recording is best-effort; a policy-check or recording-start failure must not fail the connection.
+    }
+  }, [host, sessionId, username]);
+
+  const stopRecording = useCallback(async () => {
+    const id = recordingIdRef.current;
+    if (!id) return;
+    recordingIdRef.current = null;
+    setRecordingActive(false);
+    try {
+      await invoke("recording_stop", { recordingId: id });
+    } catch {
+      // Best-effort cleanup.
+    }
+  }, []);
 
   // ── Listen for auth prompts from backend ──
   useEffect(() => {
@@ -204,6 +252,7 @@ export default function SshTerminalTab({
         if (tab) {
           updateTabStatus(tab.id, ConnectionStatus.Connected);
         }
+        void startRecordingIfRequired();
       } catch (e) {
         if (!cancelled) {
           setError(String(e));
@@ -221,6 +270,7 @@ export default function SshTerminalTab({
     return () => {
       cancelled = true;
       for (const p of unlisteners) { p.then((fn) => fn()); }
+      void stopRecording();
       if (connectionId) {
         invoke("ssh_disconnect", { connectionId }).catch(() => {});
         removeTerminal(connectionId);
@@ -243,6 +293,7 @@ export default function SshTerminalTab({
             updateTabStatus(tab.id, ConnectionStatus.Disconnected);
           }
           setDisconnectReason(event.payload.reason);
+          void stopRecording();
         }
       }
     );
@@ -250,7 +301,25 @@ export default function SshTerminalTab({
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, [connectionId, sessionId, updateTabStatus]);
+  }, [connectionId, sessionId, updateTabStatus, stopRecording]);
+
+  // Stream terminal output into the active recording (if any). Separate
+  // from SshTerminalView's own ssh:output listener, which handles writing
+  // to the visible terminal — Tauri events support multiple listeners.
+  useEffect(() => {
+    if (!connectionId) return;
+    const unlisten = listen<{ connection_id: string; data: string }>(
+      "ssh:output",
+      (event) => {
+        if (event.payload.connection_id !== connectionId) return;
+        if (!recordingIdRef.current) return;
+        invoke("recording_append", { recordingId: recordingIdRef.current, data: event.payload.data }).catch(() => {});
+      }
+    );
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [connectionId]);
 
   // ── Auth prompt listener (match any prompt while connecting) ──
   useEffect(() => {
@@ -297,6 +366,7 @@ export default function SshTerminalTab({
       if (tab) {
         updateTabStatus(tab.id, ConnectionStatus.Connected);
       }
+      void startRecordingIfRequired();
     } catch (e) {
       setError(String(e));
       setShowCredentialPrompt(true);
@@ -470,6 +540,7 @@ export default function SshTerminalTab({
           createTerminal(sessionId, connId);
           setConnectionId(connId);
           setLoading(false);
+          void startRecordingIfRequired();
         })
         .catch((e) => {
           setError(String(e));
@@ -640,6 +711,7 @@ export default function SshTerminalTab({
       if (tab) {
         updateTabStatus(tab.id, ConnectionStatus.Connected);
       }
+      void startRecordingIfRequired();
       return true;
     } catch {
       return false;
@@ -648,6 +720,13 @@ export default function SshTerminalTab({
 
   return (
     <div className="relative w-full h-full">
+      <ComplianceBanner
+        isVisible={recordingActive && recordingNotify}
+        hostname={host}
+        sessionId={connectionId}
+        allowUserDisable={recordingAllowDisable}
+        onDisableRecording={stopRecording}
+      />
       <SshTerminalView connectionId={connectionId} isActive={isActive} />
       {disconnectReason !== null && (
         <ReconnectOverlay
