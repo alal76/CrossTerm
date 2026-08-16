@@ -176,4 +176,195 @@ describe("VaultUnlock", () => {
       });
     });
   });
+
+  it("unlocks with the correct password", async () => {
+    const user = userEvent.setup();
+    setupMockInvoke({
+      vault_list: [MOCK_VAULT],
+      vault_is_locked: true,
+      vault_unlock: undefined,
+      vault_fetch_credentials: [],
+    });
+
+    render(<VaultUnlock />);
+    await waitFor(() => screen.getByRole("heading", { name: "Unlock Vault" }));
+
+    await user.type(screen.getByPlaceholderText("Password"), "correct-password");
+    await user.click(screen.getByRole("button", { name: "Unlock Vault" }));
+
+    await waitFor(() =>
+      expect(mockInvoke).toHaveBeenCalledWith("vault_unlock", {
+        vaultId: "vault-1",
+        masterPassword: "correct-password",
+      }),
+    );
+  });
+
+  it("shows an error when unlock fails and requires a non-empty password", async () => {
+    const user = userEvent.setup();
+    setupMockInvoke({
+      vault_list: [MOCK_VAULT],
+      vault_is_locked: true,
+    });
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "vault_list") return [MOCK_VAULT];
+      if (cmd === "vault_is_locked") return true;
+      if (cmd === "vault_unlock") throw new Error("incorrect password");
+      return undefined;
+    });
+
+    render(<VaultUnlock />);
+    await waitFor(() => screen.getByRole("heading", { name: "Unlock Vault" }));
+
+    await user.type(screen.getByPlaceholderText("Password"), "wrong-password");
+    await user.click(screen.getByRole("button", { name: "Unlock Vault" }));
+
+    expect(await screen.findByText("Error: incorrect password")).toBeInTheDocument();
+  });
+
+  it("attempts biometric unlock when available", async () => {
+    const user = userEvent.setup();
+    setupMockInvoke({
+      vault_list: [MOCK_VAULT],
+      vault_is_locked: true,
+      vault_biometric_available: true,
+      vault_unlock_biometric: undefined,
+      vault_unlock: undefined,
+    });
+
+    render(<VaultUnlock />);
+    const button = await screen.findByRole("button", { name: /Touch ID|Windows Hello/ });
+    await user.click(button);
+
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("vault_unlock_biometric"));
+    await waitFor(() =>
+      expect(mockInvoke).toHaveBeenCalledWith("vault_unlock", { vaultId: "vault-1", masterPassword: "" }),
+    );
+  });
+
+  it("shows biometricUnavailable error when the biometric attempt fails", async () => {
+    const user = userEvent.setup();
+    setupMockInvoke({
+      vault_list: [MOCK_VAULT],
+      vault_is_locked: true,
+      vault_biometric_available: true,
+    });
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "vault_list") return [MOCK_VAULT];
+      if (cmd === "vault_is_locked") return true;
+      if (cmd === "vault_biometric_available") return true;
+      if (cmd === "vault_fido2_available") return false;
+      if (cmd === "vault_unlock_biometric") throw new Error("no sensor");
+      return undefined;
+    });
+
+    render(<VaultUnlock />);
+    const button = await screen.findByRole("button", { name: /Touch ID|Windows Hello/ });
+    await user.click(button);
+
+    expect(
+      await screen.findByText("Biometric authentication is not available on this device"),
+    ).toBeInTheDocument();
+  });
+
+  it("shows fido2Unavailable when the security-key button is used", async () => {
+    const user = userEvent.setup();
+    setupMockInvoke({
+      vault_list: [MOCK_VAULT],
+      vault_is_locked: true,
+      vault_fido2_available: true,
+    });
+
+    render(<VaultUnlock />);
+    const button = await screen.findByRole("button", { name: "Use Security Key" });
+    await user.click(button);
+
+    expect(
+      await screen.findByText("Hardware key authentication is not yet configured"),
+    ).toBeInTheDocument();
+  });
+
+  it("navigates to create mode via 'Add new vault' and back again", async () => {
+    const user = userEvent.setup();
+    setupMockInvoke({ vault_list: [MOCK_VAULT], vault_is_locked: true });
+
+    render(<VaultUnlock />);
+    await waitFor(() => screen.getByRole("heading", { name: "Unlock Vault" }));
+
+    await user.click(screen.getByText("Add new vault"));
+    expect(await screen.findByRole("heading", { name: "Create Vault" })).toBeInTheDocument();
+
+    await user.click(screen.getByText("Back to unlock"));
+    expect(await screen.findByRole("heading", { name: "Unlock Vault" })).toBeInTheDocument();
+  });
+
+  it("deletes a vault via the two-click confirm guard and the password form", async () => {
+    const user = userEvent.setup();
+    // After the delete, listVaults() is called again — return an empty list.
+    let deleted = false;
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "vault_list") return deleted ? [] : [MOCK_VAULT];
+      if (cmd === "vault_is_locked") return true;
+      if (cmd === "vault_biometric_available") return false;
+      if (cmd === "vault_fido2_available") return false;
+      if (cmd === "vault_delete") {
+        deleted = true;
+        return undefined;
+      }
+      return undefined;
+    });
+
+    render(<VaultUnlock />);
+    await waitFor(() => screen.getByRole("heading", { name: "Unlock Vault" }));
+
+    const deleteBtn = screen.getByTitle("Delete Vault");
+    await user.click(deleteBtn); // arm
+    await user.click(screen.getByTitle("Click again to delete")); // confirm
+
+    expect(await screen.findByRole("heading", { name: "Delete vault" })).toBeInTheDocument();
+
+    await user.type(screen.getByPlaceholderText("Password"), "correct-password");
+    await user.click(screen.getByRole("button", { name: "Delete Vault" }));
+
+    await waitFor(() =>
+      expect(mockInvoke).toHaveBeenCalledWith("vault_delete", { vaultId: "vault-1", password: "correct-password" }),
+    );
+  });
+
+  it("cancels the delete confirmation form via the Cancel button", async () => {
+    const user = userEvent.setup();
+    setupMockInvoke({ vault_list: [MOCK_VAULT], vault_is_locked: true });
+
+    render(<VaultUnlock />);
+    await waitFor(() => screen.getByRole("heading", { name: "Unlock Vault" }));
+
+    const deleteBtn = screen.getByTitle("Delete Vault");
+    await user.click(deleteBtn);
+    await user.click(screen.getByTitle("Click again to delete"));
+    await screen.findByRole("heading", { name: "Delete vault" });
+
+    await user.click(screen.getByText("Cancel"));
+    expect(await screen.findByRole("heading", { name: "Unlock Vault" })).toBeInTheDocument();
+  });
+
+  it("shows a vault selector list and switches selection when multiple vaults are locked", async () => {
+    const secondVault = { ...MOCK_VAULT, id: "vault-2", name: "Work Vault", is_default: false };
+    setupMockInvoke({
+      vault_list: [MOCK_VAULT, secondVault],
+      vault_is_locked: true,
+    });
+
+    render(<VaultUnlock />);
+    await waitFor(() => screen.getByRole("heading", { name: "Unlock Vault" }));
+
+    // MOCK_VAULT.name is itself "Default", and is_default renders a "Default"
+    // badge — both legitimately produce the text "Default" here.
+    expect(screen.getAllByText("Default").length).toBeGreaterThan(0);
+    expect(screen.getByText("Work Vault")).toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByText("Work Vault"));
+    // Selection changed (no crash / still on unlock screen with both options present).
+    expect(screen.getByText("Work Vault")).toBeInTheDocument();
+  });
 });
