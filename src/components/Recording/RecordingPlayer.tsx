@@ -5,6 +5,7 @@ import { listen } from '@tauri-apps/api/event';
 import { clsx } from 'clsx';
 import { Play, Pause, Download, Clock } from 'lucide-react';
 import TimestampJumper from '@/components/Terminal/TimestampJumper';
+import { showToast } from '@/components/Shared/Toast';
 import type { RecordingInfo, PlaybackState } from '@/types';
 
 interface RecordingPlayerProps {
@@ -109,8 +110,8 @@ export default function RecordingPlayer({
           recordingId: recording.id,
           format,
         });
-      } catch {
-        // handle export error — expected stub
+      } catch (err) {
+        showToast('error', String(err));
       }
     },
     [recording.id]

@@ -578,6 +578,37 @@ pub async fn recording_playback_set_speed(
     Ok(playback.clone())
 }
 
+/// Checks whether `ffmpeg` is actually reachable on PATH, rather than
+/// assuming either way. Export previously claimed "FFmpeg is not installed"
+/// unconditionally, regardless of whether that was true.
+fn ffmpeg_is_available() -> bool {
+    std::process::Command::new("ffmpeg")
+        .arg("-version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Builds the (still-a-failure, but now honest) export error message.
+/// Rendering an asciicast (raw terminal escape sequences, not pixel frames)
+/// into a GIF/MP4 needs a headless terminal-grid renderer to produce frames
+/// in the first place — ffmpeg alone can't do that step, encoding is the
+/// easy part. That renderer doesn't exist yet, so this reports honestly
+/// depending on real ffmpeg availability instead of a hardcoded claim.
+fn export_error_message(format: ExportFormat, ffmpeg_available: bool) -> String {
+    let format_name = match format {
+        ExportFormat::Gif => "GIF",
+        ExportFormat::Mp4 => "MP4",
+    };
+    if ffmpeg_available {
+        format!("FFmpeg was found, but exporting to {format_name} isn't implemented yet (rendering terminal output into video frames is still needed).")
+    } else {
+        format!("FFmpeg is not installed or not on PATH. Install it to export recordings as {format_name}.")
+    }
+}
+
 #[tauri::command]
 pub async fn recording_export(
     recording_id: String,
@@ -589,15 +620,7 @@ pub async fn recording_export(
         return Err(RecordingError::NotFound(recording_id));
     }
 
-    // Export is a stub — requires ffmpeg or similar
-    let format_name = match format {
-        ExportFormat::Gif => "GIF",
-        ExportFormat::Mp4 => "MP4",
-    };
-
-    Err(RecordingError::ExportFailed(format!(
-        "FFmpeg is not installed. Cannot export to {format_name}."
-    )))
+    Err(RecordingError::ExportFailed(export_error_message(format, ffmpeg_is_available())))
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────
@@ -605,6 +628,31 @@ pub async fn recording_export(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_ffmpeg_is_available_does_not_panic() {
+        // Environment-dependent (CI may or may not have ffmpeg installed) —
+        // just confirms the real check runs and returns a plain bool instead
+        // of the old hardcoded assumption.
+        let _ = ffmpeg_is_available();
+    }
+
+    // Regression coverage: recording_export used to unconditionally claim
+    // "FFmpeg is not installed" regardless of whether that was true.
+    #[test]
+    fn test_export_error_message_when_ffmpeg_missing() {
+        let msg = export_error_message(ExportFormat::Gif, false);
+        assert!(msg.contains("not installed"), "got: {msg}");
+        assert!(msg.contains("GIF"), "got: {msg}");
+    }
+
+    #[test]
+    fn test_export_error_message_when_ffmpeg_present() {
+        let msg = export_error_message(ExportFormat::Mp4, true);
+        assert!(msg.contains("FFmpeg was found"), "got: {msg}");
+        assert!(!msg.contains("not installed"), "must not claim ffmpeg is missing when it isn't: {msg}");
+        assert!(msg.contains("MP4"), "got: {msg}");
+    }
 
     #[test]
     fn test_asciicast_record() {
