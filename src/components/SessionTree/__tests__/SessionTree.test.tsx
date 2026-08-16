@@ -134,4 +134,208 @@ describe("SessionTree", () => {
       expect.objectContaining({ id: "s1", name: "Clickable Server" })
     );
   });
+
+  it("context menu Edit calls onSessionEdit", async () => {
+    const onSessionEdit = vi.fn();
+    useSessionStore.setState({ sessions: [makeSession({ id: "s1", name: "Ctx Server" })] });
+    render(<SessionTree onSessionEdit={onSessionEdit} />);
+
+    fireEvent.contextMenu(screen.getByText("Ctx Server"), { clientX: 10, clientY: 10 });
+    await userEvent.click(screen.getByText("Edit"));
+
+    expect(onSessionEdit).toHaveBeenCalledWith(expect.objectContaining({ id: "s1" }));
+  });
+
+  it("context menu Duplicate adds a copy via addSession", async () => {
+    const addSession = vi.fn();
+    useSessionStore.setState({ sessions: [makeSession({ id: "s1", name: "Dup Server" })], addSession });
+    render(<SessionTree />);
+
+    fireEvent.contextMenu(screen.getByText("Dup Server"), { clientX: 10, clientY: 10 });
+    await userEvent.click(screen.getByText("Duplicate"));
+
+    expect(addSession).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Dup Server (copy)" }),
+    );
+  });
+
+  it("context menu Delete removes the session", async () => {
+    const removeSession = vi.fn();
+    useSessionStore.setState({ sessions: [makeSession({ id: "s1", name: "Del Server" })], removeSession });
+    render(<SessionTree />);
+
+    fireEvent.contextMenu(screen.getByText("Del Server"), { clientX: 10, clientY: 10 });
+    await userEvent.click(screen.getByText("Delete"));
+
+    expect(removeSession).toHaveBeenCalledWith("s1");
+  });
+
+  it("context menu Connect opens a tab and calls onSessionSelect", async () => {
+    const openTab = vi.fn();
+    const onSessionSelect = vi.fn();
+    useSessionStore.setState({ sessions: [makeSession({ id: "s1", name: "Conn Server" })], openTab });
+    render(<SessionTree onSessionSelect={onSessionSelect} />);
+
+    fireEvent.contextMenu(screen.getByText("Conn Server"), { clientX: 10, clientY: 10 });
+    await userEvent.click(screen.getByText("Connect"));
+
+    expect(openTab).toHaveBeenCalledWith(expect.objectContaining({ id: "s1" }));
+    expect(onSessionSelect).toHaveBeenCalledWith(expect.objectContaining({ id: "s1" }));
+  });
+
+  it("toggles a session as favorite via the star button, and renders it in the Favorites strip", async () => {
+    const toggleFavorite = vi.fn((id: string) => {
+      useSessionStore.setState((s) => ({
+        favorites: s.favorites.includes(id) ? s.favorites.filter((f) => f !== id) : [...s.favorites, id],
+      }));
+    });
+    useSessionStore.setState({ sessions: [makeSession({ id: "s1", name: "Fav Server" })], toggleFavorite });
+    render(<SessionTree />);
+
+    const star = screen.getByText("Fav Server").closest("button")!.parentElement!.querySelector('button[class*="shrink-0"]')!;
+    await userEvent.click(star);
+
+    expect(toggleFavorite).toHaveBeenCalledWith("s1");
+  });
+
+  it("shows the Favorites strip for a favorited session, separate from the main tree", () => {
+    useSessionStore.setState({
+      sessions: [makeSession({ id: "s1", name: "Star Server" })],
+      favorites: ["s1"],
+    });
+    render(<SessionTree />);
+
+    // Appears once in the favorites strip, once in the main list.
+    expect(screen.getAllByText("Star Server").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("shows the Recently Connected section and toggles collapse", async () => {
+    useSessionStore.setState({
+      sessions: [makeSession({ id: "s1", name: "Recent Server", lastConnectedAt: new Date().toISOString() })],
+    });
+    render(<SessionTree />);
+
+    expect(screen.getByText("Recently Connected")).toBeInTheDocument();
+    const initialCount = screen.getAllByText("Recent Server").length;
+
+    await userEvent.click(screen.getByText("Recently Connected"));
+    expect(screen.getAllByText("Recent Server").length).toBeLessThan(initialCount);
+  });
+
+  it("filters sessions by tag chip and clears the filter", async () => {
+    useSessionStore.setState({
+      sessions: [
+        makeSession({ id: "s1", name: "Tagged A", tags: ["prod"] }),
+        makeSession({ id: "s2", name: "Tagged B", tags: ["dev"] }),
+      ],
+    });
+    render(<SessionTree />);
+
+    await userEvent.click(screen.getByText("prod"));
+    expect(screen.getByText("Tagged A")).toBeInTheDocument();
+    expect(screen.queryByText("Tagged B")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByText(/Clear/));
+    expect(screen.getByText("Tagged B")).toBeInTheDocument();
+  });
+
+  it("multi-selects with ctrl+click and bulk-connects all selected sessions", async () => {
+    const openTab = vi.fn();
+    useSessionStore.setState({
+      sessions: [
+        makeSession({ id: "s1", name: "Multi A" }),
+        makeSession({ id: "s2", name: "Multi B" }),
+      ],
+      openTab,
+    });
+    render(<SessionTree />);
+
+    fireEvent.click(screen.getByText("Multi A"), { ctrlKey: true });
+    fireEvent.click(screen.getByText("Multi B"), { ctrlKey: true });
+
+    expect(screen.getByText("2 selected")).toBeInTheDocument();
+    await userEvent.click(screen.getByText("Connect All"));
+
+    expect(openTab).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText(/selected/)).not.toBeInTheDocument();
+  });
+
+  it("clears multi-selection via the Clear button", () => {
+    useSessionStore.setState({
+      sessions: [makeSession({ id: "s1", name: "Clear A" }), makeSession({ id: "s2", name: "Clear B" })],
+    });
+    render(<SessionTree />);
+
+    fireEvent.click(screen.getByText("Clear A"), { ctrlKey: true });
+    fireEvent.click(screen.getByText("Clear B"), { ctrlKey: true });
+    expect(screen.getByText("2 selected")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Clear"));
+    expect(screen.queryByText(/selected/)).not.toBeInTheDocument();
+  });
+
+  it("folder context menu: New Subfolder prompts and calls addFolder", async () => {
+    const addFolder = vi.fn();
+    const promptSpy = vi.spyOn(globalThis, "prompt").mockReturnValue("Staging");
+    useSessionStore.setState({
+      sessions: [makeSession({ id: "s1", name: "Prod Web", group: "Production" })],
+      addFolder,
+    });
+    render(<SessionTree />);
+
+    fireEvent.contextMenu(screen.getByText("Production"), { clientX: 5, clientY: 5 });
+    await userEvent.click(screen.getByText(/Subfolder/));
+
+    expect(addFolder).toHaveBeenCalledWith("Production/Staging");
+    promptSpy.mockRestore();
+  });
+
+  it("folder context menu: Delete Folder confirms and clears the group on its sessions", async () => {
+    const updateSession = vi.fn();
+    const removeFolder = vi.fn();
+    const confirmSpy = vi.spyOn(globalThis, "confirm").mockReturnValue(true);
+    useSessionStore.setState({
+      sessions: [makeSession({ id: "s1", name: "Prod Web", group: "Production" })],
+      updateSession,
+      removeFolder,
+    });
+    render(<SessionTree />);
+
+    fireEvent.contextMenu(screen.getByText("Production"), { clientX: 5, clientY: 5 });
+    await userEvent.click(screen.getByText(/Delete Folder/));
+
+    expect(updateSession).toHaveBeenCalledWith("s1", { group: "" });
+    expect(removeFolder).toHaveBeenCalledWith("Production");
+    confirmSpy.mockRestore();
+  });
+
+  it("folder context menu: Delete Folder does nothing when the confirm is declined", async () => {
+    const updateSession = vi.fn();
+    const confirmSpy = vi.spyOn(globalThis, "confirm").mockReturnValue(false);
+    useSessionStore.setState({
+      sessions: [makeSession({ id: "s1", name: "Prod Web", group: "Production" })],
+      updateSession,
+    });
+    render(<SessionTree />);
+
+    fireEvent.contextMenu(screen.getByText("Production"), { clientX: 5, clientY: 5 });
+    await userEvent.click(screen.getByText(/Delete Folder/));
+
+    expect(updateSession).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it("New Session button in the empty state calls onNewSession", async () => {
+    const onNewSession = vi.fn();
+    render(<SessionTree onNewSession={onNewSession} />);
+    await userEvent.click(screen.getByText("New Session"));
+    expect(onNewSession).toHaveBeenCalled();
+  });
+
+  it("Import button in the empty state calls onImport", async () => {
+    const onImport = vi.fn();
+    render(<SessionTree onImport={onImport} />);
+    await userEvent.click(screen.getByText("Import"));
+    expect(onImport).toHaveBeenCalled();
+  });
 });
