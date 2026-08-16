@@ -28,6 +28,7 @@ import {
   Radar,
   Cloud,
   Puzzle,
+  GitCompare,
   KeyRound,
   Bell,
   ExternalLink,
@@ -87,6 +88,8 @@ import FeatureTour from "@/components/Help/FeatureTour";
 import TipOfTheDay from "@/components/Help/TipOfTheDay";
 import NetworkExplorer from "@/components/NetworkTools/NetworkExplorer";
 import CloudDashboard from "@/components/Cloud/CloudDashboard";
+import CodeEditor from "@/components/Editor/CodeEditor";
+import DiffViewer from "@/components/Editor/DiffViewer";
 import RemoteFileBrowser from "@/components/RemoteFiles/RemoteFileBrowser";
 import VaultUnlock from "@/components/Vault/VaultUnlock";
 import CredentialManager from "@/components/Vault/CredentialManager";
@@ -555,6 +558,8 @@ function NewTabDropdown({
   onMoreSessionTypes,
   onOpenNetworkExplorer,
   onOpenCloud,
+  onOpenCodeEditor,
+  onOpenDiffViewer,
   onOpenCredentials,
   onLockVault,
   onDeleteVault,
@@ -569,6 +574,8 @@ function NewTabDropdown({
   readonly onMoreSessionTypes: () => void;
   readonly onOpenNetworkExplorer: () => void;
   readonly onOpenCloud: () => void;
+  readonly onOpenCodeEditor: () => void;
+  readonly onOpenDiffViewer: () => void;
   readonly onOpenCredentials: () => void;
   readonly onLockVault: () => void;
   readonly onDeleteVault: () => void;
@@ -644,6 +651,14 @@ function NewTabDropdown({
         <Cloud size={13} className="shrink-0 text-text-disabled" />
         Cloud
       </button>
+      <button onClick={() => { onOpenCodeEditor(); onClose(); }} className={menuItemCls}>
+        <Code2 size={13} className="shrink-0 text-text-disabled" />
+        Code Editor
+      </button>
+      <button onClick={() => { onOpenDiffViewer(); onClose(); }} className={menuItemCls}>
+        <GitCompare size={13} className="shrink-0 text-text-disabled" />
+        Diff Viewer
+      </button>
       <div className="h-px bg-border-subtle mx-2 my-1" />
       <div className="px-3 pt-1 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-text-disabled">
         Vault
@@ -679,6 +694,8 @@ function TabBar({
   onMoreSessionTypes,
   onOpenNetworkExplorer,
   onOpenCloud,
+  onOpenCodeEditor,
+  onOpenDiffViewer,
   onOpenCredentials,
   onLockVault,
   onDeleteVault,
@@ -691,6 +708,8 @@ function TabBar({
   readonly onMoreSessionTypes: () => void;
   readonly onOpenNetworkExplorer: () => void;
   readonly onOpenCloud: () => void;
+  readonly onOpenCodeEditor: () => void;
+  readonly onOpenDiffViewer: () => void;
   readonly onOpenCredentials: () => void;
   readonly onLockVault: () => void;
   readonly onDeleteVault: () => void;
@@ -847,6 +866,8 @@ function TabBar({
             onMoreSessionTypes={onMoreSessionTypes}
             onOpenNetworkExplorer={onOpenNetworkExplorer}
             onOpenCloud={onOpenCloud}
+            onOpenCodeEditor={onOpenCodeEditor}
+            onOpenDiffViewer={onOpenDiffViewer}
             onOpenCredentials={onOpenCredentials}
             onLockVault={onLockVault}
             onDeleteVault={onDeleteVault}
@@ -1139,6 +1160,28 @@ function SessionCanvas() {
               className={clsx("absolute inset-0 overflow-auto p-4", isActive ? "z-10" : "z-0 hidden")}
             >
               <CloudDashboard />
+            </div>
+          );
+        }
+
+        if (tab.sessionType === SessionType.CodeEditor) {
+          return (
+            <div
+              key={tab.id}
+              className={clsx("absolute inset-0 overflow-hidden", isActive ? "z-10" : "z-0 hidden")}
+            >
+              <CodeEditor />
+            </div>
+          );
+        }
+
+        if (tab.sessionType === SessionType.DiffViewer) {
+          return (
+            <div
+              key={tab.id}
+              className={clsx("absolute inset-0 overflow-auto p-4", isActive ? "z-10" : "z-0 hidden")}
+            >
+              <DiffViewer />
             </div>
           );
         }
@@ -1848,6 +1891,42 @@ export default function App() {
     openTab(session);
   }, [addSession, openTab]);
 
+  const handleOpenCodeEditorTab = useCallback(() => {
+    const now = new Date().toISOString();
+    const session: Session = {
+      id: crypto.randomUUID(),
+      name: "Code Editor",
+      type: SessionType.CodeEditor,
+      group: "",
+      tags: [],
+      connection: { host: "localhost", port: 0 },
+      createdAt: now,
+      updatedAt: now,
+      autoReconnect: false,
+      keepAliveIntervalSeconds: 0,
+    };
+    addSession(session);
+    openTab(session);
+  }, [addSession, openTab]);
+
+  const handleOpenDiffViewerTab = useCallback(() => {
+    const now = new Date().toISOString();
+    const session: Session = {
+      id: crypto.randomUUID(),
+      name: "Diff Viewer",
+      type: SessionType.DiffViewer,
+      group: "",
+      tags: [],
+      connection: { host: "localhost", port: 0 },
+      createdAt: now,
+      updatedAt: now,
+      autoReconnect: false,
+      keepAliveIntervalSeconds: 0,
+    };
+    addSession(session);
+    openTab(session);
+  }, [addSession, openTab]);
+
   // Native menu callbacks are stored in a ref that is overwritten every render.
   // This pattern avoids the "stale closure" problem: buildNativeMenu runs once
   // (empty dep array) and captures `cb` (the ref object), but every action
@@ -2057,6 +2136,8 @@ export default function App() {
                 }}
                 onOpenNetworkExplorer={handleOpenNetworkTab}
                 onOpenCloud={handleOpenCloudTab}
+                onOpenCodeEditor={handleOpenCodeEditorTab}
+                onOpenDiffViewer={handleOpenDiffViewerTab}
                 onOpenCredentials={() => setShowCredentialManager(true)}
                 onLockVault={() => lockAllVaults()}
                 onDeleteVault={() => setShowVaultDeleteDialog(true)}

@@ -320,9 +320,13 @@ describe("App", () => {
       (o) => (o as HTMLOptionElement).value,
     );
 
-    const allTypes = Object.values(SessionType).filter(
-      (t) => t !== SessionType.NetworkExplorer && t !== SessionType.CloudDashboard,
-    );
+    const nonConnectableTypes: SessionType[] = [
+      SessionType.NetworkExplorer,
+      SessionType.CloudDashboard,
+      SessionType.CodeEditor,
+      SessionType.DiffViewer,
+    ];
+    const allTypes = Object.values(SessionType).filter((t) => !nonConnectableTypes.includes(t));
     for (const type of allTypes) {
       expect(optionValues).toContain(type);
     }
@@ -400,6 +404,27 @@ describe("App", () => {
     fireEvent.click(screen.getByText("Cloud"));
 
     expect(await screen.findByText("Cloud Dashboard")).toBeInTheDocument();
+  });
+
+  // Regression coverage: CodeEditor.tsx and DiffViewer.tsx were fully built
+  // and tested but had no way to open them — they're local-file tools (the
+  // backend's editor_open/editor_diff commands read the local filesystem,
+  // not SFTP), so they're reachable as their own tabs rather than wired
+  // into the SFTP browser's remote-file flow.
+  it("'Code Editor' and 'Diff Viewer' in the + menu open their real components", async () => {
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "editor_list_open") return Promise.resolve([]);
+      return Promise.resolve(undefined);
+    });
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("New Tab"));
+    fireEvent.click(screen.getByText("Code Editor"));
+    expect(await screen.findByText("No files open. Open a file to start editing.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTitle("New Tab"));
+    fireEvent.click(screen.getByText("Diff Viewer"));
+    expect(await screen.findByText("Compare Files")).toBeInTheDocument();
   });
 
   // Regression coverage for wiring RDP/VNC/Telnet/Serial into the tab

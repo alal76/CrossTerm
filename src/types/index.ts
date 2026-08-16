@@ -14,6 +14,8 @@ export enum SessionType {
   DockerExec = "docker_exec",
   NetworkExplorer = "network_explorer",
   CloudDashboard = "cloud_dashboard",
+  CodeEditor = "code_editor",
+  DiffViewer = "diff_viewer",
   // Extended protocol breadth
   Mosh = "mosh",
   WinRM = "winrm",
