@@ -929,7 +929,9 @@
     "exportError": "Failed to export settings",
     "importError": "Failed to import settings",
     "never": "Never",
-    "description": "Export or import your settings, sessions, snippets, and themes as an encrypted bundle."
+    "description": "Export or import your sessions, snippets, and settings as a password-encrypted bundle.",
+    "password": "Bundle password",
+    "passwordPlaceholder": "Used to encrypt the exported bundle"
   },
   "ftp": {
     "title": "FTP Browser",

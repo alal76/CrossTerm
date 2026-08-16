@@ -1,3 +1,6 @@
+use crate::config::{ConfigState, Settings};
+use crate::snippets::SnippetState;
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use thiserror::Error;
@@ -45,6 +48,13 @@ pub struct SyncStatus {
     pub last_import: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncImportSummary {
+    pub sessions_imported: u32,
+    pub snippets_imported: u32,
+    pub settings_applied: bool,
+}
+
 // ── State ───────────────────────────────────────────────────────────────
 
 pub struct SyncState {
@@ -63,24 +73,76 @@ impl SyncState {
 
 // ── Tauri Commands ──────────────────────────────────────────────────────
 
+/// Encrypt `plaintext` with a password-derived AES-256-GCM key, returning a
+/// self-contained blob: `[32-byte salt][12-byte nonce][ciphertext]`. The
+/// salt and nonce travel with the ciphertext so import only needs the
+/// password, not any separately-managed key material.
+fn encrypt_with_password(plaintext: &[u8], password: &str) -> Result<Vec<u8>, SyncError> {
+    let mut salt = vec![0u8; crate::vault::crypto::SALT_LEN];
+    rand::thread_rng().fill_bytes(&mut salt);
+    let key = crate::vault::crypto::derive_key(password.as_bytes(), &salt)
+        .map_err(|e| SyncError::Encryption(e.to_string()))?;
+    let (ciphertext, nonce) = crate::vault::crypto::encrypt(plaintext, &key)
+        .map_err(|e| SyncError::Encryption(e.to_string()))?;
+
+    let mut out = Vec::with_capacity(salt.len() + nonce.len() + ciphertext.len());
+    out.extend_from_slice(&salt);
+    out.extend_from_slice(&nonce);
+    out.extend_from_slice(&ciphertext);
+    Ok(out)
+}
+
+/// Inverse of `encrypt_with_password`.
+fn decrypt_with_password(data: &[u8], password: &str) -> Result<Vec<u8>, SyncError> {
+    let salt_len = crate::vault::crypto::SALT_LEN;
+    let nonce_len = crate::vault::crypto::NONCE_LEN;
+    if data.len() < salt_len + nonce_len {
+        return Err(SyncError::InvalidFormat("bundle is too short to contain a salt and nonce".into()));
+    }
+    let (salt, rest) = data.split_at(salt_len);
+    let (nonce, ciphertext) = rest.split_at(nonce_len);
+
+    let key = crate::vault::crypto::derive_key(password.as_bytes(), salt)
+        .map_err(|e| SyncError::Encryption(e.to_string()))?;
+    crate::vault::crypto::decrypt(ciphertext, nonce, &key)
+        .map_err(|_| SyncError::ImportFailed("wrong password, or the bundle is corrupted".into()))
+}
+
 #[tauri::command]
 pub async fn sync_export(
+    password: String,
+    config_state: tauri::State<'_, ConfigState>,
+    snippet_state: tauri::State<'_, SnippetState>,
     state: tauri::State<'_, SyncState>,
 ) -> Result<Vec<u8>, SyncError> {
+    let sessions = crate::config::session_list(config_state.clone())
+        .map_err(|e| SyncError::ExportFailed(e.to_string()))?
+        .into_iter()
+        .map(|s| serde_json::to_value(s).unwrap_or(serde_json::Value::Null))
+        .collect();
+    let settings = crate::config::settings_get(config_state)
+        .map_err(|e| SyncError::ExportFailed(e.to_string()))
+        .and_then(|s| serde_json::to_value(s).map_err(SyncError::from))?;
+    let snippets = crate::snippets::snippet_list(snippet_state)
+        .map_err(|e| SyncError::ExportFailed(e.to_string()))?
+        .into_iter()
+        .map(|s| serde_json::to_value(s).unwrap_or(serde_json::Value::Null))
+        .collect();
+
     let bundle = SyncBundle {
-        version: "1.0".to_string(),
+        version: "2.0".to_string(),
         timestamp: chrono::Utc::now().to_rfc3339(),
-        settings: serde_json::Value::Object(serde_json::Map::new()),
-        sessions: vec![],
-        snippets: vec![],
+        settings,
+        sessions,
+        snippets,
+        // Custom themes live in frontend localStorage (appStore), not any
+        // backend store this command has access to — left empty rather than
+        // fabricated. Built-in themes need no export; they ship with the app.
         themes: vec![],
     };
 
     let json = serde_json::to_vec(&bundle)?;
-
-    // Simple XOR-based obfuscation for the bundle (real encryption would use AES-256-GCM)
-    let key: u8 = 0xC7;
-    let encrypted: Vec<u8> = json.iter().map(|b| b ^ key).collect();
+    let encrypted = encrypt_with_password(&json, &password)?;
 
     let now = chrono::Utc::now().to_rfc3339();
     *state.last_export.lock().unwrap() = Some(now);
@@ -91,20 +153,72 @@ pub async fn sync_export(
 #[tauri::command]
 pub async fn sync_import(
     data: Vec<u8>,
+    password: String,
+    config_state: tauri::State<'_, ConfigState>,
+    snippet_state: tauri::State<'_, SnippetState>,
     state: tauri::State<'_, SyncState>,
-) -> Result<(), SyncError> {
-    // Decrypt
-    let key: u8 = 0xC7;
-    let decrypted: Vec<u8> = data.iter().map(|b| b ^ key).collect();
+) -> Result<SyncImportSummary, SyncError> {
+    let decrypted = decrypt_with_password(&data, &password)?;
 
-    let _bundle: SyncBundle = serde_json::from_slice(&decrypted)
+    let bundle: SyncBundle = serde_json::from_slice(&decrypted)
         .map_err(|e| SyncError::InvalidFormat(e.to_string()))?;
 
-    // In a full implementation, apply bundle settings to the app
+    // Sessions carry their original id, so re-importing the same bundle
+    // (e.g. syncing again later) updates the existing session in place
+    // rather than duplicating it — session_create/do_session_create writes
+    // by id.
+    let mut sessions_imported = 0u32;
+    for session_json in bundle.sessions {
+        if let Ok(session) = serde_json::from_value::<crate::config::SessionDefinition>(session_json) {
+            let request = crate::config::SessionCreateRequest {
+                id: Some(session.id),
+                name: session.name,
+                session_type: session.session_type,
+                group: session.group,
+                tags: Some(session.tags),
+                icon: session.icon,
+                color_label: session.color_label,
+                credential_ref: session.credential_ref,
+                connection: session.connection,
+                startup_script: session.startup_script,
+                environment_variables: Some(session.environment_variables),
+                notes: session.notes,
+                auto_reconnect: Some(session.auto_reconnect),
+                keep_alive_interval_seconds: Some(session.keep_alive_interval_seconds),
+                favorite: Some(session.favorite),
+                settings_override: session.settings_override,
+            };
+            if crate::config::session_create(config_state.clone(), request).is_ok() {
+                sessions_imported += 1;
+            }
+        }
+    }
+
+    // Snippets always get a fresh id (snippet_create doesn't support
+    // preserving one), so re-importing the same bundle will duplicate them —
+    // a real but minor rough edge, not a silent no-op.
+    let mut snippets_imported = 0u32;
+    for snippet_json in bundle.snippets {
+        if let Ok(snippet) = serde_json::from_value::<crate::snippets::Snippet>(snippet_json) {
+            if crate::snippets::snippet_create(snippet.name, snippet.command, snippet.tags, snippet_state.clone()).is_ok() {
+                snippets_imported += 1;
+            }
+        }
+    }
+
+    let settings_applied = serde_json::from_value::<Settings>(bundle.settings)
+        .ok()
+        .and_then(|settings| crate::config::settings_update(config_state, settings).ok())
+        .is_some();
+
     let now = chrono::Utc::now().to_rfc3339();
     *state.last_import.lock().unwrap() = Some(now);
 
-    Ok(())
+    Ok(SyncImportSummary {
+        sessions_imported,
+        snippets_imported,
+        settings_applied,
+    })
 }
 
 #[tauri::command]
@@ -343,30 +457,68 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_sync_export_import() {
+    fn test_sync_bundle_roundtrips_through_serde() {
         let bundle = SyncBundle {
-            version: "1.0".to_string(),
+            version: "2.0".to_string(),
             timestamp: "2025-01-01T00:00:00Z".to_string(),
             settings: serde_json::json!({"theme": "dark"}),
             sessions: vec![serde_json::json!({"name": "test"})],
             snippets: vec![],
             themes: vec![],
         };
-
-        // Serialize
         let json = serde_json::to_vec(&bundle).unwrap();
-
-        // Encrypt
-        let key: u8 = 0xAB;
-        let encrypted: Vec<u8> = json.iter().map(|b| b ^ key).collect();
-
-        // Decrypt
-        let decrypted: Vec<u8> = encrypted.iter().map(|b| b ^ key).collect();
-
-        // Deserialize
-        let restored: SyncBundle = serde_json::from_slice(&decrypted).unwrap();
-        assert_eq!(restored.version, "1.0");
+        let restored: SyncBundle = serde_json::from_slice(&json).unwrap();
+        assert_eq!(restored.version, "2.0");
         assert_eq!(restored.sessions.len(), 1);
+    }
+
+    // Regression coverage: sync_export/sync_import used to "encrypt" with a
+    // single-byte XOR (trivially reversible, not encryption at all) and the
+    // export bundle was always empty regardless of real state. These test
+    // the real AES-256-GCM + Argon2id password-based encryption that
+    // replaced it.
+    #[test]
+    fn test_encrypt_decrypt_with_password_roundtrips() {
+        let plaintext = b"{\"sessions\":[{\"name\":\"prod-db\"}]}";
+        let encrypted = encrypt_with_password(plaintext, "correct horse battery staple").unwrap();
+
+        // Salt + nonce + at least some ciphertext, and it must not just be
+        // the plaintext bytes shifted (real encryption, not obfuscation).
+        assert!(encrypted.len() > plaintext.len());
+        assert_ne!(&encrypted[..plaintext.len().min(encrypted.len())], &plaintext[..]);
+
+        let decrypted = decrypt_with_password(&encrypted, "correct horse battery staple").unwrap();
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_decrypt_with_wrong_password_fails() {
+        let plaintext = b"secret bundle contents";
+        let encrypted = encrypt_with_password(plaintext, "right-password").unwrap();
+
+        let result = decrypt_with_password(&encrypted, "wrong-password");
+        assert!(result.is_err(), "decrypting with the wrong password must fail, not silently return garbage");
+    }
+
+    #[test]
+    fn test_decrypt_rejects_too_short_input() {
+        let result = decrypt_with_password(&[1, 2, 3], "any-password");
+        assert!(matches!(result, Err(SyncError::InvalidFormat(_))));
+    }
+
+    #[test]
+    fn test_two_exports_with_the_same_password_use_different_salt_and_nonce() {
+        // Same plaintext + same password must still produce different
+        // ciphertext bytes each time (fresh random salt/nonce per call) —
+        // otherwise identical exports would leak that fact to an observer.
+        let plaintext = b"identical content";
+        let a = encrypt_with_password(plaintext, "same-password").unwrap();
+        let b = encrypt_with_password(plaintext, "same-password").unwrap();
+        assert_ne!(a, b);
+
+        // Both still decrypt correctly with the right password.
+        assert_eq!(decrypt_with_password(&a, "same-password").unwrap(), plaintext);
+        assert_eq!(decrypt_with_password(&b, "same-password").unwrap(), plaintext);
     }
 
     #[test]

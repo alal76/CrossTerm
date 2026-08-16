@@ -957,6 +957,12 @@ export interface SyncStatus {
   last_import?: string;
 }
 
+export interface SyncImportSummary {
+  sessions_imported: number;
+  snippets_imported: number;
+  settings_applied: boolean;
+}
+
 // --- FTP Types ---
 
 export interface FtpConfig {
