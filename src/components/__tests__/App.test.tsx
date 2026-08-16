@@ -325,6 +325,7 @@ describe("App", () => {
       SessionType.CloudDashboard,
       SessionType.CodeEditor,
       SessionType.DiffViewer,
+      SessionType.Macros,
     ];
     const allTypes = Object.values(SessionType).filter((t) => !nonConnectableTypes.includes(t));
     for (const type of allTypes) {
@@ -425,6 +426,25 @@ describe("App", () => {
     fireEvent.click(screen.getByTitle("New Tab"));
     fireEvent.click(screen.getByText("Diff Viewer"));
     expect(await screen.findByText("Compare Files")).toBeInTheDocument();
+  });
+
+  // Regression coverage: MacroEditor.tsx and ExpectRuleList.tsx were fully
+  // built and tested but had no mount point anywhere in the app.
+  it("Macro Editor in the + menu opens a tab with the real MacroEditor and ExpectRuleList", async () => {
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "macro_list") return Promise.resolve([]);
+      if (cmd === "expect_rule_list") return Promise.resolve([]);
+      return Promise.resolve(undefined);
+    });
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("New Tab"));
+    fireEvent.click(screen.getByText("Macro Editor"));
+
+    expect(await screen.findByText("No macros yet. Create a macro to automate terminal tasks.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Expect Rules"));
+    expect(await screen.findByText("No expect rules defined. Add a rule to auto-respond to patterns.")).toBeInTheDocument();
   });
 
   // Regression coverage for wiring RDP/VNC/Telnet/Serial into the tab

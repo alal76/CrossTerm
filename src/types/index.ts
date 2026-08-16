@@ -16,6 +16,7 @@ export enum SessionType {
   CloudDashboard = "cloud_dashboard",
   CodeEditor = "code_editor",
   DiffViewer = "diff_viewer",
+  Macros = "macros",
   // Extended protocol breadth
   Mosh = "mosh",
   WinRM = "winrm",
