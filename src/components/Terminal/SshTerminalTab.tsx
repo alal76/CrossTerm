@@ -18,6 +18,7 @@ import ReconnectOverlay from "./ReconnectOverlay";
 import ComplianceBanner from "@/components/Shared/ComplianceBanner";
 import RecordingControls from "@/components/Recording/RecordingControls";
 import CommandAssistant from "./CommandAssistant";
+import KnownHostsDiff, { type HostKeyChange } from "@/components/SSH/KnownHostsDiff";
 
 interface SshAuthPayload {
   type: "password" | "private_key" | "none";
@@ -79,6 +80,9 @@ export default function SshTerminalTab({
   const [banner, setBanner] = useState<string | null>(null);
   // Track auth method for auto-save
   const authSuccessInfo = useRef<SshAuthSuccessEvent | null>(null);
+
+  // ── Host key change (known_hosts mismatch) state ──
+  const [hostKeyChange, setHostKeyChange] = useState<HostKeyChange | null>(null);
 
   // ── Credential prompt state (when connecting with none auth and auth is required) ──
   const [showCredentialPrompt, setShowCredentialPrompt] = useState(false);
@@ -196,6 +200,27 @@ export default function SshTerminalTab({
           ]);
         },
       ),
+      listen<{
+        host: string;
+        port: number;
+        old_key_type: string;
+        old_fingerprint: string;
+        new_key_type: string;
+        new_fingerprint: string;
+        detected_at: string;
+      }>("ssh:host_key_changed", (event) => {
+        if (cancelled) return;
+        if (event.payload.host !== host || event.payload.port !== port) return;
+        setHostKeyChange({
+          host: event.payload.host,
+          port: event.payload.port,
+          oldKeyType: event.payload.old_key_type,
+          oldFingerprint: event.payload.old_fingerprint,
+          newKeyType: event.payload.new_key_type,
+          newFingerprint: event.payload.new_fingerprint,
+          detectedAt: event.payload.detected_at,
+        });
+      }),
     ];
 
     async function connect() {
@@ -206,6 +231,7 @@ export default function SshTerminalTab({
         setConnectLogs([]);
         setBanner(null);
         setShowCredentialPrompt(false);
+        setHostKeyChange(null);
         authSuccessInfo.current = null;
 
         // Resolve auth: if we have a credentialRef, try fetching from vault
@@ -576,6 +602,22 @@ export default function SshTerminalTab({
       }
       retryConnect();
     };
+
+    if (isHostKeyChanged && hostKeyChange) {
+      return (
+        <div className="flex items-center justify-center w-full h-full bg-surface-primary p-6">
+          <div className="max-w-lg w-full">
+            <KnownHostsDiff
+              change={hostKeyChange}
+              onAccept={() => { void forgetAndRetry(); }}
+              onReject={() => setHostKeyChange(null)}
+              onForget={() => { invoke("ssh_forget_host_key", { host, port }).catch(() => {}); }}
+            />
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="flex items-center justify-center w-full h-full bg-surface-primary">
         <div className="flex flex-col items-center gap-3 max-w-md w-full px-6 text-center">

@@ -124,6 +124,74 @@ describe("SshTerminalTab", () => {
     await waitFor(() => expect(screen.getByTestId("ssh-terminal-view")).toBeInTheDocument());
   });
 
+  // Regression coverage: KnownHostsDiff was fully built and tested but never
+  // mounted — a host-key mismatch only ever showed a generic error message,
+  // never the actual old/new fingerprint diff, even though the backend now
+  // emits that detail via ssh:host_key_changed.
+  describe("KnownHostsDiff (host key mismatch detail)", () => {
+    it("shows the real fingerprint diff when ssh:host_key_changed fires", async () => {
+      mockInvoke.mockImplementation((cmd: string) => {
+        if (cmd === "ssh_connect") return Promise.reject(new Error("Host key changed for example.com"));
+        return Promise.resolve(undefined);
+      });
+      render(<SshTerminalTab {...baseProps} />);
+      await waitFor(() => expect(listenCallbacks.has("ssh:host_key_changed")).toBe(true));
+
+      act(() => {
+        listenCallbacks.get("ssh:host_key_changed")?.({
+          payload: {
+            host: "example.com",
+            port: 22,
+            old_key_type: "ssh-ed25519",
+            old_fingerprint: "SHA256:OLD",
+            new_key_type: "ssh-rsa",
+            new_fingerprint: "SHA256:NEW",
+            detected_at: "2026-01-01T00:00:00Z",
+          },
+        });
+      });
+
+      expect(await screen.findByText(/Host key mismatch detected for example.com:22/)).toBeInTheDocument();
+      expect(screen.getByText("SHA256:OLD")).toBeInTheDocument();
+      expect(screen.getByText("SHA256:NEW")).toBeInTheDocument();
+    });
+
+    it("'Accept new key' forgets the old key and retries the connection", async () => {
+      let connectAttempt = 0;
+      mockInvoke.mockImplementation((cmd: string) => {
+        if (cmd === "ssh_connect") {
+          connectAttempt += 1;
+          return connectAttempt === 1
+            ? Promise.reject(new Error("Host key changed for example.com"))
+            : Promise.resolve("conn-1");
+        }
+        if (cmd === "ssh_forget_host_key") return Promise.resolve(undefined);
+        return Promise.resolve(undefined);
+      });
+      render(<SshTerminalTab {...baseProps} />);
+      await waitFor(() => expect(listenCallbacks.has("ssh:host_key_changed")).toBe(true));
+
+      act(() => {
+        listenCallbacks.get("ssh:host_key_changed")?.({
+          payload: {
+            host: "example.com",
+            port: 22,
+            old_key_type: "ssh-ed25519",
+            old_fingerprint: "SHA256:OLD",
+            new_key_type: "ssh-rsa",
+            new_fingerprint: "SHA256:NEW",
+            detected_at: "2026-01-01T00:00:00Z",
+          },
+        });
+      });
+
+      fireEvent.click(await screen.findByText("Accept new key"));
+
+      await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("ssh_forget_host_key", { host: "example.com", port: 22 }));
+      await waitFor(() => expect(screen.getByTestId("ssh-terminal-view")).toBeInTheDocument());
+    });
+  });
+
   it("shows the credential retry form and resubmits with a password", async () => {
     let connectAttempt = 0;
     mockInvoke.mockImplementation((cmd: string) => {

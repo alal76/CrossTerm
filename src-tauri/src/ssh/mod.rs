@@ -162,6 +162,17 @@ struct SshHostKeyNewEvent {
 }
 
 #[derive(Clone, Serialize)]
+struct SshHostKeyChangedEvent {
+    host: String,
+    port: u16,
+    old_key_type: String,
+    old_fingerprint: String,
+    new_key_type: String,
+    new_fingerprint: String,
+    detected_at: String,
+}
+
+#[derive(Clone, Serialize)]
 struct SshAuthPromptEvent {
     connection_id: String,
     name: String,
@@ -282,7 +293,19 @@ impl client::Handler for SshClientHandler {
                         // Match — accept silently
                         return Ok(true);
                     } else {
-                        // Key changed — reject
+                        // Key changed — tell the frontend what changed, then reject
+                        let _ = self.app_handle.emit(
+                            "ssh:host_key_changed",
+                            SshHostKeyChangedEvent {
+                                host: self.host.clone(),
+                                port: self.port,
+                                old_key_type: parts[1].to_string(),
+                                old_fingerprint: parts[2].to_string(),
+                                new_key_type: algorithm,
+                                new_fingerprint: fingerprint,
+                                detected_at: chrono::Utc::now().to_rfc3339(),
+                            },
+                        );
                         return Err(SshError::HostKeyChanged(host_key));
                     }
                 }
@@ -2499,6 +2522,23 @@ mod tests {
         };
         let json = serde_json::to_string(&banner).unwrap();
         assert!(json.contains("\"banner\":\"Authorized users only"));
+    }
+
+    #[test]
+    fn test_ssh_host_key_changed_event_serde() {
+        let event = SshHostKeyChangedEvent {
+            host: "example.com".to_string(),
+            port: 22,
+            old_key_type: "ssh-ed25519".to_string(),
+            old_fingerprint: "SHA256:old".to_string(),
+            new_key_type: "ssh-rsa".to_string(),
+            new_fingerprint: "SHA256:new".to_string(),
+            detected_at: "2026-01-01T00:00:00+00:00".to_string(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"host\":\"example.com\""));
+        assert!(json.contains("\"old_fingerprint\":\"SHA256:old\""));
+        assert!(json.contains("\"new_fingerprint\":\"SHA256:new\""));
     }
 
     #[test]
