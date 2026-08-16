@@ -14,8 +14,97 @@ import AwsPanel from "@/components/Cloud/AwsPanel";
 import AzurePanel from "@/components/Cloud/AzurePanel";
 import GcpPanel from "@/components/Cloud/GcpPanel";
 import CloudAssetTree from "@/components/Cloud/CloudAssetTree";
+import KubectlPanel from "@/components/Cloud/KubectlPanel";
 
-type ProviderTab = "aws" | "azure" | "gcp" | "tree";
+type ProviderTab = "aws" | "azure" | "gcp" | "tree" | "kubectl";
+
+function KubectlTab() {
+  const { t } = useTranslation();
+  const [provider, setProvider] = useState<"azure" | "gcp">("azure");
+  const [cluster, setCluster] = useState("");
+  const [resourceGroup, setResourceGroup] = useState("");
+  const [zone, setZone] = useState("");
+  const [project, setProject] = useState("");
+  const [connected, setConnected] = useState(false);
+
+  if (connected && cluster) {
+    return (
+      <KubectlPanel
+        provider={provider}
+        cluster={cluster}
+        resourceGroup={resourceGroup || undefined}
+        zone={zone || undefined}
+        project={project || undefined}
+      />
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-3 p-4 max-w-sm">
+      <div>
+        <label htmlFor="kubectl-provider" className="mb-1 block text-[11px] font-medium text-text-secondary">Provider</label>
+        <select
+          id="kubectl-provider"
+          value={provider}
+          onChange={(e) => setProvider(e.target.value as "azure" | "gcp")}
+          className="w-full rounded-md border border-border-default bg-surface-secondary px-2 py-1.5 text-xs text-text-primary"
+        >
+          <option value="azure">AKS (Azure)</option>
+          <option value="gcp">GKE (GCP)</option>
+        </select>
+      </div>
+      <div>
+        <label htmlFor="kubectl-cluster" className="mb-1 block text-[11px] font-medium text-text-secondary">Cluster name</label>
+        <input
+          id="kubectl-cluster"
+          value={cluster}
+          onChange={(e) => setCluster(e.target.value)}
+          className="w-full rounded-md border border-border-default bg-surface-secondary px-2 py-1.5 text-xs text-text-primary"
+        />
+      </div>
+      {provider === "azure" ? (
+        <div>
+          <label htmlFor="kubectl-resource-group" className="mb-1 block text-[11px] font-medium text-text-secondary">Resource group</label>
+          <input
+            id="kubectl-resource-group"
+            value={resourceGroup}
+            onChange={(e) => setResourceGroup(e.target.value)}
+            className="w-full rounded-md border border-border-default bg-surface-secondary px-2 py-1.5 text-xs text-text-primary"
+          />
+        </div>
+      ) : (
+        <>
+          <div>
+            <label htmlFor="kubectl-zone" className="mb-1 block text-[11px] font-medium text-text-secondary">Zone</label>
+            <input
+              id="kubectl-zone"
+              value={zone}
+              onChange={(e) => setZone(e.target.value)}
+              className="w-full rounded-md border border-border-default bg-surface-secondary px-2 py-1.5 text-xs text-text-primary"
+            />
+          </div>
+          <div>
+            <label htmlFor="kubectl-project" className="mb-1 block text-[11px] font-medium text-text-secondary">Project</label>
+            <input
+              id="kubectl-project"
+              value={project}
+              onChange={(e) => setProject(e.target.value)}
+              className="w-full rounded-md border border-border-default bg-surface-secondary px-2 py-1.5 text-xs text-text-primary"
+            />
+          </div>
+        </>
+      )}
+      <button
+        type="button"
+        disabled={!cluster.trim()}
+        onClick={() => setConnected(true)}
+        className="rounded-md bg-interactive-default px-3 py-1.5 text-xs font-medium text-text-inverse hover:bg-interactive-hover disabled:cursor-not-allowed disabled:bg-interactive-disabled disabled:text-text-disabled"
+      >
+        {t("cloud.connect")}
+      </button>
+    </div>
+  );
+}
 
 function ProviderStatusBadge({
   status,
@@ -88,6 +177,7 @@ export default function CloudDashboard() {
     { key: "azure", label: t("cloud.azure") },
     { key: "gcp", label: t("cloud.gcp") },
     { key: "tree", label: t("cloud.assetTree") },
+    { key: "kubectl", label: t("cloud.kubectl") },
   ];
 
   return (
@@ -113,7 +203,7 @@ export default function CloudDashboard() {
           >
             <span className="flex items-center gap-1.5">
               {tab.label}
-              {tab.key !== "tree" && (
+              {tab.key !== "tree" && tab.key !== "kubectl" && (
                 <ProviderStatusBadge status={getStatus(tab.key)} />
               )}
             </span>
@@ -139,6 +229,7 @@ export default function CloudDashboard() {
               <GcpPanel status={getStatus("gcp")} />
             )}
             {activeTab === "tree" && <CloudAssetTree />}
+            {activeTab === "kubectl" && <KubectlTab />}
           </>
         )}
       </div>

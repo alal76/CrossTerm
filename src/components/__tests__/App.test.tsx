@@ -320,7 +320,9 @@ describe("App", () => {
       (o) => (o as HTMLOptionElement).value,
     );
 
-    const allTypes = Object.values(SessionType).filter((t) => t !== SessionType.NetworkExplorer);
+    const allTypes = Object.values(SessionType).filter(
+      (t) => t !== SessionType.NetworkExplorer && t !== SessionType.CloudDashboard,
+    );
     for (const type of allTypes) {
       expect(optionValues).toContain(type);
     }
@@ -374,6 +376,22 @@ describe("App", () => {
     // The search bar only exists on the real SessionTree component, not the
     // old inline SessionsPanel fallback it replaced.
     expect(screen.getByPlaceholderText("Search sessions…")).toBeInTheDocument();
+  });
+
+  // Regression coverage: CloudDashboard.tsx (which wires together AWS/Azure/
+  // GCP panels and the resource-explorer asset tree) was fully built and
+  // tested but never reachable from anywhere in the app.
+  it("'Cloud' in the + menu opens a tab rendering the real CloudDashboard", async () => {
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "cloud_detect_clis") return Promise.resolve([]);
+      return Promise.resolve(undefined);
+    });
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("New Tab"));
+    fireEvent.click(screen.getByText("Cloud"));
+
+    expect(await screen.findByText("Cloud Dashboard")).toBeInTheDocument();
   });
 
   // Regression coverage for wiring RDP/VNC/Telnet/Serial into the tab

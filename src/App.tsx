@@ -26,6 +26,7 @@ import {
   MoreVertical,
   Radio,
   Radar,
+  Cloud,
   KeyRound,
   Bell,
   ExternalLink,
@@ -83,6 +84,7 @@ import WhatsNewPanel from "@/components/Help/WhatsNewPanel";
 import FeatureTour from "@/components/Help/FeatureTour";
 import TipOfTheDay from "@/components/Help/TipOfTheDay";
 import NetworkExplorer from "@/components/NetworkTools/NetworkExplorer";
+import CloudDashboard from "@/components/Cloud/CloudDashboard";
 import RemoteFileBrowser from "@/components/RemoteFiles/RemoteFileBrowser";
 import VaultUnlock from "@/components/Vault/VaultUnlock";
 import CredentialManager from "@/components/Vault/CredentialManager";
@@ -550,6 +552,7 @@ function NewTabDropdown({
   onNewConnection,
   onMoreSessionTypes,
   onOpenNetworkExplorer,
+  onOpenCloud,
   onOpenCredentials,
   onLockVault,
   onDeleteVault,
@@ -563,6 +566,7 @@ function NewTabDropdown({
   readonly onNewConnection: (type: SessionType) => void;
   readonly onMoreSessionTypes: () => void;
   readonly onOpenNetworkExplorer: () => void;
+  readonly onOpenCloud: () => void;
   readonly onOpenCredentials: () => void;
   readonly onLockVault: () => void;
   readonly onDeleteVault: () => void;
@@ -634,6 +638,10 @@ function NewTabDropdown({
         <Radar size={13} className="shrink-0 text-text-disabled" />
         {t("network.explore")}
       </button>
+      <button onClick={() => { onOpenCloud(); onClose(); }} className={menuItemCls}>
+        <Cloud size={13} className="shrink-0 text-text-disabled" />
+        Cloud
+      </button>
       <div className="h-px bg-border-subtle mx-2 my-1" />
       <div className="px-3 pt-1 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-text-disabled">
         Vault
@@ -668,6 +676,7 @@ function TabBar({
   onNewConnection,
   onMoreSessionTypes,
   onOpenNetworkExplorer,
+  onOpenCloud,
   onOpenCredentials,
   onLockVault,
   onDeleteVault,
@@ -679,6 +688,7 @@ function TabBar({
   readonly onNewConnection: (type: SessionType) => void;
   readonly onMoreSessionTypes: () => void;
   readonly onOpenNetworkExplorer: () => void;
+  readonly onOpenCloud: () => void;
   readonly onOpenCredentials: () => void;
   readonly onLockVault: () => void;
   readonly onDeleteVault: () => void;
@@ -834,6 +844,7 @@ function TabBar({
             onNewConnection={onNewConnection}
             onMoreSessionTypes={onMoreSessionTypes}
             onOpenNetworkExplorer={onOpenNetworkExplorer}
+            onOpenCloud={onOpenCloud}
             onOpenCredentials={onOpenCredentials}
             onLockVault={onLockVault}
             onDeleteVault={onDeleteVault}
@@ -1111,6 +1122,17 @@ function SessionCanvas() {
               className={clsx("absolute inset-0 overflow-auto p-4", isActive ? "z-10" : "z-0 hidden")}
             >
               <NetworkExplorer />
+            </div>
+          );
+        }
+
+        if (tab.sessionType === SessionType.CloudDashboard) {
+          return (
+            <div
+              key={tab.id}
+              className={clsx("absolute inset-0 overflow-auto p-4", isActive ? "z-10" : "z-0 hidden")}
+            >
+              <CloudDashboard />
             </div>
           );
         }
@@ -1802,6 +1824,24 @@ export default function App() {
     openTab(session);
   }, [addSession, openTab]);
 
+  const handleOpenCloudTab = useCallback(() => {
+    const now = new Date().toISOString();
+    const session: Session = {
+      id: crypto.randomUUID(),
+      name: "Cloud",
+      type: SessionType.CloudDashboard,
+      group: "",
+      tags: [],
+      connection: { host: "localhost", port: 0 },
+      createdAt: now,
+      updatedAt: now,
+      autoReconnect: false,
+      keepAliveIntervalSeconds: 0,
+    };
+    addSession(session);
+    openTab(session);
+  }, [addSession, openTab]);
+
   // Native menu callbacks are stored in a ref that is overwritten every render.
   // This pattern avoids the "stale closure" problem: buildNativeMenu runs once
   // (empty dep array) and captures `cb` (the ref object), but every action
@@ -2010,6 +2050,7 @@ export default function App() {
                   setShowSessionEditor(true);
                 }}
                 onOpenNetworkExplorer={handleOpenNetworkTab}
+                onOpenCloud={handleOpenCloudTab}
                 onOpenCredentials={() => setShowCredentialManager(true)}
                 onLockVault={() => lockAllVaults()}
                 onDeleteVault={() => setShowVaultDeleteDialog(true)}

@@ -13,6 +13,7 @@ export enum SessionType {
   KubernetesExec = "kubernetes_exec",
   DockerExec = "docker_exec",
   NetworkExplorer = "network_explorer",
+  CloudDashboard = "cloud_dashboard",
   // Extended protocol breadth
   Mosh = "mosh",
   WinRM = "winrm",

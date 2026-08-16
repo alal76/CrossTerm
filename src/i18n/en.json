@@ -889,6 +889,7 @@
     "stop": "Stop",
     "refresh": "Refresh",
     "assetTree": "Resource Explorer",
+    "kubectl": "Kubernetes",
     "noResources": "No resources found. Authenticate with a cloud provider to view resources.",
     "ssoLogin": "SSO Login",
     "bastion": "Bastion",
