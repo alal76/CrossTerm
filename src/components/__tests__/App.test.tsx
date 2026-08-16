@@ -299,6 +299,32 @@ describe("App", () => {
     });
   });
 
+  // Regression coverage for the "+" new-tab menu: it offers direct buttons
+  // for only the handful of most-common protocols, but must always provide
+  // a path to the rest via "More Session Types…" opening the full
+  // SessionEditor picker. Before this test, the menu silently drifted out
+  // of sync as protocols were added — SESSION_TYPE_OPTIONS in
+  // SessionEditor.tsx grew to cover every SessionType, but the "+" menu had
+  // no escape hatch to reach it, so ~27 of the ~33 connectable session
+  // types (everything past Local Shell/SSH/Telnet/RDP/VNC/SFTP) were
+  // unreachable from the tab bar.
+  it("every connectable SessionType is reachable from the '+' new-tab menu", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("New Tab"));
+    fireEvent.click(screen.getByText("More Session Types…"));
+
+    const typeSelect = screen.getByRole("combobox");
+    const optionValues = Array.from(typeSelect.querySelectorAll("option")).map(
+      (o) => (o as HTMLOptionElement).value,
+    );
+
+    const allTypes = Object.values(SessionType).filter((t) => t !== SessionType.NetworkExplorer);
+    for (const type of allTypes) {
+      expect(optionValues).toContain(type);
+    }
+  });
+
   // Regression coverage for wiring RDP/VNC/Telnet/Serial into the tab
   // router: before this, SessionType.SSH was the only type with a real
   // component — everything else (including these four, whose components

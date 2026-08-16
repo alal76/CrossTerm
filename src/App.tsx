@@ -545,6 +545,7 @@ function NewTabDropdown({
   onNewSSH,
   onNewSFTP,
   onNewConnection,
+  onMoreSessionTypes,
   onOpenNetworkExplorer,
   onOpenCredentials,
   onLockVault,
@@ -557,6 +558,7 @@ function NewTabDropdown({
   readonly onNewSSH: () => void;
   readonly onNewSFTP: () => void;
   readonly onNewConnection: (type: SessionType) => void;
+  readonly onMoreSessionTypes: () => void;
   readonly onOpenNetworkExplorer: () => void;
   readonly onOpenCredentials: () => void;
   readonly onLockVault: () => void;
@@ -620,6 +622,10 @@ function NewTabDropdown({
         <FolderTree size={13} className="shrink-0 text-text-disabled" />
         {t("newTabMenu.sftp")}
       </button>
+      <button onClick={() => { onMoreSessionTypes(); onClose(); }} className={menuItemCls}>
+        <Plus size={13} className="shrink-0 text-text-disabled" />
+        {t("newTabMenu.moreTypes")}
+      </button>
       <div className="h-px bg-border-subtle mx-2 my-1" />
       <button onClick={() => { onOpenNetworkExplorer(); onClose(); }} className={menuItemCls}>
         <Radar size={13} className="shrink-0 text-text-disabled" />
@@ -657,6 +663,7 @@ function TabBar({
   onNewSSH,
   onNewSFTP,
   onNewConnection,
+  onMoreSessionTypes,
   onOpenNetworkExplorer,
   onOpenCredentials,
   onLockVault,
@@ -667,6 +674,7 @@ function TabBar({
   readonly onNewSSH: () => void;
   readonly onNewSFTP: () => void;
   readonly onNewConnection: (type: SessionType) => void;
+  readonly onMoreSessionTypes: () => void;
   readonly onOpenNetworkExplorer: () => void;
   readonly onOpenCredentials: () => void;
   readonly onLockVault: () => void;
@@ -821,6 +829,7 @@ function TabBar({
             onNewSSH={onNewSSH}
             onNewSFTP={onNewSFTP}
             onNewConnection={onNewConnection}
+            onMoreSessionTypes={onMoreSessionTypes}
             onOpenNetworkExplorer={onOpenNetworkExplorer}
             onOpenCredentials={onOpenCredentials}
             onLockVault={onLockVault}
@@ -2046,6 +2055,10 @@ export default function App() {
                 }}
                 onNewConnection={(type) => {
                   setNewSessionDefaultType(type);
+                  setEditingSession(null);
+                  setShowSessionEditor(true);
+                }}
+                onMoreSessionTypes={() => {
                   setEditingSession(null);
                   setShowSessionEditor(true);
                 }}

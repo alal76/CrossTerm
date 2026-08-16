@@ -445,7 +445,8 @@
   "newTabMenu": {
     "localShell": "New Local Shell",
     "ssh": "New SSH Session",
-    "sftp": "New SFTP Browser"
+    "sftp": "New SFTP Browser",
+    "moreTypes": "More Session Types…"
   },
   "sessionTree": {
     "noSessionsTitle": "No sessions yet",
