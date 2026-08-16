@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import "@/i18n";
 import SettingsPanel from "@/components/Settings/SettingsPanel";
+import { ToastProvider } from "@/components/Shared/Toast";
 import { useAppStore } from "@/stores/appStore";
 import { ThemeVariant } from "@/types";
 
@@ -111,5 +112,40 @@ describe("SettingsPanel", () => {
         settings: expect.objectContaining({ confirm_close_tab: true }),
       })
     );
+  });
+
+  // Regression coverage: PolicyPanel, TeamPanel, KeyManager, and the
+  // Language section (LocaleSelector/RtlSettings) were fully built and
+  // tested in isolation but never mounted anywhere in SettingsPanel —
+  // clicking their would-be category never existed, so they were entirely
+  // unreachable in the running app.
+  it("Keys, Policy, Team, and Language categories render their real panels", async () => {
+    const user = userEvent.setup();
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "rbac_list_members") return Promise.resolve([]);
+      if (cmd === "rbac_get_team_config") {
+        return Promise.resolve({ members: [], require_mfa: false, session_timeout_minutes: 60, allowed_ips: [] });
+      }
+      if (cmd === "keymgr_list_keys" || cmd === "keymgr_agent_list" || cmd === "keymgr_cert_list") {
+        return Promise.resolve([]);
+      }
+      if (cmd === "l10n_list_locales") return Promise.resolve([]);
+      if (cmd === "l10n_get_locale") return Promise.resolve("en");
+      return Promise.resolve(undefined);
+    });
+    render(<ToastProvider><SettingsPanel /></ToastProvider>);
+
+    await user.click(screen.getByRole("button", { name: /Team/ }));
+    expect((await screen.findAllByText("Invite Member")).length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole("button", { name: /Policy/ }));
+    expect(await screen.findByText("Recording Policy")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Keys/ }));
+    expect(screen.getAllByText("SSH Key Manager").length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole("button", { name: /Language/ }));
+    expect(screen.getByText("Interface language")).toBeInTheDocument();
+    expect(screen.getByText("Enable RTL text support")).toBeInTheDocument();
   });
 });

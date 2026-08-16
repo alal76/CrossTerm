@@ -22,6 +22,10 @@ import {
   Cpu,
   RefreshCw,
   X,
+  KeyRound,
+  ShieldCheck,
+  Users,
+  Languages,
 } from "lucide-react";
 import { useAppStore } from "@/stores/appStore";
 import { useFeatureFlagsStore } from "@/stores/featureFlagsStore";
@@ -30,6 +34,12 @@ import type { BellStyle, CursorStyle, ThemeFile, ThemeTokens } from "@/types";
 import FieldHelp from "@/components/Help/FieldHelp";
 import SecuritySettings from "@/components/Settings/SecuritySettings";
 import ProfileSync from "@/components/Settings/ProfileSync";
+import PolicyPanel from "@/components/Settings/PolicyPanel";
+import TeamPanel from "@/components/Settings/TeamPanel";
+import KeyManager from "@/components/KeyManager/KeyManager";
+import RtlSettings from "@/components/Settings/RtlSettings";
+import LocaleSelector from "@/components/Settings/LocaleSelector";
+import LocaleInstaller from "@/components/Settings/LocaleInstaller";
 
 import darkTheme from "@/themes/dark.json";
 import lightTheme from "@/themes/light.json";
@@ -61,6 +71,10 @@ type Category =
   | "keyboard"
   | "notifications"
   | "security"
+  | "keys"
+  | "policy"
+  | "team"
+  | "language"
   | "advanced"
   | "experimental";
 
@@ -204,6 +218,10 @@ const CATEGORIES: { id: Category; labelKey: string; icon: React.ReactNode }[] = 
   { id: "keyboard",      labelKey: "settings.keyboard",          icon: <Keyboard size={15} /> },
   { id: "notifications", labelKey: "settings.notifications",     icon: <Bell size={15} /> },
   { id: "security",      labelKey: "settings.security",             icon: <Shield size={15} /> },
+  { id: "keys",          labelKey: "settings.keys",                 icon: <KeyRound size={15} /> },
+  { id: "policy",        labelKey: "settings.policy",                icon: <ShieldCheck size={15} /> },
+  { id: "team",          labelKey: "settings.team",                  icon: <Users size={15} /> },
+  { id: "language",      labelKey: "settings.language",              icon: <Languages size={15} /> },
   { id: "advanced",      labelKey: "settings.advancedCategory",      icon: <Cpu size={15} /> },
   { id: "experimental",  labelKey: "settings.experimentalCategory",  icon: <RefreshCw size={15} /> },
 ];
@@ -218,6 +236,10 @@ const DESCRIPTION_KEYS: Record<Category, string> = {
   keyboard:      "settings.keyboardDescription",
   notifications: "settings.notificationsDescription",
   security:      "settings.securityDescription",
+  keys:          "settings.keysDescription",
+  policy:        "settings.policyDescription",
+  team:          "settings.teamDescription",
+  language:      "settings.languageDescription",
   advanced:      "settings.advancedDescription",
   experimental:  "settings.experimentalDescription",
 };
@@ -232,6 +254,10 @@ const HEADING_KEYS: Record<Category, string> = {
   keyboard:      "settings.keyboard",
   notifications: "settings.notifications",
   security:      "settings.security",
+  keys:          "settings.keys",
+  policy:        "settings.policy",
+  team:          "settings.team",
+  language:      "settings.language",
   advanced:      "settings.advancedCategory",
   experimental:  "settings.experimentalCategory",
 };
@@ -360,6 +386,23 @@ export default function SettingsPanel() {
   const [category, setCategory] = useState<Category>("general");
   const [settings, setSettings] = useState<BackendSettings>(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(true);
+
+  // RTL text-direction support — self-contained, no backend field yet, so
+  // persisted directly to localStorage rather than round-tripping through
+  // BackendSettings.
+  const [rtlEnabled, setRtlEnabled] = useState(
+    () => localStorage.getItem("ct_rtl_enabled") === "true",
+  );
+  const [rtlDirection, setRtlDirection] = useState<"auto" | "ltr" | "rtl">(
+    () => (localStorage.getItem("ct_rtl_direction") as "auto" | "ltr" | "rtl" | null) ?? "auto",
+  );
+  const handleRtlChange = useCallback((enabled: boolean, direction: "auto" | "ltr" | "rtl") => {
+    setRtlEnabled(enabled);
+    setRtlDirection(direction);
+    localStorage.setItem("ct_rtl_enabled", String(enabled));
+    localStorage.setItem("ct_rtl_direction", direction);
+  }, []);
+  const [showLocaleInstaller, setShowLocaleInstaller] = useState(false);
 
   // Experimental feature flags (used in renderExperimental)
   const featureFlags = useFeatureFlagsStore();
@@ -843,6 +886,63 @@ export default function SettingsPanel() {
     );
   }
 
+  function renderKeys() {
+    return (
+      <div className="h-[calc(100%-2rem)]">
+        <KeyManager />
+      </div>
+    );
+  }
+
+  function renderPolicy() {
+    return (
+      <div className="h-[calc(100%-2rem)] -mx-1">
+        <PolicyPanel />
+      </div>
+    );
+  }
+
+  function renderTeam() {
+    return (
+      <div className="h-[calc(100%-2rem)] -mx-1 -my-1">
+        <TeamPanel />
+      </div>
+    );
+  }
+
+  function renderLanguage() {
+    return (
+      <div>
+        <SectionHeading>Locale</SectionHeading>
+        <SettingRow
+          label="Interface language"
+          description="Choose the language CrossTerm's UI is displayed in"
+        >
+          <LocaleSelector />
+        </SettingRow>
+        <div className="py-2">
+          <button
+            type="button"
+            onClick={() => setShowLocaleInstaller(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-border-default hover:bg-surface-secondary text-text-secondary hover:text-text-primary transition-colors"
+          >
+            <Upload size={12} />
+            Install a locale file…
+          </button>
+        </div>
+
+        <SectionHeading>Right-to-Left Text</SectionHeading>
+        <div className="py-2">
+          <RtlSettings enabled={rtlEnabled} direction={rtlDirection} onChange={handleRtlChange} />
+        </div>
+
+        {showLocaleInstaller && (
+          <LocaleInstaller open={showLocaleInstaller} onClose={() => setShowLocaleInstaller(false)} />
+        )}
+      </div>
+    );
+  }
+
   function renderAdvanced() {
     return (
       <div>
@@ -1001,6 +1101,10 @@ export default function SettingsPanel() {
       case "keyboard":      return renderKeyboard();
       case "notifications": return renderNotifications();
       case "security":      return renderSecurity();
+      case "keys":          return renderKeys();
+      case "policy":        return renderPolicy();
+      case "team":          return renderTeam();
+      case "language":      return renderLanguage();
       case "advanced":      return renderAdvanced();
       case "experimental":  return renderExperimental();
     }
