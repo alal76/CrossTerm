@@ -47,6 +47,7 @@ import TerminalTab from "@/components/Terminal/TerminalTab";
 import SshTerminalTab from "@/components/Terminal/SshTerminalTab";
 import TelnetTerminal from "@/components/Telnet/TelnetTerminal";
 import SerialTerminal from "@/components/Serial/SerialTerminal";
+import PortForwardManager from "@/components/NetworkTools/PortForwardManager";
 import {
   RdpTabPane,
   VncTabPane,
@@ -87,6 +88,8 @@ import VaultUnlock from "@/components/Vault/VaultUnlock";
 import CredentialManager from "@/components/Vault/CredentialManager";
 import SettingsPanel from "@/components/Settings/SettingsPanel";
 import SessionEditor from "@/components/SessionTree/SessionEditor";
+import SessionTree from "@/components/SessionTree/SessionTree";
+import ImportWizard from "@/components/Shared/ImportWizard";
 import SftpBrowser from "@/components/SftpBrowser/SftpBrowser";
 import SnippetListPanel from "@/components/Snippets/SnippetListPanel";
 import NotificationHistoryPanel from "@/components/Notifications/NotificationHistoryPanel";
@@ -875,9 +878,13 @@ const SIDEBAR_MODES = [
 
 function Sidebar({
   onNewSession,
+  onSessionEdit,
+  onImport,
   onOpenCredentials,
 }: {
   readonly onNewSession: () => void;
+  readonly onSessionEdit: (session: import("@/types").Session) => void;
+  readonly onImport: () => void;
   readonly onOpenCredentials: () => void;
 }) {
   const { t } = useTranslation();
@@ -887,9 +894,6 @@ function Sidebar({
   const setSidebarCollapsed = useAppStore((s) => s.setSidebarCollapsed);
   const setSidebarWidth = useAppStore((s) => s.setSidebarWidth);
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
-  const sessions = useSessionStore((s) => s.sessions);
-  const favorites = useSessionStore((s) => s.favorites);
-  const openTab = useSessionStore((s) => s.openTab);
   const setSidebarMode = useAppStore((s) => s.setSidebarMode);
   const breakpoint = useBreakpoint();
 
@@ -1002,21 +1006,17 @@ function Sidebar({
           </div>
           <div className="flex-1 overflow-y-auto px-2 py-2">
             {sidebarMode === SidebarMode.Sessions && (
-              <SessionsPanel
-                sessions={sessions}
-                favorites={favorites}
-                onSelect={openTab}
+              <SessionTree
+                onSessionEdit={onSessionEdit}
                 onNewSession={onNewSession}
+                onImport={onImport}
               />
             )}
             {sidebarMode === SidebarMode.Snippets && (
               <SnippetListPanel />
             )}
             {sidebarMode === SidebarMode.Tunnels && (
-              <EmptyPanel
-                icon={<Lock size={32} className="text-text-disabled" />}
-                message={t("statusBar.noTunnels")}
-              />
+              <PortForwardManager />
             )}
             {sidebarMode === SidebarMode.RemoteFiles && (
               <RemoteFileBrowser />
@@ -1037,62 +1037,6 @@ function Sidebar({
   );
 }
 
-function SessionsPanel({
-  sessions,
-  favorites: _favorites,
-  onSelect,
-  onNewSession,
-}: Readonly<{
-  sessions: import("@/types").Session[];
-  favorites: string[];
-  onSelect: (session: import("@/types").Session) => void;
-  onNewSession?: () => void;
-}>) {
-  const { t } = useTranslation();
-
-  if (sessions.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center gap-3 py-8 text-center">
-        <Terminal size={32} className="text-text-disabled" />
-        <p className="text-xs text-text-secondary px-2">{t("sessions.emptyState")}</p>
-        <button
-          onClick={onNewSession}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-interactive-default text-text-inverse hover:bg-interactive-hover transition-colors"
-        >
-          <Plus size={12} />
-          {t("sessions.newSession")}
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-0.5">
-      {sessions.map((session) => (
-        <button
-          key={session.id}
-          onClick={() => onSelect(session)}
-          className="flex items-center gap-2 px-2 py-1.5 rounded text-xs hover:bg-surface-elevated transition-colors text-left w-full"
-        >
-          <span>{SESSION_TYPE_ICONS[session.type] ?? "⌨"}</span>
-          <span className="truncate flex-1 text-text-primary">{session.name}</span>
-          <span className="text-text-disabled truncate text-[10px]">
-            {session.connection.host}
-          </span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function EmptyPanel({ icon, message }: Readonly<{ icon: React.ReactNode; message: string }>) {
-  return (
-    <div className="flex flex-col items-center justify-center gap-3 py-8 text-center">
-      {icon}
-      <p className="text-xs text-text-secondary px-2">{message}</p>
-    </div>
-  );
-}
 
 // ─── Region D: Session Canvas ──────────────────────────────────
 
@@ -1695,6 +1639,7 @@ export default function App() {
   const [newSessionDefaultType, setNewSessionDefaultType] = useState<SessionType | undefined>(undefined);
   const [showVaultDeleteDialog, setShowVaultDeleteDialog] = useState(false);
   const [showChangePasswordDialog, setShowChangePasswordDialog] = useState(false);
+  const [showImportWizard, setShowImportWizard] = useState(false);
   const [showHelpPanel, setShowHelpPanel] = useState(false);
   const [showShortcutOverlay, setShowShortcutOverlay] = useState(false);
   const [helpArticleSlug, setHelpArticleSlug] = useState<string | undefined>(undefined);
@@ -2038,6 +1983,8 @@ export default function App() {
             {/* Region C - hidden on compact via Sidebar internal logic */}
             <Sidebar
               onNewSession={() => { setEditingSession(null); setShowSessionEditor(true); }}
+              onSessionEdit={(session) => { setEditingSession(session); setShowSessionEditor(true); }}
+              onImport={() => setShowImportWizard(true)}
               onOpenCredentials={() => setShowCredentialManager(true)}
             />
 
@@ -2125,6 +2072,13 @@ export default function App() {
           )}
           {showChangePasswordDialog && (
             <ChangePasswordDialog onClose={() => setShowChangePasswordDialog(false)} />
+          )}
+          {showImportWizard && (
+            <ImportWizard
+              open={showImportWizard}
+              onClose={() => setShowImportWizard(false)}
+              onComplete={() => { useSessionStore.getState().loadSessions(); }}
+            />
           )}
           {showFeatureTour && activeTourId && (
             <FeatureTour

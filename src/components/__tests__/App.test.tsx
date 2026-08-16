@@ -1,12 +1,13 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { invoke } from "@tauri-apps/api/core";
 import "@/i18n";
 import App from "@/App";
 import { useAppStore } from "@/stores/appStore";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useVaultStore } from "@/stores/vaultStore";
-import { ThemeVariant, SessionType, ConnectionStatus } from "@/types";
+import { ThemeVariant, SessionType, ConnectionStatus, SidebarMode } from "@/types";
 import type { Session, Tab } from "@/types";
 
 // Mock ResizeObserver (not available in jsdom)
@@ -323,6 +324,56 @@ describe("App", () => {
     for (const type of allTypes) {
       expect(optionValues).toContain(type);
     }
+  });
+
+  // Regression coverage: the Tunnels sidebar tab used to hardcode a
+  // permanent "No tunnels" placeholder instead of ever rendering the fully
+  // built PortForwardManager component.
+  it("Tunnels sidebar tab renders PortForwardManager, not a static placeholder", () => {
+    render(<App />);
+    fireEvent.click(screen.getByTitle("Tunnels"));
+    expect(screen.queryByText("No tunnels")).not.toBeInTheDocument();
+    expect(screen.getByText("Port Forwards")).toBeInTheDocument();
+  });
+
+  // Regression coverage: the Sessions sidebar tab used to render a bare-bones
+  // inline flat list (no folders, search, favorites, context menu, or
+  // "Import" action) instead of the fully built SessionTree component, and
+  // its "Import" button was wired to nothing (onImport was never passed
+  // down from App.tsx).
+  it("Sessions sidebar tab's Import button (empty state) opens the wizard", async () => {
+    useAppStore.setState({ sidebarMode: SidebarMode.Sessions });
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "import_detect_sources") return Promise.resolve([]);
+      return Promise.resolve(undefined);
+    });
+    render(<App />);
+    fireEvent.click(screen.getByText("Import"));
+    expect(await screen.findByText("Import Sessions")).toBeInTheDocument();
+  });
+
+  it("Sessions sidebar tab renders the real SessionTree, not the old flat-list fallback", () => {
+    useAppStore.setState({ sidebarMode: SidebarMode.Sessions });
+    useSessionStore.setState({
+      sessions: [
+        {
+          id: "s1",
+          name: "Prod Server",
+          type: SessionType.SSH,
+          group: "",
+          tags: [],
+          connection: { host: "10.0.0.1", port: 22 },
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          autoReconnect: false,
+          keepAliveIntervalSeconds: 60,
+        },
+      ],
+    });
+    render(<App />);
+    // The search bar only exists on the real SessionTree component, not the
+    // old inline SessionsPanel fallback it replaced.
+    expect(screen.getByPlaceholderText("Search sessions…")).toBeInTheDocument();
   });
 
   // Regression coverage for wiring RDP/VNC/Telnet/Serial into the tab
