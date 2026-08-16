@@ -326,6 +326,7 @@ describe("App", () => {
       SessionType.CodeEditor,
       SessionType.DiffViewer,
       SessionType.Macros,
+      SessionType.Recordings,
     ];
     const allTypes = Object.values(SessionType).filter((t) => !nonConnectableTypes.includes(t));
     for (const type of allTypes) {
@@ -445,6 +446,28 @@ describe("App", () => {
 
     fireEvent.click(screen.getByText("Expect Rules"));
     expect(await screen.findByText("No expect rules defined. Add a rule to auto-respond to patterns.")).toBeInTheDocument();
+  });
+
+  // Regression coverage: RecordingPlayer.tsx was fully built and tested but
+  // had no way to reach it — recordings could be created but never browsed
+  // or played back.
+  it("Recordings in the + menu opens a tab listing and playing back real recordings", async () => {
+    vi.mocked(invoke).mockImplementation((cmd: string) => {
+      if (cmd === "recording_list") {
+        return Promise.resolve([
+          { id: "rec-1", path: "/tmp/rec-1.cast", title: "demo", duration_secs: 12, size_bytes: 100, width: 80, height: 24, created_at: "2026-01-01T00:00:00Z" },
+        ]);
+      }
+      return Promise.resolve(undefined);
+    });
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("New Tab"));
+    fireEvent.click(screen.getByText("Recordings"));
+
+    expect(await screen.findByText("demo")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("demo"));
+    expect(await screen.findByText("Speed:")).toBeInTheDocument();
   });
 
   // Regression coverage for wiring RDP/VNC/Telnet/Serial into the tab

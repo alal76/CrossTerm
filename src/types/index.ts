@@ -17,6 +17,7 @@ export enum SessionType {
   CodeEditor = "code_editor",
   DiffViewer = "diff_viewer",
   Macros = "macros",
+  Recordings = "recordings",
   // Extended protocol breadth
   Mosh = "mosh",
   WinRM = "winrm",

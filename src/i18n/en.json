@@ -867,7 +867,9 @@
     "export": "Export",
     "exportGif": "Export as GIF",
     "exportMp4": "Export as MP4",
-    "noRecordings": "No recordings yet. Start recording a terminal session to see it here."
+    "noRecordings": "No recordings yet. Start recording a terminal session to see it here.",
+    "library": "Recordings",
+    "selectToPlay": "Select a recording to play it back."
   },
   "cloud": {
     "dashboard": "Cloud Dashboard",

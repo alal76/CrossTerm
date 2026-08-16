@@ -16,6 +16,7 @@ import clsx from "clsx";
 import SshTerminalView from "./SshTerminalView";
 import ReconnectOverlay from "./ReconnectOverlay";
 import ComplianceBanner from "@/components/Shared/ComplianceBanner";
+import RecordingControls from "@/components/Recording/RecordingControls";
 
 interface SshAuthPayload {
   type: "password" | "private_key" | "none";
@@ -129,6 +130,14 @@ export default function SshTerminalTab({
     } catch {
       // Best-effort cleanup.
     }
+  }, []);
+
+  // User-initiated recording (RecordingControls) shares the same
+  // recordingIdRef/append-listener as policy-driven recording above, so
+  // output is captured regardless of which path started it. It's only
+  // offered when policy recording isn't already running (see JSX below).
+  const handleManualRecordingIdChange = useCallback((id: string | null) => {
+    recordingIdRef.current = id;
   }, []);
 
   // ── Listen for auth prompts from backend ──
@@ -728,6 +737,16 @@ export default function SshTerminalTab({
         onDisableRecording={stopRecording}
       />
       <SshTerminalView connectionId={connectionId} isActive={isActive} />
+      {!recordingActive && (
+        <div className="absolute bottom-3 right-3 z-20 bg-surface-elevated border border-border-default rounded-lg shadow-lg px-2 py-1">
+          <RecordingControls
+            sessionId={sessionId}
+            width={80}
+            height={24}
+            onRecordingIdChange={handleManualRecordingIdChange}
+          />
+        </div>
+      )}
       {disconnectReason !== null && (
         <ReconnectOverlay
           reason={disconnectReason}

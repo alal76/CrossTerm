@@ -30,6 +30,7 @@ import {
   Puzzle,
   GitCompare,
   FileCode,
+  Film,
   KeyRound,
   Bell,
   ExternalLink,
@@ -91,6 +92,7 @@ import NetworkExplorer from "@/components/NetworkTools/NetworkExplorer";
 import CloudDashboard from "@/components/Cloud/CloudDashboard";
 import CodeEditor from "@/components/Editor/CodeEditor";
 import MacrosPanel from "@/components/Macros/MacrosPanel";
+import RecordingsPanel from "@/components/Recording/RecordingsPanel";
 import DiffViewer from "@/components/Editor/DiffViewer";
 import RemoteFileBrowser from "@/components/RemoteFiles/RemoteFileBrowser";
 import VaultUnlock from "@/components/Vault/VaultUnlock";
@@ -563,6 +565,7 @@ function NewTabDropdown({
   onOpenCodeEditor,
   onOpenDiffViewer,
   onOpenMacros,
+  onOpenRecordings,
   onOpenCredentials,
   onLockVault,
   onDeleteVault,
@@ -580,6 +583,7 @@ function NewTabDropdown({
   readonly onOpenCodeEditor: () => void;
   readonly onOpenDiffViewer: () => void;
   readonly onOpenMacros: () => void;
+  readonly onOpenRecordings: () => void;
   readonly onOpenCredentials: () => void;
   readonly onLockVault: () => void;
   readonly onDeleteVault: () => void;
@@ -667,6 +671,10 @@ function NewTabDropdown({
         <FileCode size={13} className="shrink-0 text-text-disabled" />
         {t("macro.editor")}
       </button>
+      <button onClick={() => { onOpenRecordings(); onClose(); }} className={menuItemCls}>
+        <Film size={13} className="shrink-0 text-text-disabled" />
+        {t("recording.library")}
+      </button>
       <div className="h-px bg-border-subtle mx-2 my-1" />
       <div className="px-3 pt-1 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-text-disabled">
         Vault
@@ -705,6 +713,7 @@ function TabBar({
   onOpenCodeEditor,
   onOpenDiffViewer,
   onOpenMacros,
+  onOpenRecordings,
   onOpenCredentials,
   onLockVault,
   onDeleteVault,
@@ -720,6 +729,7 @@ function TabBar({
   readonly onOpenCodeEditor: () => void;
   readonly onOpenDiffViewer: () => void;
   readonly onOpenMacros: () => void;
+  readonly onOpenRecordings: () => void;
   readonly onOpenCredentials: () => void;
   readonly onLockVault: () => void;
   readonly onDeleteVault: () => void;
@@ -879,6 +889,7 @@ function TabBar({
             onOpenCodeEditor={onOpenCodeEditor}
             onOpenDiffViewer={onOpenDiffViewer}
             onOpenMacros={onOpenMacros}
+            onOpenRecordings={onOpenRecordings}
             onOpenCredentials={onOpenCredentials}
             onLockVault={onLockVault}
             onDeleteVault={onDeleteVault}
@@ -1204,6 +1215,17 @@ function SessionCanvas() {
               className={clsx("absolute inset-0 overflow-hidden", isActive ? "z-10" : "z-0 hidden")}
             >
               <MacrosPanel />
+            </div>
+          );
+        }
+
+        if (tab.sessionType === SessionType.Recordings) {
+          return (
+            <div
+              key={tab.id}
+              className={clsx("absolute inset-0 overflow-hidden", isActive ? "z-10" : "z-0 hidden")}
+            >
+              <RecordingsPanel />
             </div>
           );
         }
@@ -1967,6 +1989,24 @@ export default function App() {
     openTab(session);
   }, [addSession, openTab]);
 
+  const handleOpenRecordingsTab = useCallback(() => {
+    const now = new Date().toISOString();
+    const session: Session = {
+      id: crypto.randomUUID(),
+      name: "Recordings",
+      type: SessionType.Recordings,
+      group: "",
+      tags: [],
+      connection: { host: "localhost", port: 0 },
+      createdAt: now,
+      updatedAt: now,
+      autoReconnect: false,
+      keepAliveIntervalSeconds: 0,
+    };
+    addSession(session);
+    openTab(session);
+  }, [addSession, openTab]);
+
   // Native menu callbacks are stored in a ref that is overwritten every render.
   // This pattern avoids the "stale closure" problem: buildNativeMenu runs once
   // (empty dep array) and captures `cb` (the ref object), but every action
@@ -2179,6 +2219,7 @@ export default function App() {
                 onOpenCodeEditor={handleOpenCodeEditorTab}
                 onOpenDiffViewer={handleOpenDiffViewerTab}
                 onOpenMacros={handleOpenMacrosTab}
+                onOpenRecordings={handleOpenRecordingsTab}
                 onOpenCredentials={() => setShowCredentialManager(true)}
                 onLockVault={() => lockAllVaults()}
                 onDeleteVault={() => setShowVaultDeleteDialog(true)}

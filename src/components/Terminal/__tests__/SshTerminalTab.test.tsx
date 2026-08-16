@@ -374,4 +374,57 @@ describe("SshTerminalTab", () => {
       expect(mockInvoke).not.toHaveBeenCalledWith("recording_start", expect.anything());
     });
   });
+
+  // Regression coverage: RecordingControls was fully built and tested but
+  // had no mount point — there was no way to manually start a recording
+  // outside of policy-mandated ones.
+  describe("manual recording (RecordingControls)", () => {
+    it("offers the manual Start Recording control when policy does not require recording", async () => {
+      mockInvoke.mockImplementation((cmd: string) => {
+        if (cmd === "ssh_connect") return Promise.resolve("conn-1");
+        if (cmd === "policy_check_recording_required") return Promise.resolve(false);
+        return Promise.resolve(undefined);
+      });
+      render(<SshTerminalTab {...baseProps} />);
+
+      expect(await screen.findByText("Start Recording")).toBeInTheDocument();
+    });
+
+    it("streams ssh:output into a manually-started recording via recording_append", async () => {
+      mockInvoke.mockImplementation((cmd: string) => {
+        if (cmd === "ssh_connect") return Promise.resolve("conn-1");
+        if (cmd === "policy_check_recording_required") return Promise.resolve(false);
+        if (cmd === "recording_start") return Promise.resolve("rec-manual");
+        return Promise.resolve(undefined);
+      });
+      render(<SshTerminalTab {...baseProps} />);
+
+      fireEvent.click(await screen.findByText("Start Recording"));
+      await waitFor(() =>
+        expect(mockInvoke).toHaveBeenCalledWith("recording_start", expect.objectContaining({ sessionId: "sess-1" })),
+      );
+
+      act(() => {
+        listenCallbacks.get("ssh:output")?.({ payload: { connection_id: "conn-1", data: "whoami\r\n" } });
+      });
+
+      await waitFor(() =>
+        expect(mockInvoke).toHaveBeenCalledWith("recording_append", { recordingId: "rec-manual", data: "whoami\r\n" }),
+      );
+    });
+
+    it("hides the manual control once a policy-mandated recording is already active", async () => {
+      mockInvoke.mockImplementation((cmd: string) => {
+        if (cmd === "ssh_connect") return Promise.resolve("conn-1");
+        if (cmd === "policy_check_recording_required") return Promise.resolve(true);
+        if (cmd === "recording_start") return Promise.resolve("rec-1");
+        if (cmd === "policy_get") return Promise.resolve({ recording: { notify_user: true, allow_user_disable: true } });
+        return Promise.resolve(undefined);
+      });
+      render(<SshTerminalTab {...baseProps} />);
+
+      await screen.findByText(/This session is being recorded/);
+      expect(screen.queryByText("Start Recording")).not.toBeInTheDocument();
+    });
+  });
 });

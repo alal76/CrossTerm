@@ -7,12 +7,14 @@ interface RecordingControlsProps {
   readonly sessionId: string;
   readonly width: number;
   readonly height: number;
+  readonly onRecordingIdChange?: (recordingId: string | null) => void;
 }
 
 export default function RecordingControls({
   sessionId,
   width,
   height,
+  onRecordingIdChange,
 }: RecordingControlsProps) {
   const { t } = useTranslation();
   const [recording, setRecording] = useState(false);
@@ -37,13 +39,14 @@ export default function RecordingControls({
       setRecordingId(id);
       setRecording(true);
       setElapsed(0);
+      onRecordingIdChange?.(id);
       timerRef.current = setInterval(() => {
         setElapsed((prev) => prev + 1);
       }, 1000);
     } catch {
       // handle error
     }
-  }, [sessionId, width, height]);
+  }, [sessionId, width, height, onRecordingIdChange]);
 
   const handleStop = useCallback(async () => {
     if (!recordingId) return;
@@ -54,12 +57,13 @@ export default function RecordingControls({
     } finally {
       setRecording(false);
       setRecordingId(null);
+      onRecordingIdChange?.(null);
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
       }
     }
-  }, [recordingId]);
+  }, [recordingId, onRecordingIdChange]);
 
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60);
