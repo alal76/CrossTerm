@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Search, Download, RefreshCw, Check, ArrowUpCircle } from 'lucide-react';
 import clsx from 'clsx';
+import { showToast } from '@/components/Shared/Toast';
 import type { PluginRegistryEntry } from '@/types';
 
 const REGISTRY_URL = 'https://registry.crossterm.dev/plugins.json';
@@ -48,6 +49,18 @@ export default function PluginRegistry({ className }: Readonly<PluginRegistryPro
   });
 
   const categories: FilterCategory[] = ['all', 'terminal', 'network', 'ui', 'security'];
+
+  // PluginRegistryEntry carries no download URL, and the backend has no
+  // "fetch and install from the registry" command — only plugin_install(path)
+  // for a .wasm file already on disk (see PluginManager). Remote install
+  // isn't backed by anything real yet, so this is an honest explanation
+  // instead of either a silent no-op or a fabricated fake install.
+  const handleRemoteInstallUnavailable = useCallback(() => {
+    showToast(
+      'info',
+      'Installing directly from the registry isn’t available yet. Download the plugin’s .wasm file, then use "Install Plugin" in the Installed tab.',
+    );
+  }, []);
 
   return (
     <div className={clsx('flex flex-col h-full', className)}>
@@ -121,7 +134,10 @@ export default function PluginRegistry({ className }: Readonly<PluginRegistryPro
             </div>
             <div className="flex-shrink-0">
               {entry.installed && entry.update_available && (
-                <button className="flex items-center gap-1 px-3 py-1 rounded bg-accent-primary text-text-inverse text-xs">
+                <button
+                  onClick={handleRemoteInstallUnavailable}
+                  className="flex items-center gap-1 px-3 py-1 rounded bg-accent-primary text-text-inverse text-xs"
+                >
                   <ArrowUpCircle size={12} />
                   {t('plugin.update')}
                 </button>
@@ -133,7 +149,10 @@ export default function PluginRegistry({ className }: Readonly<PluginRegistryPro
                 </span>
               )}
               {!entry.installed && (
-                <button className="flex items-center gap-1 px-3 py-1 rounded bg-interactive-default text-text-primary text-xs hover:bg-interactive-hover">
+                <button
+                  onClick={handleRemoteInstallUnavailable}
+                  className="flex items-center gap-1 px-3 py-1 rounded bg-interactive-default text-text-primary text-xs hover:bg-interactive-hover"
+                >
                   <Download size={12} />
                   {t('plugin.install')}
                 </button>

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@/i18n";
 import PluginRegistry from "@/components/Plugin/PluginRegistry";
+import { ToastProvider } from "@/components/Shared/Toast";
 import type { PluginRegistryEntry } from "@/types";
 
 function entry(overrides: Partial<PluginRegistryEntry> = {}): PluginRegistryEntry {
@@ -84,6 +85,26 @@ describe("PluginRegistry", () => {
     expect(screen.getByText("Install Plugin")).toBeInTheDocument();
     expect(screen.getByText("Installed")).toBeInTheDocument();
     expect(screen.getByText("Update")).toBeInTheDocument();
+  });
+
+  // Regression coverage: the Install/Update buttons had no onClick at all —
+  // clicking them was a complete no-op. There's no download_url on
+  // PluginRegistryEntry and no backend command to install from a remote
+  // registry, so the fix is an honest explanation rather than a fake
+  // install, but the click must do *something* visible.
+  it("Install and Update buttons explain remote install isn't available yet", async () => {
+    mockFetch([
+      entry({ id: "e1", name: "New Plugin", installed: false }),
+      entry({ id: "e3", name: "Stale Plugin", installed: true, update_available: true }),
+    ]);
+    render(<ToastProvider><PluginRegistry /></ToastProvider>);
+    await screen.findByText("New Plugin");
+
+    fireEvent.click(screen.getByText("Install Plugin"));
+    expect(await screen.findByText(/isn.t available yet/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Update"));
+    expect((await screen.findAllByText(/isn.t available yet/)).length).toBeGreaterThan(0);
   });
 
   it("refresh button re-fetches the registry", async () => {
