@@ -33,12 +33,15 @@ describe("WhatsNewPanel", () => {
     render(<WhatsNewPanel />);
 
     expect(screen.getByText("What's New")).toBeInTheDocument();
-    expect(screen.getByText("What's New in CrossTerm 1.5.1")).toBeInTheDocument();
+    expect(screen.getByText("What's New in CrossTerm 2.0.0")).toBeInTheDocument();
 
-    // Should show release notes content
-    expect(screen.getByText("New Features")).toBeInTheDocument();
+    // Should show release notes content — "New Features" and "Bug Fixes"
+    // each appear once per version section (this version's notes plus the
+    // previous version's, kept for context), "Improvements" only in the
+    // earlier section.
+    expect(screen.getAllByText("New Features").length).toBeGreaterThan(0);
     expect(screen.getByText("Improvements")).toBeInTheDocument();
-    expect(screen.getByText("Bug Fixes")).toBeInTheDocument();
+    expect(screen.getAllByText("Bug Fixes").length).toBeGreaterThan(0);
   });
 
   it("FT-H-08: dismiss button hides the panel", async () => {
@@ -52,7 +55,7 @@ describe("WhatsNewPanel", () => {
     await user.click(dismissBtn);
 
     // Panel should be hidden
-    expect(screen.queryByText("What's New in CrossTerm 1.5.1")).not.toBeInTheDocument();
+    expect(screen.queryByText("What's New in CrossTerm 2.0.0")).not.toBeInTheDocument();
   });
 
   it("FT-H-08: 'Don't show again' persists to localStorage", async () => {
@@ -63,14 +66,14 @@ describe("WhatsNewPanel", () => {
     await user.click(dontShowBtn);
 
     // Panel should be hidden
-    expect(screen.queryByText("What's New in CrossTerm 1.5.1")).not.toBeInTheDocument();
+    expect(screen.queryByText("What's New in CrossTerm 2.0.0")).not.toBeInTheDocument();
 
     // localStorage should have the dismissed version
-    expect(localStorage.getItem("crossterm:whats-new-dismissed")).toBe("1.5.1");
+    expect(localStorage.getItem("crossterm:whats-new-dismissed")).toBe("2.0.0");
   });
 
   it("FT-H-08: does not render when version is already dismissed", () => {
-    localStorage.setItem("crossterm:whats-new-dismissed", "1.5.1");
+    localStorage.setItem("crossterm:whats-new-dismissed", "2.0.0");
 
     render(<WhatsNewPanel />);
 

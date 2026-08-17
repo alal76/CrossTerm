@@ -2,11 +2,23 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { X, Sparkles } from "lucide-react";
 
-const APP_VERSION = "1.5.1";
+const APP_VERSION = "2.0.0";
 const DISMISSED_VERSION_KEY = "crossterm:whats-new-dismissed";
 
 const RELEASE_NOTES = `
 ## What's New in CrossTerm ${APP_VERSION}
+
+### New Features
+- **Faster session-type picker** — the "+" new-tab menu's "More Session Types…" now expands inline into a submenu listing every remaining protocol, instead of opening a full dialog and hunting through a dropdown.
+- **Real UDP scanning in Network Explorer** — SNMP and IPMI are now detected with genuine protocol probes (an SNMP GetRequest and an IPMI RMCP Presence Ping), not just a port guess.
+- **Redfish and WebDAV detection** — identified by their actual HTTP signature (Redfish's ServiceRoot JSON, WebDAV's DAV/PROPFIND header), not assumed from a shared generic web port.
+- **Broader scan coverage** — SMB, FTP, NFS, Rlogin, and Proxmox hosts are now suggested as one-click connections when discovered.
+
+### Bug Fixes
+- Fixed a port-mismatch bug affecting Kubernetes, Docker, WinRM, and MQTT-over-TLS discoveries: the suggested connection type was right, but a naming inconsistency meant it silently connected on the wrong port (a hardcoded fallback) instead of the real one the scan found.
+- SMB was being detected during a scan but never offered as a connectable session — fixed.
+
+## CrossTerm 1.5.1
 
 ### New Features
 - **Macro Editor & Expect Rules** — Automate terminal workflows with recordable macros and pattern-triggered auto-responses.
