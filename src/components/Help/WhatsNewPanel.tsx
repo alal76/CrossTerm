@@ -2,27 +2,33 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { X, Sparkles } from "lucide-react";
 
-const APP_VERSION = "1.0.0";
+const APP_VERSION = "1.5.1";
 const DISMISSED_VERSION_KEY = "crossterm:whats-new-dismissed";
 
 const RELEASE_NOTES = `
 ## What's New in CrossTerm ${APP_VERSION}
 
 ### New Features
-- **Credential Vault** — Store passwords, SSH keys, and API tokens securely with AES-256-GCM encryption.
-- **Split Panes** — Divide your terminal into multiple panes horizontally or vertically.
-- **Quick Connect** — Rapidly connect to hosts without saving a session first.
-- **SFTP Browser** — Browse and transfer files over SFTP.
+- **Macro Editor & Expect Rules** — Automate terminal workflows with recordable macros and pattern-triggered auto-responses.
+- **Session Recording** — Record and play back terminal sessions, with policy-driven auto-recording and a compliance banner.
+- **Cloud Dashboard** — Manage AWS, Azure, and GCP resources and Kubernetes clusters from one place.
+- **Plugin Manager & Registry** — Install, enable, and browse plugins for CrossTerm.
+- **Smart Groups** — Build dynamic session groups filtered by tag, protocol, status, or host.
+- **Single Sign-On** — Configure OIDC providers for SSO authentication.
+- **FTP support** — Connect to FTP servers alongside SFTP.
+- **Standalone Code Editor & Diff Viewer** — Edit and compare local files without leaving the app.
+- **Network Explorer** — Quick Scan and Wake-on-LAN, alongside existing discovery and Wi-Fi tools.
 
 ### Improvements
-- Keyboard shortcut overlay (⌘/)
-- Field-level help icons across forms
-- Theme import/export support
-- Broadcast mode for sending input to all panes
+- Profile Sync now encrypts with AES-256-GCM and actually transfers your sessions, snippets, and settings.
+- Session health indicators reflect real connection activity, so reconnect prompts trigger when a session actually drops.
+- SFTP gained file preview and folder sync.
+- A host key change now shows the real old/new fingerprint diff instead of a generic error.
 
 ### Bug Fixes
-- Fixed terminal resize on split pane changes
-- Improved reconnection logic for SSH sessions
+- Session rename, move, and delete no longer fail silently — errors surface and the change is rolled back.
+- The vault no longer offers a biometric unlock option that could never succeed.
+- Export Audit Log and locale installation now actually save instead of silently doing nothing.
 `;
 
 export default function WhatsNewPanel() {
