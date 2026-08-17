@@ -8,7 +8,7 @@ import { SessionType } from "@/types";
 import type { Session } from "@/types";
 import FieldHelp from "@/components/Help/FieldHelp";
 
-const SESSION_TYPE_OPTIONS = [
+export const SESSION_TYPE_OPTIONS = [
   { value: SessionType.SSH, label: "SSH" },
   { value: SessionType.SFTP, label: "SFTP" },
   { value: SessionType.SCP, label: "SCP" },

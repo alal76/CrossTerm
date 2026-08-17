@@ -12,6 +12,7 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   User,
   Sun,
   Moon,
@@ -100,7 +101,7 @@ import RemoteFileBrowser from "@/components/RemoteFiles/RemoteFileBrowser";
 import VaultUnlock from "@/components/Vault/VaultUnlock";
 import CredentialManager from "@/components/Vault/CredentialManager";
 import SettingsPanel from "@/components/Settings/SettingsPanel";
-import SessionEditor from "@/components/SessionTree/SessionEditor";
+import SessionEditor, { SESSION_TYPE_OPTIONS } from "@/components/SessionTree/SessionEditor";
 import SessionTree from "@/components/SessionTree/SessionTree";
 import ImportWizard from "@/components/Shared/ImportWizard";
 import SftpBrowser from "@/components/SftpBrowser/SftpBrowser";
@@ -556,12 +557,26 @@ function TabContextMenu({
   );
 }
 
+// SessionTypes already given their own dedicated shortcut in the Connect
+// section below — everything else in SESSION_TYPE_OPTIONS goes in the "More
+// Session Types" submenu instead, so nothing is listed twice.
+const INLINE_SESSION_TYPES = new Set<SessionType>([
+  SessionType.LocalShell,
+  SessionType.SSH,
+  SessionType.Telnet,
+  SessionType.RDP,
+  SessionType.VNC,
+  SessionType.SFTP,
+]);
+const MORE_SESSION_TYPE_OPTIONS = SESSION_TYPE_OPTIONS.filter(
+  (opt) => !INLINE_SESSION_TYPES.has(opt.value),
+);
+
 function NewTabDropdown({
   onNewLocalShell,
   onNewSSH,
   onNewSFTP,
   onNewConnection,
-  onMoreSessionTypes,
   onOpenNetworkExplorer,
   onOpenCloud,
   onOpenCodeEditor,
@@ -580,7 +595,6 @@ function NewTabDropdown({
   readonly onNewSSH: () => void;
   readonly onNewSFTP: () => void;
   readonly onNewConnection: (type: SessionType) => void;
-  readonly onMoreSessionTypes: () => void;
   readonly onOpenNetworkExplorer: () => void;
   readonly onOpenCloud: () => void;
   readonly onOpenCodeEditor: () => void;
@@ -597,6 +611,7 @@ function NewTabDropdown({
 }) {
   const { t } = useTranslation();
   const menuRef = useRef<HTMLDivElement>(null);
+  const [showMoreTypes, setShowMoreTypes] = useState(false);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -650,10 +665,34 @@ function NewTabDropdown({
         <FolderTree size={13} className="shrink-0 text-text-disabled" />
         {t("newTabMenu.sftp")}
       </button>
-      <button onClick={() => { onMoreSessionTypes(); onClose(); }} className={menuItemCls}>
-        <Plus size={13} className="shrink-0 text-text-disabled" />
-        {t("newTabMenu.moreTypes")}
+      <button
+        onClick={() => setShowMoreTypes((v) => !v)}
+        className={clsx(menuItemCls, "justify-between")}
+        aria-expanded={showMoreTypes}
+      >
+        <span className="flex items-center gap-2.5">
+          <Plus size={13} className="shrink-0 text-text-disabled" />
+          {t("newTabMenu.moreTypes")}
+        </span>
+        {showMoreTypes ? (
+          <ChevronDown size={12} className="shrink-0 text-text-disabled" />
+        ) : (
+          <ChevronRight size={12} className="shrink-0 text-text-disabled" />
+        )}
       </button>
+      {showMoreTypes && (
+        <div className="max-h-56 overflow-y-auto py-0.5 border-y border-border-subtle bg-surface-secondary/40">
+          {MORE_SESSION_TYPE_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => { onNewConnection(opt.value); onClose(); }}
+              className="flex items-center w-full pl-8 pr-3 py-1 text-[11px] text-left text-text-secondary hover:bg-surface-secondary hover:text-text-primary transition-colors"
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="h-px bg-border-subtle mx-2 my-1" />
       <button onClick={() => { onOpenNetworkExplorer(); onClose(); }} className={menuItemCls}>
         <Radar size={13} className="shrink-0 text-text-disabled" />
@@ -715,7 +754,6 @@ function TabBar({
   onNewSSH,
   onNewSFTP,
   onNewConnection,
-  onMoreSessionTypes,
   onOpenNetworkExplorer,
   onOpenCloud,
   onOpenCodeEditor,
@@ -732,7 +770,6 @@ function TabBar({
   readonly onNewSSH: () => void;
   readonly onNewSFTP: () => void;
   readonly onNewConnection: (type: SessionType) => void;
-  readonly onMoreSessionTypes: () => void;
   readonly onOpenNetworkExplorer: () => void;
   readonly onOpenCloud: () => void;
   readonly onOpenCodeEditor: () => void;
@@ -893,7 +930,6 @@ function TabBar({
             onNewSSH={onNewSSH}
             onNewSFTP={onNewSFTP}
             onNewConnection={onNewConnection}
-            onMoreSessionTypes={onMoreSessionTypes}
             onOpenNetworkExplorer={onOpenNetworkExplorer}
             onOpenCloud={onOpenCloud}
             onOpenCodeEditor={onOpenCodeEditor}
@@ -2247,10 +2283,6 @@ export default function App() {
                 }}
                 onNewConnection={(type) => {
                   setNewSessionDefaultType(type);
-                  setEditingSession(null);
-                  setShowSessionEditor(true);
-                }}
-                onMoreSessionTypes={() => {
                   setEditingSession(null);
                   setShowSessionEditor(true);
                 }}

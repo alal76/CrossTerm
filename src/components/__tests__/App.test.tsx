@@ -9,6 +9,7 @@ import { useTerminalStore } from "@/stores/terminalStore";
 import { useVaultStore } from "@/stores/vaultStore";
 import { ThemeVariant, SessionType, ConnectionStatus, SidebarMode } from "@/types";
 import type { Session, Tab } from "@/types";
+import { SESSION_TYPE_OPTIONS } from "@/components/SessionTree/SessionEditor";
 
 // Mock ResizeObserver (not available in jsdom)
 class MockResizeObserver {
@@ -302,8 +303,10 @@ describe("App", () => {
 
   // Regression coverage for the "+" new-tab menu: it offers direct buttons
   // for only the handful of most-common protocols, but must always provide
-  // a path to the rest via "More Session Types…" opening the full
-  // SessionEditor picker. Before this test, the menu silently drifted out
+  // a path to the rest via "More Session Types…" — now an inline submenu
+  // (not a modal) so every remaining protocol is reachable in one extra
+  // click rather than opening a full editor and hunting through a <select>.
+  // Before the original version of this test, the menu silently drifted out
   // of sync as protocols were added — SESSION_TYPE_OPTIONS in
   // SessionEditor.tsx grew to cover every SessionType, but the "+" menu had
   // no escape hatch to reach it, so ~27 of the ~33 connectable session
@@ -315,11 +318,6 @@ describe("App", () => {
     fireEvent.click(screen.getByTitle("New Tab"));
     fireEvent.click(screen.getByText("More Session Types…"));
 
-    const typeSelect = screen.getByRole("combobox");
-    const optionValues = Array.from(typeSelect.querySelectorAll("option")).map(
-      (o) => (o as HTMLOptionElement).value,
-    );
-
     const nonConnectableTypes: SessionType[] = [
       SessionType.NetworkExplorer,
       SessionType.CloudDashboard,
@@ -329,10 +327,35 @@ describe("App", () => {
       SessionType.Recordings,
       SessionType.Ftp,
     ];
+    const inlineTypes: SessionType[] = [
+      SessionType.LocalShell,
+      SessionType.SSH,
+      SessionType.Telnet,
+      SessionType.RDP,
+      SessionType.VNC,
+      SessionType.SFTP,
+    ];
     const allTypes = Object.values(SessionType).filter((t) => !nonConnectableTypes.includes(t));
-    for (const type of allTypes) {
-      expect(optionValues).toContain(type);
+    const submenuTypes = allTypes.filter((t) => !inlineTypes.includes(t));
+
+    // Every non-inline connectable type must appear as its own submenu item.
+    expect(submenuTypes.length).toBeGreaterThan(0);
+    for (const type of submenuTypes) {
+      const option = SESSION_TYPE_OPTIONS.find((o) => o.value === type);
+      expect(option, `SESSION_TYPE_OPTIONS is missing a label for ${type}`).toBeDefined();
+      expect(screen.getByText(option!.label)).toBeInTheDocument();
     }
+  });
+
+  it("clicking a submenu session type opens the session editor with that type pre-selected", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTitle("New Tab"));
+    fireEvent.click(screen.getByText("More Session Types…"));
+    fireEvent.click(screen.getByText("Redfish (BMC REST)"));
+
+    const typeSelect = await screen.findByRole("combobox");
+    expect((typeSelect as HTMLSelectElement).value).toBe(SessionType.Redfish);
   });
 
   // Regression coverage: the Tunnels sidebar tab used to hardcode a
