@@ -2100,6 +2100,7 @@ export default function App() {
     openRDP:    () => { setNewSessionDefaultType(SessionType.RDP);    setEditingSession(null); setShowSessionEditor(true); },
     openVNC:    () => { setNewSessionDefaultType(SessionType.VNC);    setEditingSession(null); setShowSessionEditor(true); },
     openSFTP:   () => { setNewSessionDefaultType(SessionType.SFTP);   setEditingSession(null); setShowSessionEditor(true); },
+    openSessionType: (type: SessionType) => { setNewSessionDefaultType(type); setEditingSession(null); setShowSessionEditor(true); },
     openSettings: () => setSettingsOpen(true),
   });
   nativeMenuCbs.current = {
@@ -2114,6 +2115,7 @@ export default function App() {
     openRDP:    () => { setNewSessionDefaultType(SessionType.RDP);    setEditingSession(null); setShowSessionEditor(true); },
     openVNC:    () => { setNewSessionDefaultType(SessionType.VNC);    setEditingSession(null); setShowSessionEditor(true); },
     openSFTP:   () => { setNewSessionDefaultType(SessionType.SFTP);   setEditingSession(null); setShowSessionEditor(true); },
+    openSessionType: (type: SessionType) => { setNewSessionDefaultType(type); setEditingSession(null); setShowSessionEditor(true); },
     openSettings: () => setSettingsOpen(true),
   };
 
@@ -2131,6 +2133,19 @@ export default function App() {
 
         const sep = () => PredefinedMenuItem.new({ item: 'Separator' });
 
+        // Same escape hatch as the in-window "+" menu's "More Session
+        // Types" submenu — this native macOS menu bar is a completely
+        // separate UI surface built via the Tauri menu API, not React, so
+        // it needed its own fix rather than inheriting one from the other.
+        const moreTypesSubmenu = await Submenu.new({
+          text: 'More Session Types',
+          items: await Promise.all(
+            MORE_SESSION_TYPE_OPTIONS.map((opt) =>
+              MenuItem.new({ text: opt.label, action: () => cb.current.openSessionType(opt.value) }),
+            ),
+          ),
+        });
+
         const connectSubmenu = await Submenu.new({
           text: 'Connect',
           items: [
@@ -2141,6 +2156,7 @@ export default function App() {
             await MenuItem.new({ text: 'RDP…',       action: () => cb.current.openRDP() }),
             await MenuItem.new({ text: 'VNC…',       action: () => cb.current.openVNC() }),
             await MenuItem.new({ text: 'SFTP…',      action: () => cb.current.openSFTP() }),
+            moreTypesSubmenu,
             await sep(),
             await MenuItem.new({ text: 'Network Explorer', action: () => cb.current.openNetworkTab() }),
           ],
