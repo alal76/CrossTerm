@@ -2157,13 +2157,23 @@ pub async fn network_explore_start(
                 // Run TCP port checks, ICMP ping, and the UDP protocol
                 // probes (SNMP/IPMI — UDP can't be "connect scanned" like
                 // TCP, so these send a real protocol payload and check for a
-                // real protocol response) all concurrently.
+                // real protocol response) all concurrently. The UDP probes
+                // use their own, much shorter timeout: unlike a closed TCP
+                // port (which fails fast with a real RST), a UDP port with
+                // no SNMP/IPMI agent listening never sends anything back at
+                // all, so these two probes hit their full timeout on nearly
+                // every host that doesn't have one — reusing the ~1.5s TCP/
+                // ping timeout here made every single host's scan take that
+                // much longer at minimum, regardless of how fast the real
+                // TCP/ping checks resolved. A real reply, when a device does
+                // answer, arrives in low milliseconds on a LAN.
+                let udp_timeout = Duration::from_millis(300).min(timeout);
                 let port_futures: Vec<_> = ports.iter().map(|&p| check_port(ip, p, timeout)).collect();
                 let (port_results, (ping_alive, ttl), snmp_result, ipmi_result) = tokio::join!(
                     futures::future::join_all(port_futures),
                     ping_host(ip, timeout),
-                    probe_snmp(ip, 161, timeout),
-                    probe_ipmi(ip, 623, timeout),
+                    probe_snmp(ip, 161, udp_timeout),
+                    probe_ipmi(ip, 623, udp_timeout),
                 );
                 let mut open_ports: Vec<OpenPort> = port_results.into_iter().flatten().collect();
                 if let Some(sys_descr) = snmp_result {
