@@ -2,11 +2,17 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { X, Sparkles } from "lucide-react";
 
-const APP_VERSION = "2.0.0";
+const APP_VERSION = "2.1.0";
 const DISMISSED_VERSION_KEY = "crossterm:whats-new-dismissed";
 
 const RELEASE_NOTES = `
 ## What's New in CrossTerm ${APP_VERSION}
+
+### Bug Fixes
+- Fixed the real reason "More Session Types" never showed extra protocols for some users: the native macOS/Windows/Linux menu bar's own "Connect" menu is a separate surface from the in-window "+" button and never got a "More Session Types" entry at all — it now has the same submenu the in-window menu does.
+- Fixed a Network Explorer scan slowdown introduced by the new SNMP/IPMI UDP probes: since most hosts don't run either service and UDP never sends back a "closed" response the way TCP does, those two probes were reusing the same ~1.5s timeout as the TCP/ping checks, adding that floor to every single host's scan time regardless of how fast it would otherwise have finished. They now use a much shorter, dedicated timeout.
+
+## CrossTerm 2.0.0
 
 ### New Features
 - **Faster session-type picker** — the "+" new-tab menu's "More Session Types…" now expands inline into a submenu listing every remaining protocol, instead of opening a full dialog and hunting through a dropdown.
