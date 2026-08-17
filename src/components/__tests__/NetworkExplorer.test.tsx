@@ -5,6 +5,8 @@ import NetworkExplorer from '@/components/NetworkTools/NetworkExplorer';
 import { ToastProvider } from '@/components/Shared/Toast';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { useSessionStore } from '@/stores/sessionStore';
+import { SessionType } from '@/types';
 import type { ExploreResult, TailscalePeer } from '@/types';
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({
@@ -659,5 +661,58 @@ describe('NetworkExplorer', () => {
     expect(screen.getByText('100.79.163.121')).toBeInTheDocument();
     // Both the original LAN row and the two new Tailscale-only rows are present.
     expect(screen.getByText('192.168.1.11')).toBeInTheDocument();
+  });
+
+  // Regression coverage: several suggested_session_type values the backend
+  // can now return (smb, ftp, nfs, rlogin, proxmox, snmp, ipmi, redfish,
+  // webdav) had no entry in the frontend's SESSION_TYPE_MAP at all — the
+  // scan would detect and label the service, but clicking Connect just
+  // said "not directly connectable" instead of opening a session.
+  it.each([
+    ['smb', SessionType.Smb, 445],
+    ['ftp', SessionType.Ftp, 21],
+    ['nfs', SessionType.NfsExplorer, 2049],
+    ['rlogin', SessionType.Rlogin, 513],
+    ['proxmox', SessionType.ProxmoxConsole, 8006],
+    ['snmp', SessionType.Snmp, 161],
+    ['ipmi', SessionType.IpmiSol, 623],
+  ])('Connect opens a %s session on the real detected port', async (svcType, expectedType, port) => {
+    useSessionStore.setState({ sessions: [], openTabs: [], activeTabId: null });
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'network_local_subnets') return Promise.resolve([]);
+      if (cmd === 'network_explore_start') return Promise.resolve('scan-id-123');
+      return Promise.resolve(undefined);
+    });
+    renderWithToast(<NetworkExplorer />);
+    fireEvent.change(screen.getByPlaceholderText(/192\.168/), { target: { value: '10.0.0.0/28' } });
+    fireEvent.click(screen.getByTestId('scan-start-btn'));
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith('network_explore_start', expect.anything()));
+
+    const result: ExploreResult = {
+      ip: '192.168.1.50',
+      hostname: undefined,
+      mac_address: undefined,
+      mac_vendor: undefined,
+      os_guess: 'Linux/macOS/BSD-like (TTL 64)',
+      response_time_ms: 5,
+      suggested_session_type: svcType,
+      ttl: 64,
+      open_ports: [{ port, service_name: svcType, protocol: svcType === 'snmp' || svcType === 'ipmi' ? 'udp' : 'tcp' }],
+      mdns: [],
+      evidence: [],
+    };
+    act(() => {
+      handlers['network:explore_host_found']({ payload: { scan_id: 'scan-id-123', result } });
+    });
+    await screen.findByText('192.168.1.50');
+
+    fireEvent.click(screen.getByText('Connect'));
+
+    await waitFor(() => {
+      const sessions = useSessionStore.getState().sessions;
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].type).toBe(expectedType);
+      expect(sessions[0].connection.port).toBe(port);
+    });
   });
 });

@@ -429,6 +429,12 @@ pub fn build_wol_packet(mac_bytes: &[u8; 6]) -> Vec<u8> {
 }
 
 /// Guess service name from port number.
+///
+/// These strings are also what `suggest_session_type` returns, so an
+/// `OpenPort.service_name` from a real scan always matches the suggested
+/// type string exactly — the frontend looks up the actual detected port via
+/// `open_ports.find(p => p.service_name === suggested_session_type)`, and a
+/// naming mismatch here would silently fall back to a wrong hardcoded port.
 fn guess_service(port: u16) -> String {
     match port {
         21 => "ftp".to_string(),
@@ -439,13 +445,17 @@ fn guess_service(port: u16) -> String {
         80 => "http".to_string(),
         110 => "pop3".to_string(),
         143 => "imap".to_string(),
+        161 => "snmp".to_string(),
         443 => "https".to_string(),
         445 => "smb".to_string(),
+        513 => "rlogin".to_string(),
         554 => "rtsp".to_string(),
+        623 => "ipmi".to_string(),
         830 => "netconf".to_string(),
         993 => "imaps".to_string(),
         995 => "pop3s".to_string(),
         1883 => "mqtt".to_string(),
+        2049 => "nfs".to_string(),
         2375 => "docker-api".to_string(),
         2376 => "docker-api-tls".to_string(),
         3306 => "mysql".to_string(),
@@ -457,6 +467,7 @@ fn guess_service(port: u16) -> String {
         6379 => "redis".to_string(),
         6443 => "kube-api".to_string(),
         7681 => "wsterm".to_string(),
+        8006 => "proxmox".to_string(),
         8080 => "http-alt".to_string(),
         8443 => "https-alt".to_string(),
         8883 => "mqtt-tls".to_string(),
@@ -468,43 +479,71 @@ fn guess_service(port: u16) -> String {
     }
 }
 
+/// Ports checked for a suggested session type, in priority order. The
+/// returned string is always `guess_service(port)` for whichever port wins
+/// (see `suggest_session_type`) — listing ports here instead of
+/// hand-writing each name is what guarantees that: hand-writing them
+/// previously drifted out of sync for the "-tls" port variants (2376,
+/// 5986, 8883 all fell through to their plain sibling's name, e.g. port
+/// 2376 returned "docker-api" instead of guess_service's "docker-api-tls",
+/// so the frontend's port lookup by service_name silently missed and fell
+/// back to a hardcoded, wrong port).
+const SUGGEST_TYPE_PRIORITY_PORTS: &[u16] = &[
+    22, 3389, 5900, 5985, 5986, 6443, 2375, 2376, 1883, 8883,
+    50051, 830, 7681, 445, 2049, 513, 8006, 623, 161, 23, 21,
+];
+
 /// Suggest the best session type from open ports (priority order).
+///
+/// Returns the exact same string `guess_service` uses for the winning
+/// port (see its doc comment for why that matters) by construction —
+/// derived directly from `guess_service`, not a separately hand-written copy.
 fn suggest_session_type(open_ports: &[OpenPort]) -> Option<String> {
     let ports: Vec<u16> = open_ports.iter().map(|p| p.port).collect();
-    if ports.contains(&22) {
-        Some("ssh".to_string())
-    } else if ports.contains(&3389) {
-        Some("rdp".to_string())
-    } else if ports.contains(&5900) {
-        Some("vnc".to_string())
-    } else if ports.contains(&5985) || ports.contains(&5986) {
-        Some("winrm".to_string())
-    } else if ports.contains(&6443) {
-        Some("kubernetes_exec".to_string())
-    } else if ports.contains(&2375) || ports.contains(&2376) {
-        Some("docker_exec".to_string())
-    } else if ports.contains(&1883) || ports.contains(&8883) {
-        Some("mqtt_client".to_string())
-    } else if ports.contains(&50051) {
-        Some("grpc_explorer".to_string())
-    } else if ports.contains(&830) {
-        Some("netconf".to_string())
-    } else if ports.contains(&7681) {
-        Some("websocket_terminal".to_string())
-    } else if ports.contains(&23) {
-        Some("telnet".to_string())
-    } else if ports.contains(&21) {
-        Some("sftp".to_string())
-    } else {
-        None
+    SUGGEST_TYPE_PRIORITY_PORTS
+        .iter()
+        .find(|&&p| ports.contains(&p))
+        .map(|&p| guess_service(p))
+}
+
+/// Upgrade a port-only suggestion once enrichment has actually confirmed
+/// Redfish or WebDAV via their HTTP-level signature (see `probe_redfish`/
+/// `probe_webdav`) — those can't be told apart from a generic web server by
+/// port number alone, so `suggest_session_type` can't offer them on its
+/// own. Only overrides when the current suggestion is empty or was just a
+/// generic https/http guess-by-port, never a real protocol match like SSH.
+fn refine_suggested_type(current: Option<String>, open_ports: &[OpenPort]) -> Option<String> {
+    if matches!(
+        current.as_deref(),
+        Some(
+            "ssh" | "rdp" | "vnc" | "winrm" | "winrm-tls" | "kube-api" | "docker-api"
+                | "docker-api-tls" | "mqtt" | "mqtt-tls" | "grpc" | "netconf" | "wsterm"
+                | "smb" | "nfs" | "rlogin" | "proxmox" | "ipmi" | "snmp"
+        )
+    ) {
+        return current;
     }
+    let redfish = open_ports
+        .iter()
+        .find(|p| REDFISH_PROBE_PORTS.contains(&p.port) && p.version.as_deref().is_some_and(|v| v.starts_with("Redfish")));
+    if redfish.is_some() {
+        return Some("redfish".to_string());
+    }
+    let webdav = open_ports
+        .iter()
+        .find(|p| WEBDAV_PROBE_PORTS.contains(&p.port) && p.version.as_deref() == Some("WebDAV"));
+    if webdav.is_some() {
+        return Some("webdav".to_string());
+    }
+    current
 }
 
 /// Common ports to scan by default.
 const DEFAULT_PORTS: &[u16] = &[
     21, 22, 23, 25, 53, 80, 110, 143, 443, 445,
-    830, 993, 995, 1883, 2375, 2376, 3306, 3389, 5432, 5900,
-    5985, 5986, 6379, 6443, 7681, 8080, 8443, 8883, 27017, 50051,
+    513, 830, 993, 995, 1883, 2049, 2375, 2376, 3306, 3389,
+    5432, 5900, 5985, 5986, 6379, 6443, 7681, 8006, 8080, 8443,
+    8883, 27017, 50051,
 ];
 
 // ── Interface-bound connect ────────────────────────────────────────────
@@ -1208,6 +1247,8 @@ const HTTP_PORTS: &[u16] = &[80, 8080];
 /// TLS ports: certificate is always captured; an HTTP GET is also attempted
 /// since many admin UIs/REST APIs live on 443/8443/6443/etc.
 const TLS_PROBE_PORTS: &[u16] = &[443, 5986, 6443, 8443, 8883, 50051];
+const REDFISH_PROBE_PORTS: &[u16] = &[443, 8443];
+const WEBDAV_PROBE_PORTS: &[u16] = &[80, 443, 8080, 8443];
 
 /// Connect and read whatever the server sends first, without sending
 /// anything ourselves. Covers SSH/FTP/SMTP/POP3/IMAP/MySQL/VNC, which are
@@ -1313,6 +1354,219 @@ async fn http_get_body(ip: IpAddr, port: u16, path: &str, timeout: Duration) -> 
     Some(body.to_string())
 }
 
+/// Pulled out of `probe_redfish` so the detection logic is unit-testable
+/// against hardcoded response bodies without a live TLS server. `body` is
+/// the response with headers already stripped.
+fn parse_redfish_body(body: &str) -> Option<String> {
+    let json: serde_json::Value = serde_json::from_str(body).ok()?;
+    let version = json.get("RedfishVersion").and_then(|v| v.as_str());
+    let is_service_root = json
+        .get("@odata.type")
+        .and_then(|v| v.as_str())
+        .is_some_and(|t| t.contains("ServiceRoot"));
+    if version.is_none() && !is_service_root {
+        return None;
+    }
+    Some(match version {
+        Some(v) => format!("Redfish {v}"),
+        None => "Redfish".to_string(),
+    })
+}
+
+/// Redfish (BMC REST management API) exposes an unauthenticated service
+/// root at `/redfish/v1/` describing itself via `RedfishVersion` /
+/// `@odata.type`. Distinct from a generic HTTPS probe (which would false-
+/// positive on almost any web server), this only fires on that specific
+/// signature. Tried over TLS since Redfish is conventionally HTTPS-only.
+async fn probe_redfish(ip: IpAddr, port: u16, timeout: Duration) -> Option<String> {
+    let request = format!(
+        "GET /redfish/v1/ HTTP/1.0\r\nHost: {ip}\r\nUser-Agent: CrossTerm-NetworkExplorer\r\nConnection: close\r\n\r\n"
+    );
+    let mut stream = tls_connect(ip, port, timeout).await?;
+    stream.write_all(request.as_bytes()).await.ok()?;
+    let raw = read_response_bounded(&mut stream).await?;
+    if !raw.starts_with("HTTP/") {
+        return None;
+    }
+    let (_headers, body) = raw.split_once("\r\n\r\n")?;
+    parse_redfish_body(body)
+}
+
+/// Pulled out of `probe_webdav` so the detection logic is unit-testable
+/// against a hardcoded raw response without a live server. `raw` is the
+/// full response including headers.
+fn is_webdav_response(raw: &str) -> bool {
+    if !raw.starts_with("HTTP/") {
+        return false;
+    }
+    let lower = raw.to_ascii_lowercase();
+    let has_dav_header = lower.lines().any(|l| l.starts_with("dav:"));
+    let allows_propfind = lower
+        .lines()
+        .find(|l| l.starts_with("allow:"))
+        .is_some_and(|l| l.contains("propfind"));
+    has_dav_header || allows_propfind
+}
+
+/// WebDAV is detected via an OPTIONS request: a WebDAV-capable server
+/// advertises `PROPFIND`/`MKCOL`/etc. in its `Allow` header, or sends a
+/// `DAV:` header directly. Both are checked since servers vary in which
+/// one they actually send.
+async fn probe_webdav(ip: IpAddr, port: u16, tls: bool, timeout: Duration) -> Option<()> {
+    let request = format!(
+        "OPTIONS / HTTP/1.0\r\nHost: {ip}\r\nUser-Agent: CrossTerm-NetworkExplorer\r\nConnection: close\r\n\r\n"
+    );
+    let raw = if tls {
+        let mut stream = tls_connect(ip, port, timeout).await?;
+        stream.write_all(request.as_bytes()).await.ok()?;
+        read_response_bounded(&mut stream).await?
+    } else {
+        let mut stream = connect_bound(ip, port, timeout).await.ok()?;
+        stream.write_all(request.as_bytes()).await.ok()?;
+        read_response_bounded(&mut stream).await?
+    };
+    if is_webdav_response(&raw) { Some(()) } else { None }
+}
+
+// ── UDP probes (SNMP, IPMI) ──────────────────────────────────────────────
+// Unlike TCP, a UDP "connect" doesn't verify reachability — the only
+// reliable way to tell a UDP port is actually open and speaking the
+// expected protocol is to send a real protocol payload and see if we get
+// a real protocol response back. A silent UDP port (many services don't
+// respond to malformed input) reads the same as a closed one here; that's
+// an inherent UDP-scanning limitation, not something these probes can fix.
+
+/// Send `payload` to `ip:port` over UDP (bound to `BOUND_INTERFACE` like the
+/// TCP probes) and return whatever comes back within `timeout`, if anything.
+async fn probe_udp(ip: IpAddr, port: u16, payload: &[u8], timeout: Duration) -> Option<Vec<u8>> {
+    let bound_if = current_bound_interface();
+    let bind_addr = if ip.is_ipv4() { "0.0.0.0:0" } else { "[::]:0" };
+    let socket = tokio::task::spawn_blocking({
+        let bind_addr = bind_addr.to_string();
+        move || -> std::io::Result<std::net::UdpSocket> {
+            let domain = if bind_addr.starts_with('[') { socket2::Domain::IPV6 } else { socket2::Domain::IPV4 };
+            let socket = socket2::Socket::new(domain, socket2::Type::DGRAM, Some(socket2::Protocol::UDP))?;
+            if let Some(iface) = bound_if.as_deref() {
+                bind_socket_to_interface(&socket, iface)?;
+            }
+            let addr: SocketAddr = bind_addr.parse().map_err(std::io::Error::other)?;
+            socket.bind(&addr.into())?;
+            socket.set_nonblocking(true)?;
+            Ok(socket.into())
+        }
+    })
+    .await
+    .ok()?
+    .ok()?;
+    let socket = UdpSocket::from_std(socket).ok()?;
+
+    let dest = SocketAddr::new(ip, port);
+    socket.send_to(payload, dest).await.ok()?;
+
+    let mut buf = [0u8; 512];
+    let (n, _from) = tokio::time::timeout(timeout, socket.recv_from(&mut buf)).await.ok()?.ok()?;
+    if n == 0 { None } else { Some(buf[..n].to_vec()) }
+}
+
+/// Minimal BER/DER TLV encoder — just enough to build the one fixed SNMPv1
+/// GetRequest packet below, not a general ASN.1 encoder.
+fn ber_tlv(tag: u8, content: &[u8]) -> Vec<u8> {
+    let mut out = vec![tag];
+    let len = content.len();
+    if len < 128 {
+        out.push(len as u8);
+    } else {
+        // Not needed for this fixed, short packet, but kept correct rather
+        // than silently truncating if the shape ever changes.
+        let len_bytes = len.to_be_bytes();
+        let significant: Vec<u8> = len_bytes.iter().copied().skip_while(|&b| b == 0).collect();
+        out.push(0x80 | significant.len() as u8);
+        out.extend_from_slice(&significant);
+    }
+    out.extend_from_slice(content);
+    out
+}
+
+/// Build an SNMPv1 GetRequest for sysDescr.0 (OID 1.3.6.1.2.1.1.1.0) with
+/// the given community string.
+fn build_snmp_get_request(community: &str) -> Vec<u8> {
+    let oid = ber_tlv(0x06, &[0x2B, 0x06, 0x01, 0x02, 0x01, 0x01, 0x01, 0x00]); // 1.3.6.1.2.1.1.1.0
+    let null = ber_tlv(0x05, &[]);
+    let varbind = ber_tlv(0x30, &[oid, null].concat());
+    let varbind_list = ber_tlv(0x30, &varbind);
+    let request_id = ber_tlv(0x02, &[0x01]);
+    let error_status = ber_tlv(0x02, &[0x00]);
+    let error_index = ber_tlv(0x02, &[0x00]);
+    let pdu_content = [request_id, error_status, error_index, varbind_list].concat();
+    let get_request_pdu = ber_tlv(0xA0, &pdu_content); // [0] IMPLICIT SEQUENCE
+
+    let version = ber_tlv(0x02, &[0x00]); // SNMPv1
+    let community_str = ber_tlv(0x04, community.as_bytes());
+    let message_content = [version, community_str, get_request_pdu].concat();
+    ber_tlv(0x30, &message_content)
+}
+
+/// Probe SNMP (UDP 161) with a real GetRequest for sysDescr.0 against the
+/// "public" community string. Any well-formed SNMP response (starts with a
+/// BER SEQUENCE tag) confirms an SNMP agent is present, even if sysDescr
+/// itself can't be parsed out (custom/locked-down agents, different
+/// community string, etc.).
+/// Pulled out of `probe_snmp` so response parsing is unit-testable against
+/// hardcoded byte sequences without a live UDP responder.
+fn parse_snmp_response(response: &[u8]) -> Option<String> {
+    if response.first() != Some(&0x30) {
+        return None;
+    }
+    // Best-effort: find an OCTET STRING (tag 0x04) in the response and treat
+    // it as sysDescr if printable — not a full ASN.1 parse, just a scan for
+    // the shape we expect back for this specific request.
+    for i in 0..response.len().saturating_sub(1) {
+        if response[i] == 0x04 {
+            let len = response[i + 1] as usize;
+            let start = i + 2;
+            if let Some(bytes) = response.get(start..start + len) {
+                if let Ok(text) = std::str::from_utf8(bytes) {
+                    if !text.is_empty() && text.chars().all(|c| !c.is_control() || c == '\n') {
+                        return Some(text.trim().to_string());
+                    }
+                }
+            }
+        }
+    }
+    Some("SNMP agent".to_string())
+}
+
+async fn probe_snmp(ip: IpAddr, port: u16, timeout: Duration) -> Option<String> {
+    let packet = build_snmp_get_request("public");
+    let response = probe_udp(ip, port, &packet, timeout).await?;
+    parse_snmp_response(&response)
+}
+
+/// Build an RMCP Presence Ping (ASF message type 0x80) — the standard way
+/// to probe for an IPMI-over-LAN service on UDP 623 without authenticating.
+fn build_rmcp_presence_ping() -> Vec<u8> {
+    vec![
+        0x06, 0x00, 0xFF, 0x06, // RMCP header: version 6, reserved, seq 0xFF (no ACK), class ASF
+        0x00, 0x00, 0x11, 0xBE, // ASF IANA enterprise number (4542)
+        0x80, // message type: Presence Ping
+        0x00, // message tag
+        0x00, // reserved
+        0x00, // data length: 0
+    ]
+}
+
+/// Probe IPMI SOL (UDP 623) via RMCP Presence Ping. A genuine BMC answers
+/// with a Presence Pong (ASF message type 0x40) at the same offset.
+/// Pulled out of `probe_ipmi` so the check is unit-testable directly.
+fn is_rmcp_presence_pong(response: &[u8]) -> bool {
+    response.len() >= 9 && response[3] == 0x06 && response[8] == 0x40
+}
+
+async fn probe_ipmi(ip: IpAddr, port: u16, timeout: Duration) -> Option<()> {
+    let response = probe_udp(ip, port, &build_rmcp_presence_ping(), timeout).await?;
+    if is_rmcp_presence_pong(&response) { Some(()) } else { None }
+}
+
 const JELLYFIN_PORT: u16 = 8096;
 const PLEX_PORT: u16 = 32400;
 
@@ -1379,6 +1633,19 @@ async fn enrich_port(ip: IpAddr, mut open_port: OpenPort, timeout: Duration) -> 
             }
             open_port.http_title = title;
         }
+        // Redfish/WebDAV both ride on the same HTTPS ports as any other web
+        // server, so they're only claimed on an explicit protocol signature
+        // (Redfish's ServiceRoot JSON, WebDAV's DAV/PROPFIND header) rather
+        // than assumed from the port alone.
+        if REDFISH_PROBE_PORTS.contains(&port) {
+            if let Some(redfish) = probe_redfish(ip, port, probe_timeout).await {
+                open_port.version = Some(redfish);
+            } else if WEBDAV_PROBE_PORTS.contains(&port)
+                && probe_webdav(ip, port, true, probe_timeout).await.is_some()
+            {
+                open_port.version = Some("WebDAV".to_string());
+            }
+        }
         return open_port;
     }
 
@@ -1386,6 +1653,9 @@ async fn enrich_port(ip: IpAddr, mut open_port: OpenPort, timeout: Duration) -> 
         if let Some((server, title)) = probe_http(ip, port, false, probe_timeout).await {
             open_port.version = server;
             open_port.http_title = title;
+        }
+        if WEBDAV_PROBE_PORTS.contains(&port) && probe_webdav(ip, port, false, probe_timeout).await.is_some() {
+            open_port.version = Some("WebDAV".to_string());
         }
         return open_port;
     }
@@ -1884,13 +2154,35 @@ pub async fn network_explore_start(
                 }
                 let start = Instant::now();
 
-                // Run TCP port checks and ICMP ping concurrently.
+                // Run TCP port checks, ICMP ping, and the UDP protocol
+                // probes (SNMP/IPMI — UDP can't be "connect scanned" like
+                // TCP, so these send a real protocol payload and check for a
+                // real protocol response) all concurrently.
                 let port_futures: Vec<_> = ports.iter().map(|&p| check_port(ip, p, timeout)).collect();
-                let (port_results, (ping_alive, ttl)) = tokio::join!(
+                let (port_results, (ping_alive, ttl), snmp_result, ipmi_result) = tokio::join!(
                     futures::future::join_all(port_futures),
                     ping_host(ip, timeout),
+                    probe_snmp(ip, 161, timeout),
+                    probe_ipmi(ip, 623, timeout),
                 );
-                let open_ports: Vec<OpenPort> = port_results.into_iter().flatten().collect();
+                let mut open_ports: Vec<OpenPort> = port_results.into_iter().flatten().collect();
+                if let Some(sys_descr) = snmp_result {
+                    open_ports.push(OpenPort {
+                        port: 161,
+                        service_name: "snmp".to_string(),
+                        protocol: "udp".to_string(),
+                        version: Some(sys_descr),
+                        ..Default::default()
+                    });
+                }
+                if ipmi_result.is_some() {
+                    open_ports.push(OpenPort {
+                        port: 623,
+                        service_name: "ipmi".to_string(),
+                        protocol: "udp".to_string(),
+                        ..Default::default()
+                    });
+                }
                 let found = !open_ports.is_empty() || ping_alive;
                 register_if_dns_server(ip, &open_ports, &dns_registry).await;
 
@@ -1958,6 +2250,13 @@ pub async fn network_explore_start(
                     None
                 };
                 let (os_guess, evidence) = guess_os(&open_ports, ttl);
+                // Redfish/WebDAV can only be told apart from a generic web
+                // server by the enrichment probe above (their signature
+                // check needs an actual HTTP round trip, not just a port
+                // number) — refine the port-only suggestion from phase 1
+                // now that that's available, rather than never suggesting
+                // them at all.
+                let suggested_session_type = refine_suggested_type(suggested_session_type, &open_ports);
                 let result = ExploreResult {
                     ip: ip.to_string(),
                     hostname,
@@ -4309,6 +4608,237 @@ mod tests {
         assert_eq!(guess_service(21), "ftp");
         assert_eq!(guess_service(22), "ssh");
         assert_eq!(guess_service(60000), "port-60000");
+    }
+
+    #[test]
+    fn test_guess_service_new_protocol_breadth_ports() {
+        assert_eq!(guess_service(445), "smb");
+        assert_eq!(guess_service(513), "rlogin");
+        assert_eq!(guess_service(2049), "nfs");
+        assert_eq!(guess_service(8006), "proxmox");
+    }
+
+    // Regression coverage: suggest_session_type used to return
+    // "kubernetes_exec"/"docker_exec"/"mqtt_client"/"grpc_explorer"/
+    // "websocket_terminal"/"sftp" (for FTP's port 21) — strings that don't
+    // match any guess_service() output for the same port. The frontend
+    // matches a suggested type's real port via
+    // open_ports.find(p => p.service_name === suggested_session_type); a
+    // naming mismatch meant that lookup always missed and silently fell
+    // back to a hardcoded port 22, so e.g. a discovered Kubernetes API
+    // server would open a "connect" attempt on the wrong port entirely.
+    #[test]
+    fn test_suggest_session_type_matches_guess_service_naming() {
+        let cases: &[(u16, &str)] = &[
+            (5985, "winrm"),
+            (5986, "winrm-tls"),
+            (6443, "kube-api"),
+            (2375, "docker-api"),
+            (2376, "docker-api-tls"),
+            (1883, "mqtt"),
+            (8883, "mqtt-tls"),
+            (50051, "grpc"),
+            (7681, "wsterm"),
+            (445, "smb"),
+            (2049, "nfs"),
+            (513, "rlogin"),
+            (8006, "proxmox"),
+            (623, "ipmi"),
+            (161, "snmp"),
+            (21, "ftp"),
+        ];
+        for &(port, expected) in cases {
+            let ports = vec![OpenPort { port, service_name: guess_service(port), protocol: "tcp".to_string(), ..Default::default() }];
+            let suggested = suggest_session_type(&ports);
+            assert_eq!(suggested.as_deref(), Some(expected), "port {port}");
+            // The naming-consistency invariant itself: whatever
+            // suggest_session_type returns for a lone open port must equal
+            // guess_service's own name for that same port, so the
+            // frontend's service_name lookup always finds the real port.
+            assert_eq!(suggested.as_deref(), Some(guess_service(port).as_str()), "port {port} naming mismatch");
+        }
+    }
+
+    #[test]
+    fn test_refine_suggested_type_upgrades_generic_https_to_redfish() {
+        let open_ports = vec![OpenPort {
+            port: 443,
+            service_name: "https".to_string(),
+            protocol: "tcp".to_string(),
+            version: Some("Redfish 1.6.0".to_string()),
+            ..Default::default()
+        }];
+        assert_eq!(refine_suggested_type(None, &open_ports).as_deref(), Some("redfish"));
+    }
+
+    #[test]
+    fn test_refine_suggested_type_upgrades_generic_http_to_webdav() {
+        let open_ports = vec![OpenPort {
+            port: 80,
+            service_name: "http".to_string(),
+            protocol: "tcp".to_string(),
+            version: Some("WebDAV".to_string()),
+            ..Default::default()
+        }];
+        assert_eq!(refine_suggested_type(None, &open_ports).as_deref(), Some("webdav"));
+    }
+
+    #[test]
+    fn test_refine_suggested_type_never_overrides_a_real_protocol_match() {
+        // SSH must win even if, say, port 443 on the same host happens to
+        // carry a Redfish signature too — a real shell beats a BMC API.
+        let open_ports = vec![OpenPort {
+            port: 443,
+            service_name: "https".to_string(),
+            protocol: "tcp".to_string(),
+            version: Some("Redfish 1.6.0".to_string()),
+            ..Default::default()
+        }];
+        assert_eq!(refine_suggested_type(Some("ssh".to_string()), &open_ports).as_deref(), Some("ssh"));
+    }
+
+    #[test]
+    fn test_refine_suggested_type_leaves_generic_http_alone_without_a_signature() {
+        let open_ports = vec![OpenPort {
+            port: 80,
+            service_name: "http".to_string(),
+            protocol: "tcp".to_string(),
+            version: Some("nginx".to_string()),
+            ..Default::default()
+        }];
+        assert_eq!(refine_suggested_type(None, &open_ports), None);
+    }
+
+    #[test]
+    fn test_parse_redfish_body_extracts_version() {
+        let body = "{\"RedfishVersion\":\"1.6.0\",\"@odata.type\":\"#ServiceRoot.v1_9_0.ServiceRoot\"}";
+        assert_eq!(parse_redfish_body(body).as_deref(), Some("Redfish 1.6.0"));
+    }
+
+    #[test]
+    fn test_parse_redfish_body_accepts_service_root_without_version_field() {
+        let body = "{\"@odata.type\":\"#ServiceRoot.v1_9_0.ServiceRoot\",\"Id\":\"RootService\"}";
+        assert_eq!(parse_redfish_body(body).as_deref(), Some("Redfish"));
+    }
+
+    #[test]
+    fn test_parse_redfish_body_rejects_unrelated_json() {
+        assert_eq!(parse_redfish_body(r#"{"hello":"world"}"#), None);
+        assert_eq!(parse_redfish_body("not json at all"), None);
+    }
+
+    #[test]
+    fn test_is_webdav_response_detects_dav_header() {
+        assert!(is_webdav_response("HTTP/1.1 200 OK\r\nDAV: 1,2\r\n\r\n"));
+    }
+
+    #[test]
+    fn test_is_webdav_response_detects_propfind_in_allow_header() {
+        assert!(is_webdav_response("HTTP/1.1 200 OK\r\nAllow: GET, PROPFIND, MKCOL\r\n\r\n"));
+    }
+
+    #[test]
+    fn test_is_webdav_response_rejects_generic_http_server() {
+        assert!(!is_webdav_response("HTTP/1.1 200 OK\r\nAllow: GET, POST, HEAD\r\n\r\n"));
+        assert!(!is_webdav_response("not an http response"));
+    }
+
+    #[test]
+    fn test_ber_tlv_short_form_length() {
+        assert_eq!(ber_tlv(0x04, b"public"), vec![0x04, 0x06, b'p', b'u', b'b', b'l', b'i', b'c']);
+        assert_eq!(ber_tlv(0x05, &[]), vec![0x05, 0x00]);
+    }
+
+    #[test]
+    fn test_build_snmp_get_request_is_well_formed_ber() {
+        let packet = build_snmp_get_request("public");
+        // Outer SEQUENCE tag + a length byte, at minimum.
+        assert_eq!(packet[0], 0x30);
+        // version INTEGER 0 (SNMPv1)
+        assert_eq!(&packet[2..5], &[0x02, 0x01, 0x00]);
+        // community OCTET STRING "public"
+        assert_eq!(&packet[5..13], b"\x04\x06public");
+        // Contains the sysDescr.0 OID bytes somewhere in the GetRequest PDU.
+        let oid = [0x06, 0x08, 0x2B, 0x06, 0x01, 0x02, 0x01, 0x01, 0x01, 0x00];
+        assert!(packet.windows(oid.len()).any(|w| w == oid));
+    }
+
+    #[test]
+    fn test_parse_snmp_response_extracts_sys_descr() {
+        // Minimal well-formed-enough response carrying an OCTET STRING.
+        let mut response = vec![0x30, 0x00];
+        response.extend_from_slice(&[0x04, 0x0B]);
+        response.extend_from_slice(b"Linux host1");
+        assert_eq!(parse_snmp_response(&response).as_deref(), Some("Linux host1"));
+    }
+
+    #[test]
+    fn test_parse_snmp_response_falls_back_to_generic_label() {
+        let response = vec![0x30, 0x03, 0x02, 0x01, 0x00];
+        assert_eq!(parse_snmp_response(&response).as_deref(), Some("SNMP agent"));
+    }
+
+    #[test]
+    fn test_parse_snmp_response_rejects_non_ber_data() {
+        assert_eq!(parse_snmp_response(&[0xFF, 0xFF, 0xFF]), None);
+        assert_eq!(parse_snmp_response(&[]), None);
+    }
+
+    #[test]
+    fn test_build_rmcp_presence_ping_structure() {
+        let ping = build_rmcp_presence_ping();
+        assert_eq!(ping.len(), 12);
+        assert_eq!(ping[0], 0x06); // RMCP version
+        assert_eq!(ping[3], 0x06); // ASF class
+        assert_eq!(&ping[4..8], &[0x00, 0x00, 0x11, 0xBE]); // IANA 4542
+        assert_eq!(ping[8], 0x80); // Presence Ping message type
+    }
+
+    #[test]
+    fn test_is_rmcp_presence_pong_accepts_real_pong_shape() {
+        let pong = [0x06, 0x00, 0xFF, 0x06, 0x00, 0x00, 0x11, 0xBE, 0x40, 0x00, 0x00, 0x00];
+        assert!(is_rmcp_presence_pong(&pong));
+    }
+
+    #[test]
+    fn test_is_rmcp_presence_pong_rejects_short_or_wrong_type() {
+        assert!(!is_rmcp_presence_pong(&[0x06, 0x00, 0xFF]));
+        let wrong_type = [0x06, 0x00, 0xFF, 0x06, 0x00, 0x00, 0x11, 0xBE, 0x80, 0x00, 0x00, 0x00];
+        assert!(!is_rmcp_presence_pong(&wrong_type));
+    }
+
+    #[tokio::test]
+    async fn test_probe_webdav_over_plain_tcp() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let mut buf = [0u8; 256];
+                let _ = stream.read(&mut buf).await;
+                let _ = stream.write_all(
+                    b"HTTP/1.1 200 OK\r\nAllow: OPTIONS, GET, PROPFIND, MKCOL\r\nDAV: 1,2\r\n\r\n"
+                ).await;
+            }
+        });
+
+        let result = probe_webdav(addr.ip(), addr.port(), false, Duration::from_millis(500)).await;
+        assert_eq!(result, Some(()));
+    }
+
+    #[tokio::test]
+    async fn test_probe_webdav_rejects_a_plain_web_server() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let mut buf = [0u8; 256];
+                let _ = stream.read(&mut buf).await;
+                let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nAllow: GET, HEAD, POST\r\n\r\n").await;
+            }
+        });
+
+        let result = probe_webdav(addr.ip(), addr.port(), false, Duration::from_millis(500)).await;
+        assert_eq!(result, None);
     }
 
     #[test]

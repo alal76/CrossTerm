@@ -143,11 +143,14 @@ const SERVICE_PORT_COLORS: Record<string, string> = {
 
 const SERVICE_DEFAULT_PORTS: Record<string, number> = {
   ssh: 22, sftp: 22, rdp: 3389, vnc: 5900, telnet: 23, ftp: 21,
+  smb: 445, nfs: 2049, rlogin: 513, proxmox: 8006, snmp: 161, ipmi: 623,
+  redfish: 443, webdav: 80,
 };
 
 const SESSION_TYPE_MAP: Record<string, SessionType> = {
   ssh: SessionType.SSH,
   sftp: SessionType.SFTP,
+  ftp: SessionType.Ftp,
   rdp: SessionType.RDP,
   vnc: SessionType.VNC,
   telnet: SessionType.Telnet,
@@ -166,6 +169,14 @@ const SESSION_TYPE_MAP: Record<string, SessionType> = {
   mqtt_client: SessionType.MqttClient,
   grpc_explorer: SessionType.GrpcExplorer,
   websocket_terminal: SessionType.WebSocketTerminal,
+  smb: SessionType.Smb,
+  nfs: SessionType.NfsExplorer,
+  rlogin: SessionType.Rlogin,
+  proxmox: SessionType.ProxmoxConsole,
+  snmp: SessionType.Snmp,
+  ipmi: SessionType.IpmiSol,
+  redfish: SessionType.Redfish,
+  webdav: SessionType.WebDav,
 };
 
 type SortKey = 'ip' | 'hostname' | 'name' | 'type' | 'mac' | 'vendor' | 'os' | 'ports' | 'response' | 'session';
