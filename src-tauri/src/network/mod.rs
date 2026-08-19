@@ -1285,8 +1285,14 @@ const WEBDAV_PROBE_PORTS: &[u16] = &[80, 443, 8080, 8443];
 async fn grab_banner(ip: IpAddr, port: u16, timeout: Duration) -> Option<String> {
     let mut stream = connect_bound(ip, port, timeout).await.ok()?;
 
+    // Previously hardcoded to 1500ms here regardless of the `timeout`
+    // parameter — which only ever governed the connect phase above, not
+    // this read. That meant a caller asking for more overall margin (e.g.
+    // a test bumping its own timeout to work around CI scheduling delays)
+    // had no actual effect on the read, which is where the real wait
+    // happens. Use the same timeout for both phases.
     let mut buf = [0u8; 256];
-    let n = tokio::time::timeout(Duration::from_millis(1500), stream.read(&mut buf)).await.ok()?.ok()?;
+    let n = tokio::time::timeout(timeout, stream.read(&mut buf)).await.ok()?.ok()?;
     if n == 0 {
         return None;
     }
