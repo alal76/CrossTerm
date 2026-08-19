@@ -67,6 +67,18 @@ mod vault;
 mod vnc;
 mod window;
 
+/// Gates whether the always-registered log plugin (see `run()`) actually
+/// writes anything, independent of `log::max_level()`. `tauri-plugin-log`
+/// bakes its `.level()` into the `fern::Dispatch` chain once, at plugin
+/// registration time — calling `log::set_max_level()` afterward changes the
+/// `log` crate's own global early-exit check, but the already-built fern
+/// dispatcher still applies its own frozen level filter underneath that,
+/// so a level configured at startup can never be raised or lowered later
+/// through that mechanism alone. Registering with `.filter()` instead (see
+/// `run()`) re-checks this atomic on every record, which is what actually
+/// makes the Settings > Advanced toggle take effect without a restart.
+pub static DIAGNOSTIC_LOGGING_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Both `ring` and `aws-lc-rs` are linked in transitively (reqwest, kube,
@@ -80,13 +92,26 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
+            // Previously gated to debug builds only, so the installed
+            // release app had no logging at all — no way to diagnose a
+            // report like "the scan only found N hosts" after the fact
+            // without asking the user to rebuild in debug mode. Now always
+            // registered (writes to stdout + the OS app-log directory via
+            // TargetKind::LogDir when active), gated by `.filter()` on
+            // `DIAGNOSTIC_LOGGING_ENABLED` rather than `.level()` — see that
+            // static's doc comment for why `.level()` alone can't be
+            // toggled live. The per-profile Settings toggle (Settings >
+            // Advanced > Enable Diagnostic Logging) flips the atomic via
+            // `config::apply_diagnostic_logging_level` on profile switch
+            // and settings update; nothing is logged until the user opts in.
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(log::LevelFilter::Info)
+                    .filter(|_metadata| {
+                        DIAGNOSTIC_LOGGING_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
+                    })
+                    .build(),
+            )?;
             Ok(())
         })
         .manage(vault::Vault::new())
