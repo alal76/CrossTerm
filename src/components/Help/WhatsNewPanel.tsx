@@ -2,11 +2,17 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { X, Sparkles } from "lucide-react";
 
-const APP_VERSION = "2.0.4";
+const APP_VERSION = "2.0.5";
 const DISMISSED_VERSION_KEY = "crossterm:whats-new-dismissed";
 
 const RELEASE_NOTES = `
 ## What's New in CrossTerm ${APP_VERSION}
+
+### Bug Fixes
+- Fixed the native macOS/Windows/Linux menu bar's Settings submenu items (General, Appearance, ... Advanced) all opening to the same generic first page — clicking "Advanced" now actually opens Advanced, not General.
+- Fixed CrossTerm's own menus (Connect, Vault, Settings) appearing *before* File and Edit in the native menu bar on macOS and Windows. They're now inserted right after Edit, matching standard OS menu conventions on every platform.
+
+## CrossTerm 2.0.4
 
 ### Bug Fixes
 - Fixed pressing Enter in the CIDR field while a scan was already running launching a second, fully overlapping scan: the Scan button correctly disabled itself mid-scan, but the CIDR field's Enter-key shortcut had no such check. Two overlapping scans of the same subnet split the shared probe pool from 2.0.3 between them, so results could look dramatically worse than a single scan of the exact same subnet moments later — this was mistakable for a detection bug when it was really just two scans quietly fighting each other. Pressing Enter (or clicking Scan) while one is already in progress is now a no-op until it finishes.
