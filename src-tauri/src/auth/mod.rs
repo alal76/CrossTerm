@@ -398,14 +398,6 @@ fn percent_decode(s: &str) -> String {
 
 // ── Tauri commands ────────────────────────────────────────────────────────
 
-/// Run the full OIDC Authorization Code + PKCE flow:
-///
-/// 1. Find a free ephemeral port in 12300–12399.
-/// 2. Build the authorization URL.
-/// 3. Open the system browser.
-/// 4. Wait for the browser redirect to `http://127.0.0.1:{port}/callback`.
-/// 5. Exchange the authorization code for tokens.
-/// 6. Parse the ID token and return the user profile.
 /// Find the saved config for `provider_name`, or a descriptive error.
 /// Extracted from `auth_oidc_begin` so it's unit-testable without a Tauri
 /// app context.
@@ -417,6 +409,14 @@ pub fn resolve_oidc_config(configs: &[OidcConfig], provider_name: &str) -> Resul
         .ok_or_else(|| format!("No OIDC config found for provider '{provider_name}'"))
 }
 
+/// Run the full OIDC Authorization Code + PKCE flow:
+///
+/// 1. Find a free ephemeral port in 12300–12399.
+/// 2. Build the authorization URL.
+/// 3. Open the system browser.
+/// 4. Wait for the browser redirect to `http://127.0.0.1:{port}/callback`.
+/// 5. Exchange the authorization code for tokens.
+/// 6. Parse the ID token and return the user profile.
 #[tauri::command]
 pub async fn auth_oidc_begin(
     provider_name: String,
