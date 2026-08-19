@@ -194,4 +194,176 @@ describe("SessionEditor", () => {
     expect(screen.getByRole("button", { name: "Advanced" })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByPlaceholderText("Production")).toBeInTheDocument();
   });
+
+  // Regression coverage: sessionConfig.ts's builders for Proxmox Console,
+  // Docker Logs, and Kubernetes Port-Forward all read protocol-specific
+  // identifiers (node+vmid, container ID, pod name) that the editor never
+  // collected — every session of these types was structurally unable to
+  // connect regardless of what the user entered, since the required field
+  // was always empty. Confirmed live for Proxmox Console against a real
+  // host before this fix. These three now have required-field validation
+  // matching Name/Host's existing pattern.
+  describe("protocol-specific required fields block Save when empty", () => {
+    async function fillNameAndHost(user: ReturnType<typeof userEvent.setup>) {
+      await user.type(screen.getByPlaceholderText("My Server"), "Test");
+      await user.type(screen.getByPlaceholderText("192.168.1.100"), "10.0.0.1");
+    }
+
+    it("Proxmox Console requires Node and VM/CT ID", async () => {
+      const user = userEvent.setup();
+      render(<SessionEditor onClose={onClose} defaultType={SessionType.ProxmoxConsole} />);
+      await fillNameAndHost(user);
+
+      await user.click(screen.getByRole("button", { name: "Create" }));
+
+      expect(screen.getByText("Node is required")).toBeInTheDocument();
+      expect(screen.getByText("VM/CT ID is required")).toBeInTheDocument();
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("Docker Logs requires a Container ID or name", async () => {
+      const user = userEvent.setup();
+      render(<SessionEditor onClose={onClose} defaultType={SessionType.DockerLogs} />);
+      await fillNameAndHost(user);
+
+      await user.click(screen.getByRole("button", { name: "Create" }));
+
+      expect(screen.getByText("Container ID or name is required")).toBeInTheDocument();
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("Kubernetes Port-Forward requires a Pod Name", async () => {
+      const user = userEvent.setup();
+      render(<SessionEditor onClose={onClose} defaultType={SessionType.KubernetesPortForward} />);
+      await user.type(screen.getByPlaceholderText("My Server"), "Test");
+
+      await user.click(screen.getByRole("button", { name: "Create" }));
+
+      expect(screen.getByText("Pod name is required")).toBeInTheDocument();
+      expect(onClose).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("protocol-specific fields save into protocolOptions correctly", () => {
+    function setupSpy() {
+      const addSessionSpy = vi.fn();
+      useSessionStore.setState({ addSession: addSessionSpy } as unknown as Parameters<typeof useSessionStore.setState>[0]);
+      return addSessionSpy;
+    }
+
+    it("VNC saves the password field", async () => {
+      const user = userEvent.setup();
+      const addSessionSpy = setupSpy();
+      render(<SessionEditor onClose={onClose} defaultType={SessionType.VNC} />);
+
+      await user.type(screen.getByPlaceholderText("My Server"), "VNC Box");
+      await user.type(screen.getByPlaceholderText("192.168.1.100"), "10.0.0.2");
+      await user.type(screen.getByPlaceholderText("Password"), "hunter2");
+      await user.click(screen.getByRole("button", { name: "Create" }));
+
+      const saved = addSessionSpy.mock.calls[0][0] as Session;
+      expect(saved.connection.protocolOptions?.password).toBe("hunter2");
+    });
+
+    it("RDP saves both password and domain", async () => {
+      const user = userEvent.setup();
+      const addSessionSpy = setupSpy();
+      render(<SessionEditor onClose={onClose} defaultType={SessionType.RDP} />);
+
+      await user.type(screen.getByPlaceholderText("My Server"), "RDP Box");
+      await user.type(screen.getByPlaceholderText("192.168.1.100"), "10.0.0.3");
+      await user.type(screen.getByPlaceholderText("Password"), "s3cret");
+      await user.type(screen.getByPlaceholderText("e.g. CORP, WORKGROUP"), "CORP");
+      await user.click(screen.getByRole("button", { name: "Create" }));
+
+      const saved = addSessionSpy.mock.calls[0][0] as Session;
+      expect(saved.connection.protocolOptions?.password).toBe("s3cret");
+      expect(saved.connection.protocolOptions?.domain).toBe("CORP");
+    });
+
+    it("Docker Logs saves container_id under the exact key buildDockerLogsConfig reads", async () => {
+      const user = userEvent.setup();
+      const addSessionSpy = setupSpy();
+      render(<SessionEditor onClose={onClose} defaultType={SessionType.DockerLogs} />);
+
+      await user.type(screen.getByPlaceholderText("My Server"), "Logs");
+      await user.type(screen.getByPlaceholderText("192.168.1.100"), "10.0.0.4");
+      await user.type(screen.getByPlaceholderText("e.g. web-app or a1b2c3d4e5f6"), "web-app");
+      await user.click(screen.getByRole("button", { name: "Create" }));
+
+      const saved = addSessionSpy.mock.calls[0][0] as Session;
+      expect(saved.connection.protocolOptions?.container_id).toBe("web-app");
+    });
+
+    it("Kubernetes Port-Forward saves pod_name and namespace under the exact keys buildK8sPortForwardConfig reads", async () => {
+      const user = userEvent.setup();
+      const addSessionSpy = setupSpy();
+      render(<SessionEditor onClose={onClose} defaultType={SessionType.KubernetesPortForward} />);
+
+      await user.type(screen.getByPlaceholderText("My Server"), "PF");
+      await user.type(screen.getByPlaceholderText("192.168.1.100"), "10.0.0.7");
+      await user.type(screen.getByPlaceholderText("e.g. web-app-7d8f9c-x2k4p"), "web-app-7d8f9c-x2k4p");
+      const nsInput = screen.getByPlaceholderText("default");
+      await user.clear(nsInput);
+      await user.type(nsInput, "prod");
+      await user.click(screen.getByRole("button", { name: "Create" }));
+
+      const saved = addSessionSpy.mock.calls[0][0] as Session;
+      expect(saved.connection.protocolOptions?.pod_name).toBe("web-app-7d8f9c-x2k4p");
+      expect(saved.connection.protocolOptions?.namespace).toBe("prod");
+    });
+
+    // NetConf's builder reads "private_key"; X11 Forward's reads "key_data"
+    // — same UI field, different backend key names. Getting this wrong
+    // silently breaks key-based auth for one or the other.
+    it("NetConf saves the private key under 'private_key'", async () => {
+      const user = userEvent.setup();
+      const addSessionSpy = setupSpy();
+      render(<SessionEditor onClose={onClose} defaultType={SessionType.NetConf} />);
+
+      await user.type(screen.getByPlaceholderText("My Server"), "Router");
+      await user.type(screen.getByPlaceholderText("192.168.1.100"), "10.0.0.5");
+      await user.type(screen.getByPlaceholderText("-----BEGIN OPENSSH PRIVATE KEY-----"), "KEYDATA");
+      await user.click(screen.getByRole("button", { name: "Create" }));
+
+      const saved = addSessionSpy.mock.calls[0][0] as Session;
+      expect(saved.connection.protocolOptions?.private_key).toBe("KEYDATA");
+      expect(saved.connection.protocolOptions?.key_data).toBeUndefined();
+    });
+
+    it("X11 Forward saves the private key under 'key_data'", async () => {
+      const user = userEvent.setup();
+      const addSessionSpy = setupSpy();
+      render(<SessionEditor onClose={onClose} defaultType={SessionType.X11Forward} />);
+
+      await user.type(screen.getByPlaceholderText("My Server"), "X11 Box");
+      await user.type(screen.getByPlaceholderText("192.168.1.100"), "10.0.0.6");
+      await user.type(screen.getByPlaceholderText("-----BEGIN OPENSSH PRIVATE KEY-----"), "KEYDATA");
+      await user.click(screen.getByRole("button", { name: "Create" }));
+
+      const saved = addSessionSpy.mock.calls[0][0] as Session;
+      expect(saved.connection.protocolOptions?.key_data).toBe("KEYDATA");
+      expect(saved.connection.protocolOptions?.private_key).toBeUndefined();
+    });
+
+    it("Proxmox Console saves node, vmid, resource_type, realm, and password", async () => {
+      const user = userEvent.setup();
+      const addSessionSpy = setupSpy();
+      render(<SessionEditor onClose={onClose} defaultType={SessionType.ProxmoxConsole} />);
+
+      await user.type(screen.getByPlaceholderText("My Server"), "PVE");
+      await user.type(screen.getByPlaceholderText("192.168.1.100"), "192.168.0.251");
+      await user.type(screen.getByPlaceholderText("pve1"), "pve1");
+      await user.type(screen.getByPlaceholderText("100"), "100");
+      await user.type(screen.getByPlaceholderText("Proxmox API password"), "rootpw");
+      await user.click(screen.getByRole("button", { name: "Create" }));
+
+      const saved = addSessionSpy.mock.calls[0][0] as Session;
+      expect(saved.connection.protocolOptions?.node).toBe("pve1");
+      expect(saved.connection.protocolOptions?.vmid).toBe("100");
+      expect(saved.connection.protocolOptions?.resource_type).toBe("qemu");
+      expect(saved.connection.protocolOptions?.realm).toBe("pam");
+      expect(saved.connection.protocolOptions?.password).toBe("rootpw");
+    });
+  });
 });

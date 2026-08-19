@@ -5,7 +5,7 @@ import { X, Save, ChevronRight, ChevronDown } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import { useSessionStore } from "@/stores/sessionStore";
 import { SessionType } from "@/types";
-import type { Session } from "@/types";
+import type { Session, ProxmoxResourceType } from "@/types";
 import FieldHelp from "@/components/Help/FieldHelp";
 
 export const SESSION_TYPE_OPTIONS = [
@@ -83,6 +83,10 @@ interface FormErrors {
   name?: string;
   host?: string;
   port?: string;
+  proxmoxNode?: string;
+  proxmoxVmid?: string;
+  containerId?: string;
+  podName?: string;
 }
 
 export default function SessionEditor({ session, defaultType, onClose }: SessionEditorProps) {
@@ -98,6 +102,43 @@ export default function SessionEditor({ session, defaultType, onClose }: Session
   const [host, setHost] = useState(session?.connection.host ?? "");
   const [port, setPort] = useState(String(session?.connection.port ?? DEFAULT_PORTS[SessionType.SSH] ?? 22));
   const [username, setUsername] = useState((session?.connection.protocolOptions?.["username"] as string) ?? "");
+  // Shared across every protocol whose config builder (sessionConfig.ts)
+  // reads a "password"/"domain" key — VNC, RDP, Redfish, WinRM, IPMI, SMB,
+  // NetConf, X11 Forward, and Proxmox Console. One state field each is
+  // simpler than N near-identical ones and matches how `username` above is
+  // already shared; switching session type mid-edit just carries the
+  // typed value along, which is harmless since nothing is saved until Save
+  // is clicked.
+  const [password, setPassword] = useState((session?.connection.protocolOptions?.["password"] as string) ?? "");
+  const [domain, setDomain] = useState((session?.connection.protocolOptions?.["domain"] as string) ?? "");
+  // NetConf's builder reads "private_key"; X11 Forward's reads "key_data".
+  // Different key names for the same "paste your SSH private key" concept
+  // — mapped to the right one at save time based on `type`.
+  const [privateKeyContent, setPrivateKeyContent] = useState(
+    (session?.connection.protocolOptions?.["private_key"] as string) ??
+    (session?.connection.protocolOptions?.["key_data"] as string) ??
+    ""
+  );
+  // Docker Logs / Kubernetes Port-Forward: a Docker host runs many
+  // containers and a Kubernetes cluster runs many pods — same class of gap
+  // as Proxmox's node/vmid, just for one field instead of two.
+  const [containerId, setContainerId] = useState((session?.connection.protocolOptions?.["container_id"] as string) ?? "");
+  const [podName, setPodName] = useState((session?.connection.protocolOptions?.["pod_name"] as string) ?? "");
+  const [k8sNamespace, setK8sNamespace] = useState((session?.connection.protocolOptions?.["namespace"] as string) ?? "default");
+  // Proxmox Console needs a specific node + VM/container ID to know which
+  // console to open (a Proxmox host manages many VMs/containers — there's
+  // no such thing as "the" console for a bare host/username pair the way
+  // there is for SSH). Without these, the connect request goes out with an
+  // empty node/vmid and fails; the viewer still looks like a normal VNC
+  // connect attempt on screen since Proxmox's console genuinely is VNC
+  // tunneled inside a WebSocket, which made this look like a VNC bug
+  // rather than missing required fields.
+  const [proxmoxNode, setProxmoxNode] = useState((session?.connection.protocolOptions?.["node"] as string) ?? "");
+  const [proxmoxVmid, setProxmoxVmid] = useState((session?.connection.protocolOptions?.["vmid"] as string) ?? "");
+  const [proxmoxResourceType, setProxmoxResourceType] = useState<ProxmoxResourceType>(
+    (session?.connection.protocolOptions?.["resource_type"] as ProxmoxResourceType) ?? "qemu"
+  );
+  const [proxmoxRealm, setProxmoxRealm] = useState((session?.connection.protocolOptions?.["realm"] as string) ?? "pam");
   const [group, setGroup] = useState(session?.group ?? "");
   const [tags, setTags] = useState(session?.tags.join(", ") ?? "");
   const [credentialRef, setCredentialRef] = useState(session?.credentialRef ?? "");
@@ -135,6 +176,20 @@ export default function SessionEditor({ session, defaultType, onClose }: Session
       errs.port = "Port must be between 1 and 65535";
     }
 
+    // A Proxmox host manages many VMs/containers — without a node + VM ID
+    // there's no way to know which console to open, and the connect
+    // request goes out malformed. Required, not optional/advanced.
+    if (type === SessionType.ProxmoxConsole) {
+      if (!proxmoxNode.trim()) errs.proxmoxNode = "Node is required";
+      if (!proxmoxVmid.trim()) errs.proxmoxVmid = "VM/CT ID is required";
+    }
+    if (type === SessionType.DockerLogs && !containerId.trim()) {
+      errs.containerId = "Container ID or name is required";
+    }
+    if (type === SessionType.KubernetesPortForward && !podName.trim()) {
+      errs.podName = "Pod name is required";
+    }
+
     setErrors(errs);
     return Object.keys(errs).length === 0;
   }
@@ -150,7 +205,27 @@ export default function SessionEditor({ session, defaultType, onClose }: Session
       .filter(Boolean);
 
     const usernameVal = username.trim();
-    const protocolOptions = usernameVal ? { username: usernameVal } : undefined;
+    const protocolOptions: Record<string, unknown> = {};
+    if (usernameVal) protocolOptions.username = usernameVal;
+    if (needsPassword && password) protocolOptions.password = password;
+    if (needsDomain && domain.trim()) protocolOptions.domain = domain.trim();
+    if (needsPrivateKey && privateKeyContent.trim()) {
+      // Different builders read different key names for the same concept
+      // (see the privateKeyContent state comment above).
+      protocolOptions[type === SessionType.NetConf ? "private_key" : "key_data"] = privateKeyContent;
+    }
+    if (isDockerLogs && containerId.trim()) protocolOptions.container_id = containerId.trim();
+    if (isK8sPortForward) {
+      if (podName.trim()) protocolOptions.pod_name = podName.trim();
+      if (k8sNamespace.trim()) protocolOptions.namespace = k8sNamespace.trim();
+    }
+    if (isProxmoxConsole) {
+      protocolOptions.node = proxmoxNode.trim();
+      protocolOptions.vmid = proxmoxVmid.trim();
+      protocolOptions.resource_type = proxmoxResourceType;
+      protocolOptions.realm = proxmoxRealm.trim() || "pam";
+    }
+    const hasProtocolOptions = Object.keys(protocolOptions).length > 0;
 
     if (isEdit && session) {
       updateSession(session.id, {
@@ -159,7 +234,7 @@ export default function SessionEditor({ session, defaultType, onClose }: Session
         group: group.trim(),
         tags: parsedTags,
         credentialRef: credentialRef.trim() || undefined,
-        connection: { host: host.trim(), port: portNum, protocolOptions },
+        connection: { host: host.trim(), port: portNum, protocolOptions: hasProtocolOptions ? protocolOptions : undefined },
         startupScript: startupScript.trim() || undefined,
         notes: notes.trim() || undefined,
       });
@@ -171,7 +246,7 @@ export default function SessionEditor({ session, defaultType, onClose }: Session
         group: group.trim(),
         tags: parsedTags,
         credentialRef: credentialRef.trim() || undefined,
-        connection: { host: host.trim(), port: portNum, protocolOptions },
+        connection: { host: host.trim(), port: portNum, protocolOptions: hasProtocolOptions ? protocolOptions : undefined },
         startupScript: startupScript.trim() || undefined,
         notes: notes.trim() || undefined,
         createdAt: now,
@@ -186,6 +261,22 @@ export default function SessionEditor({ session, defaultType, onClose }: Session
   }
 
   const needsHost = type !== SessionType.LocalShell && type !== SessionType.WSL;
+  const isProxmoxConsole = type === SessionType.ProxmoxConsole;
+  const isDockerLogs = type === SessionType.DockerLogs;
+  const isK8sPortForward = type === SessionType.KubernetesPortForward;
+  // These protocols' config builders (sessionConfig.ts) read a "password"
+  // key — VNC/RDP/Redfish/WinRM/IPMI/SMB always need it in real
+  // deployments; NetConf/X11 Forward accept it as one of two valid auth
+  // methods (see needsPrivateKey below). Not validated as required here:
+  // unlike a resource identifier, an empty password can be genuinely
+  // correct (e.g. a no-auth VNC/dev SMB share), so this stays optional
+  // rather than blocking Save.
+  const needsPassword = [
+    SessionType.VNC, SessionType.RDP, SessionType.Redfish, SessionType.WinRM,
+    SessionType.IpmiSol, SessionType.Smb, SessionType.NetConf, SessionType.X11Forward,
+  ].includes(type) || isProxmoxConsole;
+  const needsDomain = type === SessionType.RDP || type === SessionType.Smb;
+  const needsPrivateKey = type === SessionType.NetConf || type === SessionType.X11Forward;
 
   return (
     <dialog
@@ -279,6 +370,133 @@ export default function SessionEditor({ session, defaultType, onClose }: Session
                 className={inputClass(false)}
               />
             </Field>
+          )}
+
+          {/* Password — shared across every protocol whose builder reads a
+              "password" key. Left optional (no validation error) since an
+              empty password is sometimes genuinely correct (e.g. a no-auth
+              VNC server or an anonymous SMB share), unlike the resource
+              identifiers below. */}
+          {needsPassword && (
+            <Field label="Password">
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={isProxmoxConsole ? "Proxmox API password" : "Password"}
+                autoComplete="current-password"
+                className={inputClass(false)}
+              />
+            </Field>
+          )}
+
+          {/* Domain — RDP (AD domain) and SMB (workgroup/domain). */}
+          {needsDomain && (
+            <Field label="Domain">
+              <input
+                value={domain}
+                onChange={(e) => setDomain(e.target.value)}
+                placeholder="e.g. CORP, WORKGROUP"
+                className={inputClass(false)}
+              />
+            </Field>
+          )}
+
+          {/* Private key — NetConf and X11 Forward accept this as an
+              alternative to the password field above; either one alone is
+              enough to authenticate. */}
+          {needsPrivateKey && (
+            <Field label="Private Key (alternative to password)">
+              <textarea
+                value={privateKeyContent}
+                onChange={(e) => setPrivateKeyContent(e.target.value)}
+                placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                rows={3}
+                className={clsx(inputClass(false), "font-mono text-[11px]")}
+              />
+            </Field>
+          )}
+
+          {/* Docker Logs: a Docker host runs many containers — there's no
+              "the" log stream for a bare host the way there is for SSH. */}
+          {isDockerLogs && (
+            <Field label="Container ID or Name" error={errors.containerId}>
+              <input
+                value={containerId}
+                onChange={(e) => setContainerId(e.target.value)}
+                placeholder="e.g. web-app or a1b2c3d4e5f6"
+                className={inputClass(!!errors.containerId)}
+              />
+            </Field>
+          )}
+
+          {/* Kubernetes Port-Forward: a cluster runs many pods across many
+              namespaces — same class of gap as Docker Logs' container ID. */}
+          {isK8sPortForward && (
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Pod Name" error={errors.podName}>
+                <input
+                  value={podName}
+                  onChange={(e) => setPodName(e.target.value)}
+                  placeholder="e.g. web-app-7d8f9c-x2k4p"
+                  className={inputClass(!!errors.podName)}
+                />
+              </Field>
+              <Field label="Namespace">
+                <input
+                  value={k8sNamespace}
+                  onChange={(e) => setK8sNamespace(e.target.value)}
+                  placeholder="default"
+                  className={inputClass(false)}
+                />
+              </Field>
+            </div>
+          )}
+
+          {/* Proxmox Console: node + VM/CT ID are required to know which
+              console to open — a Proxmox host manages many VMs/containers,
+              so a bare host/username pair isn't enough, unlike SSH. */}
+          {isProxmoxConsole && (
+            <>
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="Node" error={errors.proxmoxNode}>
+                  <input
+                    value={proxmoxNode}
+                    onChange={(e) => setProxmoxNode(e.target.value)}
+                    placeholder="pve1"
+                    className={inputClass(!!errors.proxmoxNode)}
+                  />
+                </Field>
+                <Field label="VM/CT ID" error={errors.proxmoxVmid}>
+                  <input
+                    value={proxmoxVmid}
+                    onChange={(e) => setProxmoxVmid(e.target.value)}
+                    placeholder="100"
+                    className={inputClass(!!errors.proxmoxVmid)}
+                  />
+                </Field>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="Resource Type">
+                  <select
+                    value={proxmoxResourceType}
+                    onChange={(e) => setProxmoxResourceType(e.target.value as ProxmoxResourceType)}
+                    className={inputClass(false)}
+                  >
+                    <option value="qemu">QEMU/KVM VM</option>
+                    <option value="lxc">LXC Container</option>
+                  </select>
+                </Field>
+                <Field label="Realm">
+                  <input
+                    value={proxmoxRealm}
+                    onChange={(e) => setProxmoxRealm(e.target.value)}
+                    placeholder="pam"
+                    className={inputClass(false)}
+                  />
+                </Field>
+              </div>
+            </>
           )}
 
           {/* Advanced toggle */}
