@@ -25,7 +25,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
@@ -40,10 +40,10 @@ jobs:
             librsvg2-dev \
             patchelf
 
-      - name: Install Node.js 20
-        uses: actions/setup-node@v4
+      - name: Install Node.js 24
+        uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 24
 
       - name: Install npm dependencies
         run: npm install
@@ -78,7 +78,7 @@ jobs:
             }
 
       - name: Upload checksums
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           draft: false
           files: src-tauri/target/release/bundle/**/*.sha256
@@ -88,7 +88,7 @@ jobs:
     needs: build
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download macOS DMG checksum
         uses: robinraju/release-downloader@v1
