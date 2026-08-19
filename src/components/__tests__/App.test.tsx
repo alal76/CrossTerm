@@ -247,6 +247,39 @@ describe("App", () => {
     expect(screen.getByRole("status")).toBeInTheDocument();
   });
 
+  // Regression coverage: `activeProfileId` defaults to the literal string
+  // "default" (see appStore.ts) — never a real profile UUID — until
+  // FirstLaunchWizard's setActiveProfile() call replaces it. If that never
+  // ran (or the profile it pointed to was since removed), `profile_switch`
+  // fails on every subsequent launch and every settings/session read/write
+  // silently fails right along with it, forever, with no recovery path.
+  it("recovers from a stale/missing active profile ID by switching to the most recently used real profile", async () => {
+    useAppStore.setState({ activeProfileId: "default" });
+    const mockInvoke = vi.mocked(invoke);
+    mockInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "profile_switch") {
+        const { id } = args as { id: string };
+        if (id === "default") return Promise.reject(new Error("Profile not found"));
+        return Promise.resolve({ id, name: "Recovered" });
+      }
+      if (cmd === "profile_list") {
+        return Promise.resolve([
+          { id: "old-profile", updated_at: "2026-01-01T00:00:00Z" },
+          { id: "recent-profile", updated_at: "2026-08-16T22:22:00Z" },
+        ]);
+      }
+      if (cmd === "settings_get") return Promise.resolve({ theme: ThemeVariant.Dark });
+      return Promise.resolve(undefined);
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("profile_switch", { id: "recent-profile" });
+    });
+    expect(useAppStore.getState().activeProfileId).toBe("recent-profile");
+  });
+
   // FT-C-36: Ctrl+J toggles bottom panel
   it("FT-C-36: Ctrl+J toggles bottom panel", () => {
     render(<App />);
