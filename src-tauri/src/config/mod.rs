@@ -124,6 +124,32 @@ pub struct Settings {
     /// (whose CredentialType enum has no generic-metadata variant and would
     /// otherwise gate labels behind a vault unlock for no security benefit).
     pub network_device_labels: HashMap<String, String>,
+    /// User-configured additional ports to probe on every scan, alongside
+    /// the built-in service list — comma-separated (e.g. "8081, 9000"), same
+    /// format `parseExtraPorts` already accepts for the per-scan "extra
+    /// ports" field. Persisted so a custom port set doesn't need retyping
+    /// every time the Network Explorer panel is reopened.
+    #[serde(default)]
+    pub network_scan_extra_ports: String,
+    /// Additional SNMP community strings to try against each host's UDP/161
+    /// during a scan, alongside "public" — comma-separated. Many managed
+    /// switches/UPSes/printers are deliberately configured off the default
+    /// community string, so they'd otherwise always show as SNMP-silent.
+    #[serde(default)]
+    pub network_scan_snmp_communities: String,
+    /// Extra vendor keywords (e.g. "HIKVISION", "MIKROTIK", "QNAP") to match
+    /// against a discovered TLS certificate's subject/issuer org during OS
+    /// guessing, beyond the built-in list — comma-separated. Brands common
+    /// on the user's own network but too niche to bake into every install.
+    #[serde(default)]
+    pub network_scan_vendor_hints: String,
+    /// Off by default in every build (release included) — logging host IPs
+    /// and scan details to disk isn't nothing, so it's opt-in rather than
+    /// always-on. When enabled, Info-level logs (including Network Explorer
+    /// scan activity) go to stdout and the OS app-log directory via
+    /// tauri-plugin-log; see `apply_diagnostic_logging_level`.
+    #[serde(default)]
+    pub enable_diagnostic_logging: bool,
 }
 
 impl Default for Settings {
@@ -207,6 +233,10 @@ impl Default for Settings {
 
             // Network Explorer
             network_device_labels: HashMap::new(),
+            network_scan_extra_ports: String::new(),
+            network_scan_snmp_communities: String::new(),
+            network_scan_vendor_hints: String::new(),
+            enable_diagnostic_logging: false,
         }
     }
 }
@@ -264,6 +294,60 @@ pub enum SessionType {
     KubernetesExec,
     #[serde(rename = "docker_exec")]
     DockerExec,
+    #[serde(rename = "network_explorer")]
+    NetworkExplorer,
+    #[serde(rename = "cloud_dashboard")]
+    CloudDashboard,
+    #[serde(rename = "code_editor")]
+    CodeEditor,
+    #[serde(rename = "diff_viewer")]
+    DiffViewer,
+    #[serde(rename = "macros")]
+    Macros,
+    #[serde(rename = "recordings")]
+    Recordings,
+    #[serde(rename = "ftp")]
+    Ftp,
+    #[serde(rename = "mosh")]
+    Mosh,
+    #[serde(rename = "winrm")]
+    WinRM,
+    #[serde(rename = "websocket_terminal")]
+    WebSocketTerminal,
+    #[serde(rename = "tn3270")]
+    Tn3270,
+    #[serde(rename = "tn5250")]
+    Tn5250,
+    #[serde(rename = "ipmi_sol")]
+    IpmiSol,
+    #[serde(rename = "redfish")]
+    Redfish,
+    #[serde(rename = "netconf")]
+    NetConf,
+    #[serde(rename = "snmp")]
+    Snmp,
+    #[serde(rename = "smb")]
+    Smb,
+    #[serde(rename = "webdav")]
+    WebDav,
+    #[serde(rename = "grpc_explorer")]
+    GrpcExplorer,
+    #[serde(rename = "mqtt_client")]
+    MqttClient,
+    #[serde(rename = "kubernetes_port_forward")]
+    KubernetesPortForward,
+    #[serde(rename = "docker_logs")]
+    DockerLogs,
+    #[serde(rename = "spice_console")]
+    SpiceConsole,
+    #[serde(rename = "proxmox_console")]
+    ProxmoxConsole,
+    #[serde(rename = "rlogin")]
+    Rlogin,
+    #[serde(rename = "x11_forward")]
+    X11Forward,
+    #[serde(rename = "nfs_explorer")]
+    NfsExplorer,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -686,6 +770,22 @@ pub fn profile_delete(id: String) -> Result<(), ConfigError> {
     do_profile_delete(&id)
 }
 
+/// `DIAGNOSTIC_LOGGING_ENABLED` is a global, process-wide switch — no
+/// per-profile isolation, but that's fine here: only one profile is ever
+/// active in a running instance at a time, and this is called both on
+/// profile switch and settings update so it always reflects whichever
+/// profile is currently active. See that static's doc comment in `lib.rs`
+/// for why this uses a `.filter()`-checked atomic rather than
+/// `log::set_max_level` (which doesn't work here — a level baked into
+/// `tauri-plugin-log`'s `fern::Dispatch` at plugin-registration time can't
+/// be changed afterward through that mechanism).
+fn apply_diagnostic_logging_level(settings: &Settings) {
+    crate::DIAGNOSTIC_LOGGING_ENABLED.store(
+        settings.enable_diagnostic_logging,
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
 #[tauri::command]
 pub fn profile_switch(
     state: tauri::State<'_, ConfigState>,
@@ -694,6 +794,8 @@ pub fn profile_switch(
     let profile = do_profile_get(&id)?;
     let mut active = state.active_profile_id.write().unwrap();
     *active = Some(id.clone());
+    drop(active);
+    apply_diagnostic_logging_level(&profile.settings);
     crate::audit::append_event(&id, crate::audit::AuditEventType::ProfileSwitch, &format!("Switched to profile '{}'", profile.name));
     Ok(profile)
 }
@@ -762,6 +864,14 @@ pub fn settings_get(
 ) -> Result<Settings, ConfigError> {
     let pid = state.active_profile()?;
     let profile = do_profile_get(&pid)?;
+    // Also applied on `profile_switch`/`settings_update`, but this command
+    // is the one unconditionally called on every app startup (App.tsx calls
+    // `profile_switch` only when a persisted `activeProfileId` is already
+    // available, which can race the store's own rehydration) — so this is
+    // the reliable place to make sure a freshly launched app actually
+    // reflects the saved logging preference, not just after a later
+    // settings write.
+    apply_diagnostic_logging_level(&profile.settings);
     Ok(profile.settings)
 }
 
@@ -772,7 +882,8 @@ pub fn settings_update(
 ) -> Result<Settings, ConfigError> {
     let pid = state.active_profile()?;
     let result = do_settings_update(&pid, settings);
-    if result.is_ok() {
+    if let Ok(ref updated) = result {
+        apply_diagnostic_logging_level(updated);
         crate::audit::append_event(&pid, crate::audit::AuditEventType::SettingsUpdate, "Settings updated");
     }
     result
@@ -1676,6 +1787,25 @@ mod tests {
         assert!(dir.to_string_lossy().contains("CrossTerm"));
     }
 
+    #[test]
+    fn test_apply_diagnostic_logging_level_toggles_the_shared_atomic() {
+        // Regression: an earlier implementation called `log::set_max_level`
+        // here, which does nothing useful — tauri-plugin-log bakes its
+        // level into a `fern::Dispatch` chain once, at plugin registration,
+        // so the global `log` max-level static (which only gates whether
+        // the `log` crate calls the installed logger at all) has no effect
+        // on records the fern dispatcher has already decided to reject.
+        // `DIAGNOSTIC_LOGGING_ENABLED` — checked live via `.filter()` on
+        // every record — is what the toggle must actually flip.
+        use std::sync::atomic::Ordering;
+
+        apply_diagnostic_logging_level(&Settings { enable_diagnostic_logging: true, ..Default::default() });
+        assert!(crate::DIAGNOSTIC_LOGGING_ENABLED.load(Ordering::Relaxed));
+
+        apply_diagnostic_logging_level(&Settings { enable_diagnostic_logging: false, ..Default::default() });
+        assert!(!crate::DIAGNOSTIC_LOGGING_ENABLED.load(Ordering::Relaxed));
+    }
+
     // ── UT-C-04: Settings persistence ───────────────────────────────
 
     #[test]
@@ -1998,7 +2128,35 @@ Host *
             (SessionType::WebConsole, "Web Console"),
             (SessionType::KubernetesExec, "Kubernetes Exec"),
             (SessionType::DockerExec, "Docker Exec"),
+            (SessionType::NetworkExplorer, "Network Explorer"),
+            (SessionType::CloudDashboard, "Cloud Dashboard"),
+            (SessionType::CodeEditor, "Code Editor"),
+            (SessionType::DiffViewer, "Diff Viewer"),
+            (SessionType::Macros, "Macros"),
+            (SessionType::Recordings, "Recordings"),
+            (SessionType::Ftp, "FTP Session"),
+            (SessionType::Mosh, "Mosh Session"),
+            (SessionType::WinRM, "WinRM Session"),
+            (SessionType::WebSocketTerminal, "WebSocket Terminal"),
+            (SessionType::Tn3270, "TN3270 Session"),
+            (SessionType::Tn5250, "TN5250 Session"),
+            (SessionType::IpmiSol, "IPMI SOL Session"),
+            (SessionType::Redfish, "Redfish Session"),
+            (SessionType::NetConf, "NetConf Session"),
+            (SessionType::Snmp, "SNMP Session"),
+            (SessionType::Smb, "SMB Session"),
+            (SessionType::WebDav, "WebDAV Session"),
+            (SessionType::GrpcExplorer, "gRPC Explorer"),
+            (SessionType::MqttClient, "MQTT Client"),
+            (SessionType::KubernetesPortForward, "Kubernetes Port Forward"),
+            (SessionType::DockerLogs, "Docker Logs"),
+            (SessionType::SpiceConsole, "SPICE Console"),
+            (SessionType::ProxmoxConsole, "Proxmox Console"),
+            (SessionType::Rlogin, "Rlogin Session"),
+            (SessionType::X11Forward, "X11 Forward"),
+            (SessionType::NfsExplorer, "NFS Explorer"),
         ];
+        let expected_count = all_types.len();
 
         let mut created_ids = Vec::new();
         for (stype, name) in &all_types {
@@ -2029,11 +2187,11 @@ Host *
             created_ids.push(session.id);
         }
 
-        assert_eq!(created_ids.len(), 13, "All 13 session types must be created");
+        assert_eq!(created_ids.len(), expected_count, "All session types must be created");
 
         // Verify all persist and deserialize correctly
         let list = do_session_list(env.id()).unwrap();
-        assert_eq!(list.len(), 13);
+        assert_eq!(list.len(), expected_count);
 
         for (stype, name) in &all_types {
             let found = list.iter().find(|s| s.name == *name);
