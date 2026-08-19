@@ -118,9 +118,13 @@ export default function SerialTerminal() {
     }
   }, [connectionId, inputValue]);
 
-  const handleBaudChange = useCallback(
+  // Only commits to the backend on blur/Enter (see the baud-rate <input>
+  // below) — with a free-typed number instead of a <select>, an onChange
+  // firing on every keystroke would call serial_set_baud with every
+  // intermediate digit (e.g. 2, 23, 230, 2304 while typing "230400").
+  const commitBaudRate = useCallback(
     async (newBaud: number) => {
-      setBaudRate(newBaud);
+      if (!Number.isFinite(newBaud) || newBaud < 1) return;
       if (connectionId) {
         try {
           await invoke("serial_set_baud", { connId: connectionId, baudRate: newBaud });
@@ -183,17 +187,19 @@ export default function SerialTerminal() {
                 <label className="text-xs font-medium text-text-secondary">
                   {t("serial.baudRate")}
                 </label>
-                <select
+                <input
+                  type="number"
+                  list="baud-rate-presets-config"
+                  min={1}
                   value={baudRate}
                   onChange={(e) => setBaudRate(Number(e.target.value))}
                   className="rounded border border-border-default bg-surface-secondary px-2 py-1.5 text-xs text-text-primary"
-                >
+                />
+                <datalist id="baud-rate-presets-config">
                   {BAUD_RATES.map((b) => (
-                    <option key={b} value={b}>
-                      {b}
-                    </option>
+                    <option key={b} value={b} />
                   ))}
-                </select>
+                </datalist>
               </div>
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-medium text-text-secondary">
@@ -292,17 +298,21 @@ export default function SerialTerminal() {
         <span className="text-xs font-medium">{selectedPort}</span>
         <span className="text-xs text-text-secondary">@ {baudRate} baud</span>
 
-        <select
+        <input
+          type="number"
+          list="baud-rate-presets-toolbar"
+          min={1}
           value={baudRate}
-          onChange={(e) => handleBaudChange(Number(e.target.value))}
-          className="ml-2 rounded border border-border-default bg-surface-secondary px-1 py-0.5 text-xs"
-        >
+          onChange={(e) => setBaudRate(Number(e.target.value))}
+          onBlur={(e) => commitBaudRate(Number(e.target.value))}
+          onKeyDown={(e) => e.key === "Enter" && commitBaudRate(Number(e.currentTarget.value))}
+          className="ml-2 w-20 rounded border border-border-default bg-surface-secondary px-1 py-0.5 text-xs"
+        />
+        <datalist id="baud-rate-presets-toolbar">
           {BAUD_RATES.map((b) => (
-            <option key={b} value={b}>
-              {b}
-            </option>
+            <option key={b} value={b} />
           ))}
-        </select>
+        </datalist>
 
         <button
           onClick={disconnect}
