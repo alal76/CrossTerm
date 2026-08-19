@@ -393,9 +393,27 @@ function TextInput({
 
 // ── Main component ──────────────────────────────────────────────────────────
 
+const CATEGORY_IDS = new Set<string>(CATEGORIES.map((c) => c.id));
+
 export default function SettingsPanel() {
   const { t } = useTranslation();
-  const [category, setCategory] = useState<Category>("general");
+  const settingsInitialCategory = useAppStore((s) => s.settingsInitialCategory);
+  const clearSettingsInitialCategory = useAppStore((s) => s.clearSettingsInitialCategory);
+  const [category, setCategory] = useState<Category>(() =>
+    settingsInitialCategory && CATEGORY_IDS.has(settingsInitialCategory)
+      ? (settingsInitialCategory as Category)
+      : "general"
+  );
+
+  // Consumed once on mount (the lazy useState initializer above already
+  // applied it to the initial render) — clear it so a later plain
+  // setSettingsOpen(true) doesn't get stuck reopening to the same category,
+  // and so switching categories inside the panel isn't fighting a stale
+  // override on the next open.
+  useEffect(() => {
+    if (settingsInitialCategory) clearSettingsInitialCategory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [settings, setSettings] = useState<BackendSettings>(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(true);
 

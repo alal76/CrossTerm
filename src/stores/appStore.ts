@@ -24,6 +24,12 @@ interface AppState {
   resolvedTheme: ThemeVariant.Dark | ThemeVariant.Light;
 
   settingsOpen: boolean;
+  // Set alongside settingsOpen when a caller (the native OS menu bar's
+  // Settings submenu, e.g. "Advanced") wants the panel to jump straight to
+  // a specific category instead of always landing on General. Consumed
+  // once by SettingsPanel on open, then cleared — normal in-panel category
+  // switching afterward is unaffected.
+  settingsInitialCategory: string | null;
   firstLaunchComplete: boolean;
 
   bellStyle: BellStyle;
@@ -54,6 +60,8 @@ interface AppState {
   setResolvedTheme: (resolved: ThemeVariant.Dark | ThemeVariant.Light) => void;
 
   setSettingsOpen: (open: boolean) => void;
+  openSettingsToCategory: (category: string) => void;
+  clearSettingsInitialCategory: () => void;
 
   setFirstLaunchComplete: (complete: boolean) => void;
 
@@ -96,6 +104,7 @@ export const useAppStore = create<AppState>()(persist((set) => ({
   resolvedTheme: getSystemTheme(),
 
   settingsOpen: false,
+  settingsInitialCategory: null,
   firstLaunchComplete: false,
 
   bellStyle: "none" as BellStyle,
@@ -145,6 +154,8 @@ export const useAppStore = create<AppState>()(persist((set) => ({
   setResolvedTheme: (resolved) => set({ resolvedTheme: resolved }),
 
   setSettingsOpen: (open) => set({ settingsOpen: open }),
+  openSettingsToCategory: (category) => set({ settingsOpen: true, settingsInitialCategory: category }),
+  clearSettingsInitialCategory: () => set({ settingsInitialCategory: null }),
 
   setFirstLaunchComplete: (complete) => set({ firstLaunchComplete: complete }),
 

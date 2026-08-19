@@ -24,6 +24,7 @@ function resetStore() {
     profiles: [{ id: "default", name: "Default", authMethod: "password" as const, createdAt: new Date().toISOString() }],
     theme: ThemeVariant.Dark,
     settingsOpen: true,
+    settingsInitialCategory: null,
     customThemeName: null,
     customThemeTokens: null,
     bellStyle: "visual",
@@ -63,6 +64,24 @@ describe("SettingsPanel", () => {
 
     await user.click(terminalBtn);
     expect(screen.getByRole("heading", { name: "Terminal" })).toBeInTheDocument();
+  });
+
+  // Regression coverage: the native OS menu bar's Settings submenu items
+  // (General, Appearance, ... Advanced) all opened to the same default
+  // General tab regardless of which one was clicked — this is the panel
+  // side of the fix, which reads a store-set initial category on open.
+  it("opens directly to the category set via settingsInitialCategory, then clears it", async () => {
+    useAppStore.setState({ settingsInitialCategory: "advanced" });
+
+    render(<SettingsPanel />);
+
+    expect(screen.getByRole("heading", { name: "Advanced" })).toBeInTheDocument();
+    expect(useAppStore.getState().settingsInitialCategory).toBeNull();
+  });
+
+  it("falls back to General when no initial category is set", () => {
+    render(<SettingsPanel />);
+    expect(screen.getByRole("heading", { name: "General" })).toBeInTheDocument();
   });
 
   it("close button sets settingsOpen to false", async () => {

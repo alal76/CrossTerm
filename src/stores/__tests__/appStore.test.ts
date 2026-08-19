@@ -110,6 +110,21 @@ describe("appStore", () => {
     });
   });
 
+  describe("openSettingsToCategory", () => {
+    it("opens settings and sets the requested category", () => {
+      useAppStore.getState().openSettingsToCategory("advanced");
+      expect(useAppStore.getState().settingsOpen).toBe(true);
+      expect(useAppStore.getState().settingsInitialCategory).toBe("advanced");
+    });
+
+    it("clearSettingsInitialCategory resets it without closing settings", () => {
+      useAppStore.getState().openSettingsToCategory("security");
+      useAppStore.getState().clearSettingsInitialCategory();
+      expect(useAppStore.getState().settingsInitialCategory).toBeNull();
+      expect(useAppStore.getState().settingsOpen).toBe(true);
+    });
+  });
+
   // ── Window Dimensions ──
 
   describe("setWindowDimensions", () => {
