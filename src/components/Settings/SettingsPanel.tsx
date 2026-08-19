@@ -152,6 +152,7 @@ interface BackendSettings {
   // Advanced
   log_level: string;
   telemetry_enabled: boolean;
+  enable_diagnostic_logging: boolean;
 }
 
 const DEFAULT_SETTINGS: BackendSettings = {
@@ -211,6 +212,7 @@ const DEFAULT_SETTINGS: BackendSettings = {
   clipboard_history_size: 50,
   log_level: "info",
   telemetry_enabled: false,
+  enable_diagnostic_logging: false,
 };
 
 // ── Category definitions ────────────────────────────────────────────────────
@@ -520,7 +522,15 @@ export default function SettingsPanel() {
 
   const persist = useCallback(async (next: BackendSettings) => {
     setSettings(next);
-    try { await invoke("settings_update", { settings: next }); } catch { /* keep optimistic */ }
+    try {
+      await invoke("settings_update", { settings: next });
+    } catch (err) {
+      // Previously silently swallowed — the UI kept showing the toggled
+      // value even when the backend write failed (e.g. a stale active
+      // profile ID), so a setting could look saved while nothing actually
+      // persisted, with zero indication anything was wrong.
+      showToast("error", `Failed to save settings: ${String(err)}`);
+    }
   }, []);
 
   const update = useCallback(
@@ -1090,6 +1100,15 @@ export default function SettingsPanel() {
             onChange={(v) => update("log_level", v)}
           />
         </SettingRow>
+        <SettingRow
+          label={t("settings.enableDiagnosticLogging")}
+          description={t("settings.enableDiagnosticLoggingDescription")}
+        >
+          <Toggle
+            value={settings.enable_diagnostic_logging}
+            onChange={(v) => update("enable_diagnostic_logging", v)}
+          />
+        </SettingRow>
 
         <SectionHeading>Privacy</SectionHeading>
         <SettingRow label={t("settings.telemetryEnabled")} description={t("settings.telemetryEnabledDescription")}>
@@ -1106,7 +1125,7 @@ export default function SettingsPanel() {
               else platform = "Linux";
             }
             return [
-              { label: "Version", value: "2.1.0" },
+              { label: "Version", value: "2.0.4" },
               { label: "Platform", value: platform },
               { label: "Renderer", value: settings.gpu_acceleration ? "GPU (WebGL)" : "CPU (Canvas)" },
             ].map(({ label, value }) => (

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import "@/i18n";
@@ -116,6 +116,30 @@ describe("SettingsPanel", () => {
     );
   });
 
+  // Regression coverage: a failed settings_update (e.g. a stale active
+  // profile ID on the backend) used to be silently swallowed — the toggle
+  // stayed showing "on" in the UI even though nothing was actually
+  // persisted, with no indication anything had gone wrong.
+  it("surfaces an error toast when settings_update fails instead of silently keeping the optimistic value", async () => {
+    const user = userEvent.setup();
+    const mockInvoke = vi.mocked(invoke);
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "settings_get") return Promise.resolve(undefined);
+      if (cmd === "settings_update") return Promise.reject(new Error("Profile not found"));
+      return Promise.resolve(undefined);
+    });
+
+    render(<ToastProvider><SettingsPanel /></ToastProvider>);
+    await waitFor(() => expect(screen.queryByText("Loading…")).not.toBeInTheDocument());
+
+    const toggleButtons = screen.getAllByRole("button").filter((btn) =>
+      btn.className.includes("rounded-full")
+    );
+    await user.click(toggleButtons[0]);
+
+    expect(await screen.findByText(/Failed to save settings/)).toBeInTheDocument();
+  });
+
   // Regression coverage: PolicyPanel, TeamPanel, KeyManager, and the
   // Language section (LocaleSelector/RtlSettings) were fully built and
   // tested in isolation but never mounted anywhere in SettingsPanel —
@@ -149,6 +173,30 @@ describe("SettingsPanel", () => {
     await user.click(screen.getByRole("button", { name: /Language/ }));
     expect(screen.getByText("Interface language")).toBeInTheDocument();
     expect(screen.getByText("Enable RTL text support")).toBeInTheDocument();
+  });
+
+  // Diagnostic logging is off by default in every build (release included)
+  // and is a per-profile Settings toggle rather than always-on — confirms
+  // the Advanced tab actually exposes and persists it.
+  it("Advanced category's diagnostic logging toggle persists via settings_update", async () => {
+    const user = userEvent.setup();
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    render(<ToastProvider><SettingsPanel /></ToastProvider>);
+
+    await user.click(screen.getByRole("button", { name: /Advanced/ }));
+    const label = await screen.findByText("Enable Diagnostic Logging");
+    const row = label.closest("div")?.parentElement;
+    const toggle = row?.querySelector("button.rounded-full");
+    expect(toggle).toBeTruthy();
+
+    await user.click(toggle as HTMLElement);
+
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith(
+      "settings_update",
+      expect.objectContaining({
+        settings: expect.objectContaining({ enable_diagnostic_logging: true }),
+      })
+    );
   });
 
   // Regression coverage: the Export Audit Log button discarded the CSV
