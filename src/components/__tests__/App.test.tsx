@@ -11,6 +11,32 @@ import { ThemeVariant, SessionType, ConnectionStatus, SidebarMode } from "@/type
 import type { Session, Tab } from "@/types";
 import { SESSION_TYPE_OPTIONS } from "@/components/SessionTree/SessionEditor";
 
+// The native OS menu bar is built via @tauri-apps/api/menu in a useEffect
+// that silently no-ops outside a real Tauri runtime (the real module's
+// calls fail against the globally-mocked `invoke`, caught by App.tsx's own
+// try/catch) — meaning this whole surface had zero test coverage. Mock it
+// for real so both the "which category does each Settings item open" wiring
+// and the "insert after Edit, not at a fixed index" ordering fix are
+// actually exercised.
+const nativeMenuInserted: { items: MockMenuNode[]; index: number }[] = [];
+type MockMenuNode = { text: string; items?: MockMenuNode[]; action?: () => void };
+const defaultMenuTopLevel = ["CrossTerm", "File", "Edit", "View", "Window", "Help"];
+
+vi.mock("@tauri-apps/api/menu", () => ({
+  Menu: {
+    default: vi.fn(async () => ({
+      items: vi.fn(async () => defaultMenuTopLevel.map((text) => ({ text: () => Promise.resolve(text) }))),
+      insert: vi.fn(async (items: MockMenuNode[], index: number) => {
+        nativeMenuInserted.push({ items, index });
+      }),
+      setAsAppMenu: vi.fn(async () => {}),
+    })),
+  },
+  Submenu: { new: vi.fn(async (opts: MockMenuNode) => opts) },
+  MenuItem: { new: vi.fn(async (opts: MockMenuNode) => opts) },
+  PredefinedMenuItem: { new: vi.fn(async (opts: { item: string }) => ({ text: opts.item })) },
+}));
+
 // Mock ResizeObserver (not available in jsdom)
 class MockResizeObserver {
   observe = vi.fn();
@@ -278,6 +304,44 @@ describe("App", () => {
       expect(mockInvoke).toHaveBeenCalledWith("profile_switch", { id: "recent-profile" });
     });
     expect(useAppStore.getState().activeProfileId).toBe("recent-profile");
+  });
+
+  // Regression coverage: the native OS menu bar's Connect/Vault/Settings
+  // submenus were always inserted at a fixed index (1), which put them
+  // *before* File and Edit on macOS and Windows — Menu.default()'s actual
+  // layout differs per platform (see the comment in App.tsx), so a fixed
+  // index only happened to look right on Linux.
+  it("inserts the native Connect/Vault/Settings menus right after Edit, not at a fixed index", async () => {
+    nativeMenuInserted.length = 0;
+    render(<App />);
+
+    await waitFor(() => expect(nativeMenuInserted.length).toBeGreaterThan(0));
+    const { items, index } = nativeMenuInserted[0];
+
+    // Mocked default menu is [CrossTerm, File, Edit, View, Window, Help] —
+    // Edit is index 2, so the insert must land right after it, at index 3.
+    expect(index).toBe(3);
+    expect(items.map((i) => i.text)).toEqual(["Connect", "Vault", "Settings"]);
+  });
+
+  // Regression coverage: every item in the native menu bar's Settings
+  // submenu (General, Appearance, ... Advanced) called the same
+  // no-argument openSettings(), which always opened to the General tab —
+  // clicking "Advanced" from the menu bar showed the generic first page,
+  // not the Advanced settings the user actually asked for.
+  it("native menu bar's Settings submenu items open directly to their matching category", async () => {
+    nativeMenuInserted.length = 0;
+    render(<App />);
+    await waitFor(() => expect(nativeMenuInserted.length).toBeGreaterThan(0));
+
+    const settingsSubmenu = nativeMenuInserted[0].items.find((i) => i.text === "Settings");
+    const advancedItem = settingsSubmenu?.items?.find((i) => i.text === "Advanced");
+    expect(advancedItem?.action).toBeTypeOf("function");
+
+    advancedItem?.action?.();
+
+    expect(useAppStore.getState().settingsOpen).toBe(true);
+    expect(useAppStore.getState().settingsInitialCategory).toBe("advanced");
   });
 
   // FT-C-36: Ctrl+J toggles bottom panel

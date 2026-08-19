@@ -1792,6 +1792,7 @@ export default function App() {
   const setWindowDimensions = useAppStore((s) => s.setWindowDimensions);
   const settingsOpen = useAppStore((s) => s.settingsOpen);
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen);
+  const openSettingsToCategory = useAppStore((s) => s.openSettingsToCategory);
   const setTheme = useAppStore((s) => s.setTheme);
   const setActiveProfile = useAppStore((s) => s.setActiveProfile);
   const firstLaunchComplete = useAppStore((s) => s.firstLaunchComplete);
@@ -2122,7 +2123,7 @@ export default function App() {
     openVNC:    () => { setNewSessionDefaultType(SessionType.VNC);    setEditingSession(null); setShowSessionEditor(true); },
     openSFTP:   () => { setNewSessionDefaultType(SessionType.SFTP);   setEditingSession(null); setShowSessionEditor(true); },
     openSessionType: (type: SessionType) => { setNewSessionDefaultType(type); setEditingSession(null); setShowSessionEditor(true); },
-    openSettings: () => setSettingsOpen(true),
+    openSettings: (category?: string) => { if (category) openSettingsToCategory(category); else setSettingsOpen(true); },
   });
   nativeMenuCbs.current = {
     newLocalShell: handleNewLocalShell,
@@ -2137,7 +2138,7 @@ export default function App() {
     openVNC:    () => { setNewSessionDefaultType(SessionType.VNC);    setEditingSession(null); setShowSessionEditor(true); },
     openSFTP:   () => { setNewSessionDefaultType(SessionType.SFTP);   setEditingSession(null); setShowSessionEditor(true); },
     openSessionType: (type: SessionType) => { setNewSessionDefaultType(type); setEditingSession(null); setShowSessionEditor(true); },
-    openSettings: () => setSettingsOpen(true),
+    openSettings: (category?: string) => { if (category) openSettingsToCategory(category); else setSettingsOpen(true); },
   };
 
   // Build the native OS menu bar once on mount. The Tauri menu API is
@@ -2199,21 +2200,39 @@ export default function App() {
           items: [
             await MenuItem.new({ text: 'Preferences…', accelerator: 'CmdOrCtrl+,', action: () => cb.current.openSettings() }),
             await sep(),
-            await MenuItem.new({ text: 'General',       action: () => cb.current.openSettings() }),
-            await MenuItem.new({ text: 'Appearance',    action: () => cb.current.openSettings() }),
-            await MenuItem.new({ text: 'Terminal',      action: () => cb.current.openSettings() }),
-            await MenuItem.new({ text: 'SSH',           action: () => cb.current.openSettings() }),
-            await MenuItem.new({ text: 'Connections',   action: () => cb.current.openSettings() }),
-            await MenuItem.new({ text: 'File Transfer', action: () => cb.current.openSettings() }),
-            await MenuItem.new({ text: 'Keyboard',      action: () => cb.current.openSettings() }),
-            await MenuItem.new({ text: 'Notifications', action: () => cb.current.openSettings() }),
-            await MenuItem.new({ text: 'Security',      action: () => cb.current.openSettings() }),
-            await MenuItem.new({ text: 'Advanced',      action: () => cb.current.openSettings() }),
+            await MenuItem.new({ text: 'General',       action: () => cb.current.openSettings('general') }),
+            await MenuItem.new({ text: 'Appearance',    action: () => cb.current.openSettings('appearance') }),
+            await MenuItem.new({ text: 'Terminal',      action: () => cb.current.openSettings('terminal') }),
+            await MenuItem.new({ text: 'SSH',           action: () => cb.current.openSettings('ssh') }),
+            await MenuItem.new({ text: 'Connections',   action: () => cb.current.openSettings('connections') }),
+            await MenuItem.new({ text: 'File Transfer', action: () => cb.current.openSettings('file_transfer') }),
+            await MenuItem.new({ text: 'Keyboard',      action: () => cb.current.openSettings('keyboard') }),
+            await MenuItem.new({ text: 'Notifications', action: () => cb.current.openSettings('notifications') }),
+            await MenuItem.new({ text: 'Security',      action: () => cb.current.openSettings('security') }),
+            await MenuItem.new({ text: 'Advanced',      action: () => cb.current.openSettings('advanced') }),
           ],
         });
 
         const defaultMenu = await Menu.default();
-        await defaultMenu.insert([connectSubmenu, vaultSubmenu, settingsSubmenu], 1);
+        // Menu.default() gives a platform-appropriate base menu — macOS:
+        // [CrossTerm, File, Edit, View, Window, Help]; Windows: [File, Edit,
+        // Window, Help]; Linux: [Edit, Window, Help] (see tauri::menu::Menu
+        // ::default in the Rust crate). Inserting at a fixed index (1) put
+        // CrossTerm's own menus *before* File/Edit on macOS and Windows —
+        // find "Edit" (present on every platform) and insert right after it
+        // instead, so the order reads App, File, Edit, then app-specific
+        // menus, matching standard OS conventions on every platform rather
+        // than assuming one fixed layout.
+        const topItems = await defaultMenu.items();
+        let insertIndex = topItems.length;
+        for (let i = 0; i < topItems.length; i++) {
+          const item = topItems[i] as { text?: () => Promise<string> };
+          if (typeof item.text === 'function' && (await item.text()) === 'Edit') {
+            insertIndex = i + 1;
+            break;
+          }
+        }
+        await defaultMenu.insert([connectSubmenu, vaultSubmenu, settingsSubmenu], insertIndex);
         await defaultMenu.setAsAppMenu();
       } catch {
         // Outside Tauri (browser dev server, Vitest) the dynamic import or
