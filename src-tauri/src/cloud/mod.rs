@@ -313,6 +313,43 @@ pub async fn cloud_get_asset_tree(
     Ok(roots)
 }
 
+// ── Generic kubectl (used by both AKS and GKE panels once credentials are
+// configured via cloud_azure_aks_get_credentials / cloud_gcp_gke_get_credentials) ──
+
+#[tauri::command]
+pub async fn kubectl_get_namespaces() -> Result<String, CloudError> {
+    let output = tokio::process::Command::new("kubectl")
+        .args(["get", "namespaces"])
+        .output()
+        .await
+        .map_err(|e| CloudError::CliExecution(format!("kubectl get namespaces: {e}")))?;
+
+    if !output.status.success() {
+        return Err(CloudError::CliExecution(
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        ));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+#[tauri::command]
+pub async fn kubectl_list_pods(namespace: String) -> Result<String, CloudError> {
+    let output = tokio::process::Command::new("kubectl")
+        .args(["get", "pods", "-n", &namespace])
+        .output()
+        .await
+        .map_err(|e| CloudError::CliExecution(format!("kubectl get pods: {e}")))?;
+
+    if !output.status.success() {
+        return Err(CloudError::CliExecution(
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        ));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]

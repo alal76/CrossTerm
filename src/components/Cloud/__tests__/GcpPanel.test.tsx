@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@/i18n";
 import GcpPanel from "@/components/Cloud/GcpPanel";
 import { invoke } from "@tauri-apps/api/core";
+import { useSessionStore } from "@/stores/sessionStore";
 import type { CloudProviderStatus, GcpConfig, GcpInstance, GcsBucket } from "@/types";
 
 const mockInvoke = vi.mocked(invoke);
@@ -44,6 +45,7 @@ function mockAll(overrides: Partial<Record<string, unknown>> = {}) {
 describe("GcpPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useSessionStore.setState({ sessions: [], openTabs: [], activeTabId: null });
   });
 
   it("shows a not-installed message when the CLI is missing", () => {
@@ -90,12 +92,12 @@ describe("GcpPanel", () => {
 
     fireEvent.click(screen.getByText("gcs-bucket"));
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("cloud_gcp_list_objects", { project: "my-project", bucket: "gcs-bucket" });
+      expect(mockInvoke).toHaveBeenCalledWith("cloud_gcp_list_objects", { bucket: "gcs-bucket", prefix: "" });
     });
     expect(await screen.findByText("obj.txt")).toBeInTheDocument();
   });
 
-  it("starts, stops, connects, and IAP-tunnels to an instance", async () => {
+  it("starts, stops, and IAP-tunnels to an instance via the real backend commands", async () => {
     mockAll();
     render(<GcpPanel status={status()} />);
     await screen.findByText("web-1");
@@ -110,14 +112,24 @@ describe("GcpPanel", () => {
       expect(mockInvoke).toHaveBeenCalledWith("cloud_gcp_stop_instance", { project: "my-project", zone: "us-central1-a", instance: "web-1" });
     });
 
-    fireEvent.click(screen.getByTitle("Connect"));
-    await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("cloud_gcp_ssh_connect", { project: "my-project", zone: "us-central1-a", instance: "web-1" });
-    });
-
     fireEvent.click(screen.getByTitle("IAP Tunnel"));
     await waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith("cloud_gcp_iap_tunnel", { project: "my-project", zone: "us-central1-a", instance: "web-1" });
+    });
+  });
+
+  it("connect opens a real SSH session tab instead of calling a nonexistent backend command", async () => {
+    mockAll();
+    render(<GcpPanel status={status()} />);
+    await screen.findByText("web-1");
+
+    fireEvent.click(screen.getByTitle("Connect"));
+
+    await waitFor(() => {
+      const sessions = useSessionStore.getState().sessions;
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].connection.host).toBe("9.9.9.9");
+      expect(sessions[0].type).toBe("ssh");
     });
   });
 

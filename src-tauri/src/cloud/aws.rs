@@ -413,6 +413,54 @@ pub async fn cloud_aws_ssm_start(
 }
 
 #[tauri::command]
+pub async fn cloud_aws_start_instance(instance_id: String, region: String) -> Result<(), CloudError> {
+    let output = tokio::process::Command::new("aws")
+        .args([
+            "ec2",
+            "start-instances",
+            "--region",
+            &region,
+            "--instance-ids",
+            &instance_id,
+        ])
+        .output()
+        .await
+        .map_err(|e| CloudError::CliExecution(e.to_string()))?;
+
+    if !output.status.success() {
+        return Err(CloudError::CliExecution(
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn cloud_aws_stop_instance(instance_id: String, region: String) -> Result<(), CloudError> {
+    let output = tokio::process::Command::new("aws")
+        .args([
+            "ec2",
+            "stop-instances",
+            "--region",
+            &region,
+            "--instance-ids",
+            &instance_id,
+        ])
+        .output()
+        .await
+        .map_err(|e| CloudError::CliExecution(e.to_string()))?;
+
+    if !output.status.success() {
+        return Err(CloudError::CliExecution(
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn cloud_aws_list_s3_buckets() -> Result<Vec<S3Bucket>, CloudError> {
     let output = tokio::process::Command::new("aws")
         .args(["s3api", "list-buckets", "--output", "json"])
@@ -509,6 +557,7 @@ pub async fn cloud_aws_ecs_exec(
     cluster: String,
     task: String,
     container: String,
+    command: String,
 ) -> Result<String, CloudError> {
     let session_id = uuid::Uuid::new_v4().to_string();
 
@@ -524,7 +573,7 @@ pub async fn cloud_aws_ecs_exec(
             &container,
             "--interactive",
             "--command",
-            "/bin/sh",
+            &command,
         ])
         .spawn()
         .map_err(|e| CloudError::CliExecution(e.to_string()))?;

@@ -22,6 +22,8 @@ import type {
   GcsBucket,
   GcsObject,
 } from "@/types";
+import { useSessionStore } from "@/stores/sessionStore";
+import { buildAdHocSshSession } from "@/utils/cloudConnect";
 
 interface GcpPanelProps {
   readonly status: CloudProviderStatus | undefined;
@@ -29,6 +31,7 @@ interface GcpPanelProps {
 
 export default function GcpPanel({ status }: GcpPanelProps) {
   const { t } = useTranslation();
+  const { addSession, openTab } = useSessionStore();
   const [configs, setConfigs] = useState<GcpConfig[]>([]);
   const [selectedProject, setSelectedProject] = useState<string>("");
   const [instances, setInstances] = useState<GcpInstance[]>([]);
@@ -96,8 +99,8 @@ export default function GcpPanel({ status }: GcpPanelProps) {
       setLoading(true);
       try {
         const result = await invoke<GcsObject[]>("cloud_gcp_list_objects", {
-          project: selectedProject,
           bucket,
+          prefix: "",
         });
         setObjects(result);
       } catch {
@@ -144,11 +147,12 @@ export default function GcpPanel({ status }: GcpPanelProps) {
           });
           loadInstances();
         } else if (action === "connect") {
-          await invoke("cloud_gcp_ssh_connect", {
-            project: selectedProject,
-            zone,
-            instance: instanceName,
-          });
+          const inst = instances.find((i) => i.name === instanceName && i.zone === zone);
+          const host = inst?.external_ip ?? inst?.internal_ip;
+          if (!host) return;
+          const session = buildAdHocSshSession(host, `${instanceName} (GCP)`);
+          addSession(session);
+          openTab(session);
         } else if (action === "iap") {
           await invoke("cloud_gcp_iap_tunnel", {
             project: selectedProject,
@@ -160,7 +164,7 @@ export default function GcpPanel({ status }: GcpPanelProps) {
         // Action failed
       }
     },
-    [selectedProject, loadInstances]
+    [selectedProject, instances, loadInstances, addSession, openTab]
   );
 
   const handleCloudShell = useCallback(async () => {

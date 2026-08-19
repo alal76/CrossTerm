@@ -19,20 +19,27 @@ import {
 } from "lucide-react";
 import type {
   CloudProviderStatus,
+  AwsProfile,
   Ec2Instance,
   S3Bucket,
   S3Object,
   CostSummary,
 } from "@/types";
+import { useSessionStore } from "@/stores/sessionStore";
+import { buildAdHocSshSession } from "@/utils/cloudConnect";
 
 interface AwsPanelProps {
   readonly status: CloudProviderStatus | undefined;
 }
 
+const DEFAULT_AWS_REGION = "us-east-1";
+
 export default function AwsPanel({ status }: AwsPanelProps) {
   const { t } = useTranslation();
+  const { addSession, openTab } = useSessionStore();
   const [selectedProfile, setSelectedProfile] = useState<string>("");
   const [profiles, setProfiles] = useState<string[]>([]);
+  const [awsProfiles, setAwsProfiles] = useState<AwsProfile[]>([]);
   const [instances, setInstances] = useState<Ec2Instance[]>([]);
   const [buckets, setBuckets] = useState<S3Bucket[]>([]);
   const [objects, setObjects] = useState<S3Object[]>([]);
@@ -64,12 +71,28 @@ export default function AwsPanel({ status }: AwsPanelProps) {
     }
   }, [status]);
 
+  useEffect(() => {
+    invoke<AwsProfile[]>("cloud_aws_list_profiles")
+      .then((result) => setAwsProfiles(result ?? []))
+      .catch(() => setAwsProfiles([]));
+  }, []);
+
+  const selectedRegion =
+    awsProfiles.find((p) => p.name === selectedProfile)?.region ?? DEFAULT_AWS_REGION;
+
+  useEffect(() => {
+    if (!selectedProfile) return;
+    invoke("cloud_aws_switch_profile", { profile: selectedProfile }).catch(() => {
+      // Profile switch failed — subsequent calls fall back to the CLI's own default
+    });
+  }, [selectedProfile]);
+
   const loadInstances = useCallback(async () => {
     if (!selectedProfile) return;
     setLoading(true);
     try {
-      const result = await invoke<Ec2Instance[]>("cloud_aws_list_instances", {
-        profile: selectedProfile,
+      const result = await invoke<Ec2Instance[]>("cloud_aws_list_ec2", {
+        region: selectedRegion,
       });
       setInstances(result);
     } catch {
@@ -77,15 +100,13 @@ export default function AwsPanel({ status }: AwsPanelProps) {
     } finally {
       setLoading(false);
     }
-  }, [selectedProfile]);
+  }, [selectedProfile, selectedRegion]);
 
   const loadBuckets = useCallback(async () => {
     if (!selectedProfile) return;
     setLoading(true);
     try {
-      const result = await invoke<S3Bucket[]>("cloud_aws_list_buckets", {
-        profile: selectedProfile,
-      });
+      const result = await invoke<S3Bucket[]>("cloud_aws_list_s3_buckets");
       setBuckets(result);
     } catch {
       setBuckets([]);
@@ -98,9 +119,7 @@ export default function AwsPanel({ status }: AwsPanelProps) {
     if (!selectedProfile) return;
     setLoading(true);
     try {
-      const result = await invoke<CostSummary>("cloud_aws_get_cost", {
-        profile: selectedProfile,
-      });
+      const result = await invoke<CostSummary>("cloud_aws_cost_summary");
       setCostSummary(result);
     } catch {
       setCostSummary(null);
@@ -115,9 +134,9 @@ export default function AwsPanel({ status }: AwsPanelProps) {
       setSelectedBucket(bucket);
       setLoading(true);
       try {
-        const result = await invoke<S3Object[]>("cloud_aws_list_objects", {
-          profile: selectedProfile,
+        const result = await invoke<S3Object[]>("cloud_aws_list_s3_objects", {
           bucket,
+          prefix: "",
         });
         setObjects(result);
       } catch {
@@ -134,8 +153,7 @@ export default function AwsPanel({ status }: AwsPanelProps) {
     setLoading(true);
     try {
       const result = await invoke<string>("cloud_aws_lambda_invoke", {
-        profile: selectedProfile,
-        functionName: lambdaName,
+        function: lambdaName,
         payload: lambdaPayload,
       });
       setLambdaResult(result);
@@ -151,10 +169,9 @@ export default function AwsPanel({ status }: AwsPanelProps) {
     setLoading(true);
     try {
       const result = await invoke<string>("cloud_aws_ecs_exec", {
-        profile: selectedProfile,
         cluster: ecsCluster,
         task: ecsTask,
-        container: ecsContainer || undefined,
+        container: ecsContainer,
         command: ecsCommand,
       });
       setEcsResult(result);
@@ -187,21 +204,26 @@ export default function AwsPanel({ status }: AwsPanelProps) {
       if (!selectedProfile) return;
       try {
         if (action === "start") {
-          await invoke("cloud_aws_start_instance", { profile: selectedProfile, instanceId });
+          await invoke("cloud_aws_start_instance", { instanceId, region: selectedRegion });
           loadInstances();
         } else if (action === "stop") {
-          await invoke("cloud_aws_stop_instance", { profile: selectedProfile, instanceId });
+          await invoke("cloud_aws_stop_instance", { instanceId, region: selectedRegion });
           loadInstances();
         } else if (action === "connect") {
-          await invoke("cloud_aws_connect_instance", { profile: selectedProfile, instanceId });
+          const inst = instances.find((i) => i.id === instanceId);
+          const host = inst?.public_ip ?? inst?.private_ip;
+          if (!host) return;
+          const session = buildAdHocSshSession(host, `${inst?.name || instanceId} (AWS)`);
+          addSession(session);
+          openTab(session);
         } else if (action === "ssm") {
-          await invoke("cloud_aws_ssm_session", { profile: selectedProfile, instanceId });
+          await invoke("cloud_aws_ssm_start", { instanceId, region: selectedRegion });
         }
       } catch {
         // Action failed
       }
     },
-    [selectedProfile, loadInstances]
+    [selectedProfile, selectedRegion, instances, loadInstances, addSession, openTab]
   );
 
   if (status?.cli_status.type === "not_installed") {

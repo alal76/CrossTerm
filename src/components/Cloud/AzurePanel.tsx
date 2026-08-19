@@ -19,6 +19,8 @@ import type {
   AzureVm,
   AzureStorageAccount,
 } from "@/types";
+import { useSessionStore } from "@/stores/sessionStore";
+import { buildAdHocSshSession } from "@/utils/cloudConnect";
 
 interface AzurePanelProps {
   readonly status: CloudProviderStatus | undefined;
@@ -26,6 +28,7 @@ interface AzurePanelProps {
 
 export default function AzurePanel({ status }: AzurePanelProps) {
   const { t } = useTranslation();
+  const { addSession, openTab } = useSessionStore();
   const [subscriptions, setSubscriptions] = useState<AzureSubscription[]>([]);
   const [selectedSub, setSelectedSub] = useState<string>("");
   const [vms, setVms] = useState<AzureVm[]>([]);
@@ -56,7 +59,7 @@ export default function AzurePanel({ status }: AzurePanelProps) {
     setLoading(true);
     try {
       const result = await invoke<AzureVm[]>("cloud_azure_list_vms", {
-        subscriptionId: selectedSub,
+        subscription: selectedSub,
       });
       setVms(result);
     } catch {
@@ -71,8 +74,8 @@ export default function AzurePanel({ status }: AzurePanelProps) {
     setLoading(true);
     try {
       const result = await invoke<AzureStorageAccount[]>(
-        "cloud_azure_list_storage_accounts",
-        { subscriptionId: selectedSub }
+        "cloud_azure_list_storage",
+        { subscription: selectedSub }
       );
       setStorageAccounts(result);
     } catch {
@@ -91,7 +94,7 @@ export default function AzurePanel({ status }: AzurePanelProps) {
 
   const handleLogin = useCallback(async () => {
     try {
-      await invoke("cloud_azure_login");
+      await invoke("cloud_azure_login", { method: "interactive" });
       loadSubscriptions();
     } catch {
       // Login failed
@@ -103,26 +106,31 @@ export default function AzurePanel({ status }: AzurePanelProps) {
       if (!selectedSub) return;
       try {
         if (action === "start") {
-          await invoke("cloud_azure_start_vm", { subscriptionId: selectedSub, vmId });
+          await invoke("cloud_azure_start_vm", { subscription: selectedSub, vmId });
           loadVms();
         } else if (action === "stop") {
-          await invoke("cloud_azure_stop_vm", { subscriptionId: selectedSub, vmId });
+          await invoke("cloud_azure_stop_vm", { subscription: selectedSub, vmId });
           loadVms();
         } else if (action === "connect") {
-          await invoke("cloud_azure_connect_vm", { subscriptionId: selectedSub, vmId });
+          const vm = vms.find((v) => v.id === vmId);
+          const host = vm?.public_ip ?? vm?.private_ip;
+          if (!host) return;
+          const session = buildAdHocSshSession(host, `${vm?.name || vmId} (Azure)`);
+          addSession(session);
+          openTab(session);
         } else if (action === "bastion") {
-          await invoke("cloud_azure_bastion_connect", { subscriptionId: selectedSub, vmId });
+          await invoke("cloud_azure_bastion_connect", { vmId, authType: "AAD" });
         }
       } catch {
         // Action failed
       }
     },
-    [selectedSub, loadVms]
+    [selectedSub, vms, loadVms, addSession, openTab]
   );
 
   const handleCloudShell = useCallback(async () => {
     try {
-      await invoke("cloud_azure_cloud_shell");
+      await invoke("cloud_azure_cloud_shell", { shellType: "bash" });
     } catch {
       // Cloud Shell launch failed
     }

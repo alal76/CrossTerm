@@ -286,6 +286,71 @@ pub async fn cloud_gcp_list_instances(
 }
 
 #[tauri::command]
+pub async fn cloud_gcp_auth_login() -> Result<(), CloudError> {
+    let output = tokio::process::Command::new("gcloud")
+        .args(["auth", "login"])
+        .output()
+        .await
+        .map_err(|e| CloudError::CliExecution(e.to_string()))?;
+
+    if !output.status.success() {
+        return Err(CloudError::AuthRequired(
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn cloud_gcp_start_instance(
+    project: String,
+    zone: String,
+    instance: String,
+) -> Result<(), CloudError> {
+    let output = tokio::process::Command::new("gcloud")
+        .args([
+            "compute", "instances", "start", &instance,
+            "--project", &project, "--zone", &zone,
+        ])
+        .output()
+        .await
+        .map_err(|e| CloudError::CliExecution(e.to_string()))?;
+
+    if !output.status.success() {
+        return Err(CloudError::CliExecution(
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn cloud_gcp_stop_instance(
+    project: String,
+    zone: String,
+    instance: String,
+) -> Result<(), CloudError> {
+    let output = tokio::process::Command::new("gcloud")
+        .args([
+            "compute", "instances", "stop", &instance,
+            "--project", &project, "--zone", &zone,
+        ])
+        .output()
+        .await
+        .map_err(|e| CloudError::CliExecution(e.to_string()))?;
+
+    if !output.status.success() {
+        return Err(CloudError::CliExecution(
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn cloud_gcp_iap_tunnel(
     instance: String,
     project: String,

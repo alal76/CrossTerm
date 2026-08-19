@@ -572,6 +572,8 @@ export interface Ec2Instance {
   launch_time: string;
 }
 
+export interface AwsProfile { name: string; region?: string; sso_start_url?: string; }
+
 export interface S3Bucket { name: string; region: string; creation_date: string; }
 export interface S3Object { key: string; size: number; last_modified: string; storage_class: string; }
 

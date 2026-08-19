@@ -266,6 +266,44 @@ pub async fn cloud_azure_list_vms(
 }
 
 #[tauri::command]
+pub async fn cloud_azure_start_vm(subscription: String, vm_id: String) -> Result<(), CloudError> {
+    let output = tokio::process::Command::new("az")
+        .args([
+            "vm", "start", "--ids", &vm_id, "--subscription", &subscription,
+        ])
+        .output()
+        .await
+        .map_err(|e| CloudError::CliExecution(e.to_string()))?;
+
+    if !output.status.success() {
+        return Err(CloudError::CliExecution(
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn cloud_azure_stop_vm(subscription: String, vm_id: String) -> Result<(), CloudError> {
+    let output = tokio::process::Command::new("az")
+        .args([
+            "vm", "deallocate", "--ids", &vm_id, "--subscription", &subscription,
+        ])
+        .output()
+        .await
+        .map_err(|e| CloudError::CliExecution(e.to_string()))?;
+
+    if !output.status.success() {
+        return Err(CloudError::CliExecution(
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn cloud_azure_bastion_connect(
     vm_id: String,
     auth_type: String,
@@ -289,7 +327,8 @@ pub async fn cloud_azure_bastion_connect(
 }
 
 #[tauri::command]
-pub async fn cloud_azure_cloud_shell(_shell_type: String) -> Result<String, CloudError> {
+pub async fn cloud_azure_cloud_shell(shell_type: String) -> Result<String, CloudError> {
+    let _ = shell_type;
     let session_id = uuid::Uuid::new_v4().to_string();
 
     // Azure Cloud Shell doesn't have a direct CLI command for local embedding,
