@@ -278,6 +278,19 @@ pub struct ExploreTarget {
     pub extra_ports: Vec<u16>,
     /// Per-host TCP connect timeout in milliseconds (default 1500).
     pub timeout_ms: Option<u64>,
+    /// SNMP community strings to try against each host's UDP/161, in
+    /// addition to "public". Many managed switches/UPSes/printers are
+    /// deliberately configured off the default community, so a scan that
+    /// only ever tries "public" silently sees them as SNMP-silent even
+    /// though the agent is up.
+    #[serde(default)]
+    pub snmp_communities: Vec<String>,
+    /// Extra vendor keywords (e.g. "HIKVISION", "MIKROTIK") to match against
+    /// a discovered TLS certificate's subject/issuer org, beyond the
+    /// built-in `VENDOR_HINTS` list — for brands common on the user's own
+    /// network but too niche to bake into every install.
+    #[serde(default)]
+    pub extra_vendor_hints: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -395,8 +408,13 @@ fn parse_cidr(cidr: &str) -> Result<Vec<Ipv4Addr>, NetworkError> {
     let network = ip_u32 & mask;
     let count = 1u32 << host_bits;
 
+    // Skip the network address (i=0) and broadcast address (i=count-1) —
+    // neither is a connectable host, and scanning the broadcast address in
+    // particular tends to draw an ICMP reply (from the subnet's multicast/
+    // broadcast handling), so it was showing up in Network Explorer results
+    // as a bogus "found" device with no real host behind it.
     let mut addrs = Vec::new();
-    for i in 0..count {
+    for i in 1..count.saturating_sub(1) {
         addrs.push(Ipv4Addr::from(network + i));
     }
 
@@ -1067,6 +1085,17 @@ async fn resolve_arp_mac_once(ip: IpAddr) -> Option<String> {
     parse_arp_mac_output(&String::from_utf8_lossy(&output.stdout))
 }
 
+/// A host with every scanned port closed/filtered and ICMP blocked by a
+/// local firewall is otherwise invisible to a scan relying only on
+/// TCP-connect + ping, even though it's plainly present and responding to
+/// plain ARP (which can't be disabled without breaking IP connectivity
+/// entirely). Pulled out as its own function — both `network_explore_start`
+/// and the standalone `run_explore_and_dump` (used by `network-explore-cli`)
+/// need the exact same "is this host actually here" call.
+fn host_is_present(open_ports: &[OpenPort], ping_alive: bool, arp_mac: &Option<String>) -> bool {
+    !open_ports.is_empty() || ping_alive || arp_mac.is_some()
+}
+
 /// Extract and canonicalize a MAC address from `arp -n` output. macOS/BSD's
 /// `arp` does **not** zero-pad single-hex-digit octets — a real line looks
 /// like `? (192.168.0.39) at ac:a7:f1:8:6:a7 on en0 ifscope [ethernet]`, not
@@ -1536,10 +1565,21 @@ fn parse_snmp_response(response: &[u8]) -> Option<String> {
     Some("SNMP agent".to_string())
 }
 
-async fn probe_snmp(ip: IpAddr, port: u16, timeout: Duration) -> Option<String> {
-    let packet = build_snmp_get_request("public");
+async fn probe_snmp(ip: IpAddr, port: u16, timeout: Duration, community: &str) -> Option<String> {
+    let packet = build_snmp_get_request(community);
     let response = probe_udp(ip, port, &packet, timeout).await?;
     parse_snmp_response(&response)
+}
+
+/// Try each community string concurrently (not sequentially — sequential
+/// tries would multiply the UDP timeout by however many communities are
+/// configured, re-introducing the exact per-host scan slowdown the
+/// dedicated `udp_timeout` was added to fix) and return the first real
+/// reply. `communities` should already include "public" if it's wanted;
+/// callers control the full list rather than it being silently implied.
+async fn probe_snmp_any(ip: IpAddr, port: u16, timeout: Duration, communities: &[String]) -> Option<String> {
+    let futures = communities.iter().map(|c| probe_snmp(ip, port, timeout, c));
+    futures::future::join_all(futures).await.into_iter().flatten().next()
 }
 
 /// Build an RMCP Presence Ping (ASF message type 0x80) — the standard way
@@ -1836,8 +1876,11 @@ const VENDOR_HINTS: &[&str] = &[
 
 /// Guess the OS/device family from every signal gathered for a host, and
 /// return the human-readable evidence trail alongside it (each check that
-/// matched appends one short note explaining why).
-fn guess_os(open_ports: &[OpenPort], ttl: Option<u8>) -> (Option<String>, Vec<String>) {
+/// matched appends one short note explaining why). `extra_vendor_hints`
+/// lets a scan add keywords (e.g. "HIKVISION", "MIKROTIK", "QNAP") beyond
+/// the built-in `VENDOR_HINTS` list, for brands common on the user's own
+/// network but too niche to bake into every install.
+fn guess_os(open_ports: &[OpenPort], ttl: Option<u8>, extra_vendor_hints: &[String]) -> (Option<String>, Vec<String>) {
     let mut evidence = Vec::new();
 
     // 1. OS name found verbatim in a banner/version/title string.
@@ -1853,12 +1896,15 @@ fn guess_os(open_ports: &[OpenPort], ttl: Option<u8>) -> (Option<String>, Vec<St
     }
 
     // 2. Vendor keyword in a TLS certificate's subject/issuer org.
+    let all_vendor_hints: Vec<String> = VENDOR_HINTS.iter().map(|h| h.to_string())
+        .chain(extra_vendor_hints.iter().map(|h| h.to_ascii_uppercase()))
+        .collect();
     for port in open_ports {
         if let Some(tls) = &port.tls {
             for org in [&tls.subject_org, &tls.issuer_org].into_iter().flatten() {
                 let upper = org.to_ascii_uppercase();
-                for hint in VENDOR_HINTS {
-                    if upper.contains(hint) {
+                for hint in &all_vendor_hints {
+                    if upper.contains(hint.as_str()) {
                         evidence.push(format!("port {} TLS cert org: {}", port.port, org));
                         return (Some(format!("Embedded Linux ({} device)", to_title_case(hint))), evidence);
                     }
@@ -1924,6 +1970,19 @@ pub struct NetworkState {
     pub monitor_interfaces: Mutex<HashSet<String>>,
     /// Cancellation flags for in-progress `network_explore_start` scans, keyed by scan_id.
     pub explore_cancel_flags: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    /// Shared across every concurrently-running `network_scan_start`/
+    /// `network_explore_start` call — each used to create its own fresh
+    /// `Semaphore::new(25)` per scan, which bounded concurrency *within*
+    /// one scan but not *across* scans. Scanning several CIDRs at once
+    /// (the Network Explorer UI does this by default when multiple local
+    /// subnets are auto-detected) meant up to 25 concurrent host tasks per
+    /// scan, each spawning its own `ping`/`arp` subprocesses — 4 scans at
+    /// once could mean 100+ concurrent subprocess spawns, which visibly
+    /// degraded every scan's result quality (confirmed: a subnet scanned
+    /// alone found 31 real hosts; the same subnet scanned alongside 3
+    /// others found only 4). One shared semaphore keeps total concurrent
+    /// probing work bounded regardless of how many scans are active.
+    pub scan_semaphore: Arc<Semaphore>,
 }
 
 impl Default for NetworkState {
@@ -1944,6 +2003,7 @@ impl NetworkState {
             aircrack_audit_log: Mutex::new(Vec::new()),
             monitor_interfaces: Mutex::new(HashSet::new()),
             explore_cancel_flags: Mutex::new(HashMap::new()),
+            scan_semaphore: Arc::new(Semaphore::new(25)),
         }
     }
 }
@@ -1967,10 +2027,13 @@ pub async fn network_scan_start(
     }
 
     let scan_id_clone = scan_id.clone();
+    // `state` itself can't be moved into `tokio::spawn` (its borrow isn't
+    // `'static`) — clone the shared, owned `Arc<Semaphore>` out of it first.
+    // See the field doc on `NetworkState::scan_semaphore` for why this must
+    // be shared across scans rather than a fresh one created per call.
+    let semaphore = Arc::clone(&state.scan_semaphore);
 
     tokio::spawn(async move {
-        const MAX_CONCURRENT: usize = 25;
-        let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT));
         let hosts_scanned = Arc::new(AtomicU32::new(0));
         let timeout = Duration::from_millis(1500);
         let mut tasks = tokio::task::JoinSet::new();
@@ -2003,7 +2066,7 @@ pub async fn network_scan_start(
                     } else {
                         None
                     };
-                    let os_guess = guess_os(&open_ports, None).0;
+                    let os_guess = guess_os(&open_ports, None, &[]).0;
                     let result = ScanResult {
                         ip: ip.to_string(),
                         hostname,
@@ -2105,13 +2168,27 @@ pub async fn network_explore_start(
     // VPN's competing route for the same prefix can't steal it and starve
     // ARP resolution.
     let bound_if = interface_for_cidr(&target.cidr);
+    log::info!(
+        "explore[{}]: starting scan of {} ({} hosts, bound interface {:?}, ports {:?})",
+        scan_id, target.cidr, total_hosts, bound_if, ports
+    );
+
+    let mut snmp_communities = vec!["public".to_string()];
+    snmp_communities.extend(target.snmp_communities.iter().filter(|c| *c != "public").cloned());
+    let extra_vendor_hints = target.extra_vendor_hints.clone();
+    // `state` itself can't be moved into `tokio::spawn` (its borrow isn't
+    // `'static`) — clone the shared, owned `Arc<Semaphore>` out of it first.
+    // See the field doc on `NetworkState::scan_semaphore` for why this must
+    // be shared across scans (including concurrent `network_scan_start`
+    // calls) rather than a fresh one created per call.
+    let semaphore = Arc::clone(&state.scan_semaphore);
 
     tokio::spawn(async move {
-        const MAX_CONCURRENT: usize = 25;
-        let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT));
         let hosts_scanned = Arc::new(AtomicU32::new(0));
         let hosts_found = Arc::new(AtomicU32::new(0));
         let ports = Arc::new(ports);
+        let snmp_communities = Arc::new(snmp_communities);
+        let extra_vendor_hints = Arc::new(extra_vendor_hints);
         let mut tasks = tokio::task::JoinSet::new();
 
         // mDNS/Bonjour discovery runs concurrently with the per-host CIDR
@@ -2145,6 +2222,8 @@ pub async fn network_explore_start(
             let ports = Arc::clone(&ports);
             let cancelled = Arc::clone(&cancel_flag);
             let bound_if = bound_if.clone();
+            let snmp_communities = Arc::clone(&snmp_communities);
+            let extra_vendor_hints = Arc::clone(&extra_vendor_hints);
             let dns_registry = Arc::clone(&dns_registry);
 
             tasks.spawn(BOUND_INTERFACE.scope(bound_if, async move {
@@ -2169,11 +2248,22 @@ pub async fn network_explore_start(
                 // answer, arrives in low milliseconds on a LAN.
                 let udp_timeout = Duration::from_millis(300).min(timeout);
                 let port_futures: Vec<_> = ports.iter().map(|&p| check_port(ip, p, timeout)).collect();
-                let (port_results, (ping_alive, ttl), snmp_result, ipmi_result) = tokio::join!(
+                let (port_results, (ping_alive, ttl), snmp_result, ipmi_result, arp_mac) = tokio::join!(
                     futures::future::join_all(port_futures),
                     ping_host(ip, timeout),
-                    probe_snmp(ip, 161, udp_timeout),
+                    probe_snmp_any(ip, 161, udp_timeout, &snmp_communities),
                     probe_ipmi(ip, 623, udp_timeout),
+                    // A host with every scanned port closed/filtered and ICMP
+                    // blocked by a local firewall is otherwise invisible to
+                    // this scan, even though it's plainly present and
+                    // responding to plain ARP (which can't be disabled
+                    // without breaking IP connectivity entirely). Reading the
+                    // OS ARP cache here — right after the ping above, which
+                    // already triggers ARP resolution as a side effect of
+                    // sending it, regardless of whether ICMP itself gets
+                    // through — costs nothing extra network-wise and catches
+                    // exactly this class of host.
+                    resolve_arp_mac_once(ip),
                 );
                 let mut open_ports: Vec<OpenPort> = port_results.into_iter().flatten().collect();
                 if let Some(sys_descr) = snmp_result {
@@ -2193,7 +2283,16 @@ pub async fn network_explore_start(
                         ..Default::default()
                     });
                 }
-                let found = !open_ports.is_empty() || ping_alive;
+                let found = host_is_present(&open_ports, ping_alive, &arp_mac);
+                if found && open_ports.is_empty() && !ping_alive {
+                    // Only the interesting case: ARP was the sole reason
+                    // this host counts as present. Logging every host
+                    // (including the ~90% that are simply absent) floods
+                    // the log fast enough to trigger rotation mid-scan,
+                    // losing the very "starting scan"/summary lines needed
+                    // to diagnose a run.
+                    log::info!("explore[{}]: {} found via ARP only (mac={:?})", scan_id, ip, arp_mac);
+                }
                 register_if_dns_server(ip, &open_ports, &dns_registry).await;
 
                 // Progress/"scanned" advances here, at the fast port-scan/ping
@@ -2208,6 +2307,12 @@ pub async fn network_explore_start(
                     found_counter.fetch_add(1, Ordering::Relaxed);
                 }
                 let scanned = counter.fetch_add(1, Ordering::Relaxed) + 1;
+                if scanned >= total_hosts {
+                    log::info!(
+                        "explore[{}]: progress hit {}/{} — frontend retires this scan_id from its active set now",
+                        scan_id, scanned, total_hosts
+                    );
+                }
                 let _ = app.emit("network:explore_progress", ExploreProgress {
                     scan_id: scan_id.clone(),
                     hosts_scanned: scanned,
@@ -2223,12 +2328,17 @@ pub async fn network_explore_start(
                 // port scan/ping already know — real ports, a TTL-only OS
                 // guess, a ports-only suggested session type. No banner/TLS/
                 // hostname/MAC/vendor yet; those come from phase 2 below.
-                let (early_os_guess, early_evidence) = guess_os(&open_ports, ttl);
+                let (early_os_guess, mut early_evidence) = guess_os(&open_ports, ttl, &extra_vendor_hints);
+                if open_ports.is_empty() && !ping_alive {
+                    if let Some(mac) = &arp_mac {
+                        early_evidence.push(format!("responds to ARP ({mac}) but not to any scanned port or ping"));
+                    }
+                }
                 let suggested_session_type = suggest_session_type(&open_ports);
                 let early_result = ExploreResult {
                     ip: ip.to_string(),
                     hostname: None,
-                    mac_address: None,
+                    mac_address: arp_mac.clone(),
                     mac_vendor: None,
                     open_ports: open_ports.clone(),
                     os_guess: early_os_guess,
@@ -2238,6 +2348,7 @@ pub async fn network_explore_start(
                     mdns: Vec::new(),
                     evidence: early_evidence,
                 };
+                log::info!("explore[{}]: emitting host_found for {} ({} open ports)", scan_id, ip, early_result.open_ports.len());
                 let _ = app.emit("network:explore_host_found", ExploreHostFound {
                     scan_id: scan_id.clone(),
                     result: early_result,
@@ -2259,7 +2370,7 @@ pub async fn network_explore_start(
                 } else {
                     None
                 };
-                let (os_guess, evidence) = guess_os(&open_ports, ttl);
+                let (os_guess, evidence) = guess_os(&open_ports, ttl, &extra_vendor_hints);
                 // Redfish/WebDAV can only be told apart from a generic web
                 // server by the enrichment probe above (their signature
                 // check needs an actual HTTP round trip, not just a port
@@ -2280,6 +2391,7 @@ pub async fn network_explore_start(
                     mdns: Vec::new(),
                     evidence,
                 };
+                log::info!("explore[{}]: emitting host_enriched for {}", scan_id, ip);
                 let _ = app.emit("network:explore_host_enriched", ExploreHostFound {
                     scan_id,
                     result,
@@ -2289,6 +2401,10 @@ pub async fn network_explore_start(
 
         while tasks.join_next().await.is_some() {}
         let _ = mdns_task.await;
+        log::info!(
+            "explore[{}]: all host tasks finished, {} hosts found out of {} scanned",
+            scan_id_clone, hosts_found.load(Ordering::Relaxed), hosts_scanned.load(Ordering::Relaxed)
+        );
     });
 
     Ok(scan_id)
@@ -2362,12 +2478,13 @@ pub async fn run_explore_and_dump(
         async move {
             let _permit = sem.acquire_owned().await.unwrap();
             let port_futures: Vec<_> = ports.iter().map(|&p| check_port(ip, p, timeout)).collect();
-            let (port_results, (ping_alive, ttl)) = tokio::join!(
+            let (port_results, (ping_alive, ttl), arp_mac) = tokio::join!(
                 futures::future::join_all(port_futures),
                 ping_host(ip, timeout),
+                resolve_arp_mac_once(ip),
             );
             let open_ports: Vec<OpenPort> = port_results.into_iter().flatten().collect();
-            if open_ports.is_empty() && !ping_alive {
+            if !host_is_present(&open_ports, ping_alive, &arp_mac) {
                 return None;
             }
             register_if_dns_server(ip, &open_ports, &dns_registry).await;
@@ -2378,7 +2495,7 @@ pub async fn run_explore_and_dump(
                 resolve_arp_mac(ip),
             );
             let mac_vendor = if let Some(ref mac) = mac_address { lookup_mac_vendor(mac).await } else { None };
-            let (os_guess, evidence) = guess_os(&open_ports, ttl);
+            let (os_guess, evidence) = guess_os(&open_ports, ttl, &[]);
             let suggested_session_type = suggest_session_type(&open_ports);
             Some(ExploreResult {
                 ip: ip.to_string(),
@@ -4547,8 +4664,10 @@ mod tests {
 
     #[test]
     fn test_parse_cidr() {
+        // /30 has 4 addresses total; network (.0) and broadcast (.3) are
+        // excluded, leaving only the 2 usable host addresses.
         let addrs = parse_cidr("192.168.1.0/30").unwrap();
-        assert_eq!(addrs.len(), 4);
+        assert_eq!(addrs, vec![Ipv4Addr::new(192, 168, 1, 1), Ipv4Addr::new(192, 168, 1, 2)]);
 
         let single = parse_cidr("10.0.0.1/32").unwrap();
         assert_eq!(single.len(), 1);
@@ -4556,6 +4675,16 @@ mod tests {
 
         assert!(parse_cidr("invalid").is_err());
         assert!(parse_cidr("192.168.1.0/33").is_err());
+    }
+
+    #[test]
+    fn test_parse_cidr_excludes_network_and_broadcast_for_slash_24() {
+        let addrs = parse_cidr("192.168.0.0/24").unwrap();
+        assert_eq!(addrs.len(), 254);
+        assert!(!addrs.contains(&Ipv4Addr::new(192, 168, 0, 0)), "network address must be excluded");
+        assert!(!addrs.contains(&Ipv4Addr::new(192, 168, 0, 255)), "broadcast address must be excluded");
+        assert!(addrs.contains(&Ipv4Addr::new(192, 168, 0, 1)));
+        assert!(addrs.contains(&Ipv4Addr::new(192, 168, 0, 254)));
     }
 
     #[test]
@@ -4774,6 +4903,15 @@ mod tests {
     }
 
     #[test]
+    fn test_build_snmp_get_request_with_custom_community() {
+        // Regression: probe_snmp_any tries each user-configured community
+        // string, not just "public" — the community bytes must actually
+        // change per-request, not just the length-prefixed literal above.
+        let packet = build_snmp_get_request("private");
+        assert_eq!(&packet[5..14], b"\x04\x07private");
+    }
+
+    #[test]
     fn test_parse_snmp_response_extracts_sys_descr() {
         // Minimal well-formed-enough response carrying an OCTET STRING.
         let mut response = vec![0x30, 0x00];
@@ -4792,6 +4930,66 @@ mod tests {
     fn test_parse_snmp_response_rejects_non_ber_data() {
         assert_eq!(parse_snmp_response(&[0xFF, 0xFF, 0xFF]), None);
         assert_eq!(parse_snmp_response(&[]), None);
+    }
+
+    #[test]
+    fn test_guess_os_matches_built_in_vendor_hint() {
+        let ports = vec![OpenPort {
+            port: 443,
+            service_name: "https".to_string(),
+            protocol: "tcp".to_string(),
+            tls: Some(TlsCertInfo {
+                subject_cn: None,
+                subject_org: Some("Ubiquiti Inc.".to_string()),
+                issuer_org: None,
+                san: vec![],
+                not_after: None,
+            }),
+            ..Default::default()
+        }];
+        let (guess, _) = guess_os(&ports, None, &[]);
+        assert_eq!(guess.as_deref(), Some("Embedded Linux (Ubiquiti device)"));
+    }
+
+    #[test]
+    fn test_guess_os_matches_user_supplied_vendor_hint() {
+        // A brand not in the built-in VENDOR_HINTS list must still match
+        // once the user has added it via network_scan_vendor_hints.
+        let ports = vec![OpenPort {
+            port: 443,
+            service_name: "https".to_string(),
+            protocol: "tcp".to_string(),
+            tls: Some(TlsCertInfo {
+                subject_cn: None,
+                subject_org: Some("Hikvision Digital Technology".to_string()),
+                issuer_org: None,
+                san: vec![],
+                not_after: None,
+            }),
+            ..Default::default()
+        }];
+        assert_eq!(guess_os(&ports, None, &[]).0, None, "must not match before the hint is supplied");
+        let (guess, _) = guess_os(&ports, None, &["HIKVISION".to_string()]);
+        assert_eq!(guess.as_deref(), Some("Embedded Linux (Hikvision device)"));
+    }
+
+    #[test]
+    fn test_guess_os_user_supplied_vendor_hint_is_case_insensitive() {
+        let ports = vec![OpenPort {
+            port: 443,
+            service_name: "https".to_string(),
+            protocol: "tcp".to_string(),
+            tls: Some(TlsCertInfo {
+                subject_cn: None,
+                subject_org: Some("MikroTik".to_string()),
+                issuer_org: None,
+                san: vec![],
+                not_after: None,
+            }),
+            ..Default::default()
+        }];
+        let (guess, _) = guess_os(&ports, None, &["mikrotik".to_string()]);
+        assert_eq!(guess.as_deref(), Some("Embedded Linux (Mikrotik device)"));
     }
 
     #[test]
@@ -5088,6 +5286,30 @@ mod tests {
         assert_eq!(parse_arp_mac_output(line3).as_deref(), Some("50:88:11:C3:A2:39"));
 
         assert_eq!(parse_arp_mac_output("192.168.0.99 (192.168.0.99) -- no entry\n"), None);
+    }
+
+    #[test]
+    fn test_host_is_present_via_arp_alone() {
+        // Regression: a host with a firewall that blocks ICMP and has none
+        // of the scanned ports open was invisible to the scan even though
+        // it's plainly on the LAN — confirmed via a real ARP table showing
+        // resolved MACs (e.g. .33, .52) for IPs that never once appeared in
+        // any scan result. ARP can't be blocked without breaking basic IP
+        // connectivity, so a resolved ARP entry is real evidence of
+        // presence on its own, independent of TCP/ICMP.
+        assert!(host_is_present(&[], false, &Some("AA:BB:CC:DD:EE:FF".to_string())));
+    }
+
+    #[test]
+    fn test_host_is_present_via_open_port_or_ping_unchanged() {
+        let port = OpenPort { port: 22, service_name: "ssh".to_string(), protocol: "tcp".to_string(), ..Default::default() };
+        assert!(host_is_present(&[port], false, &None));
+        assert!(host_is_present(&[], true, &None));
+    }
+
+    #[test]
+    fn test_host_is_present_false_when_no_signal_at_all() {
+        assert!(!host_is_present(&[], false, &None));
     }
 
     #[test]
