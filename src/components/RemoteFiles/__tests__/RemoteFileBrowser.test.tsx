@@ -96,7 +96,10 @@ describe("RemoteFileBrowser", () => {
   it("shows the empty-directory message when the listing is empty", async () => {
     connectSshTab();
     render(<RemoteFileBrowser />);
-    expect(await screen.findByText("This directory is empty.")).toBeInTheDocument();
+    // Default findByText timeout (1000ms) was tight enough to flake on
+    // Windows CI runners: this waits on a three-deep await chain
+    // (sftp_open -> ssh_exec -> sftp_list) before the empty state renders.
+    expect(await screen.findByText("This directory is empty.", {}, { timeout: 5000 })).toBeInTheDocument();
   });
 
   it("expands a directory to load its children on click", async () => {

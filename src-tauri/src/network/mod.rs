@@ -5107,7 +5107,11 @@ mod tests {
             }
         });
 
-        let banner = grab_banner(addr.ip(), addr.port(), Duration::from_millis(500)).await;
+        // 500ms was tight enough to occasionally lose the race against
+        // scheduling the spawned accept-and-write task on a loaded CI
+        // runner (same root cause as test_enrich_port_dispatches_banner_first
+        // below) — give it the same generous margin.
+        let banner = grab_banner(addr.ip(), addr.port(), Duration::from_millis(5000)).await;
         assert_eq!(banner.as_deref(), Some("SSH-2.0-OpenSSH_9.6"));
     }
 
@@ -5470,15 +5474,16 @@ mod tests {
             protocol: "tcp".to_string(),
             ..Default::default()
         };
-        // 500ms was tight enough to occasionally lose the race against
-        // scheduling the spawned accept-and-write task on a loaded CI
-        // runner (observed flaky specifically on GitHub's macOS runner,
-        // never locally) — this is a real loopback round trip plus task
-        // scheduling, not just a network call, so give it real margin.
+        // 500ms, then 2000ms, were both tight enough to occasionally lose
+        // the race against scheduling the spawned accept-and-write task on
+        // a loaded CI runner (observed flaky specifically on GitHub's
+        // macOS runner even at 2000ms) — this is a real loopback round
+        // trip plus task scheduling, not just a network call, so give it
+        // real margin rather than continuing to nudge it up in small steps.
         let enriched = enrich_port(
             IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
             open_port,
-            Duration::from_millis(2000),
+            Duration::from_millis(5000),
         ).await;
 
         assert!(enriched.banner.is_some(), "expected a banner to be grabbed from the canned MySQL greeting");
