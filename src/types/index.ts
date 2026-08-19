@@ -687,6 +687,8 @@ export interface ExploreTarget {
   services: ServiceFilter[];
   extra_ports: number[];
   timeout_ms?: number;
+  snmp_communities?: string[];
+  extra_vendor_hints?: string[];
 }
 
 export interface ExploreResult {
