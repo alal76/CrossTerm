@@ -1793,6 +1793,7 @@ export default function App() {
   const settingsOpen = useAppStore((s) => s.settingsOpen);
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen);
   const setTheme = useAppStore((s) => s.setTheme);
+  const setActiveProfile = useAppStore((s) => s.setActiveProfile);
   const firstLaunchComplete = useAppStore((s) => s.firstLaunchComplete);
   const setFirstLaunchComplete = useAppStore((s) => s.setFirstLaunchComplete);
   const lockAllVaults = useVaultStore((s) => s.lockAllVaults);
@@ -1831,10 +1832,30 @@ export default function App() {
   useEffect(() => {
     async function loadSettings() {
       try {
-        // Sync active profile to Rust backend
+        // Sync active profile to Rust backend. `activeProfileId` defaults to
+        // the literal string "default" (see appStore.ts) — never a real
+        // profile UUID — until FirstLaunchWizard's setActiveProfile() call
+        // replaces it. If that never ran, or the profile it pointed to was
+        // since removed, `profile_switch` fails here and every later
+        // settings/session read/write fails right along with it — silently,
+        // since callers already treat backend errors as "not ready yet".
+        // Self-heal instead of leaving the app permanently stuck reading
+        // client-only defaults: fall back to the most recently used real
+        // profile from the backend's own list.
         const profileId = useAppStore.getState().activeProfileId;
+        let switchedOk = false;
         if (profileId) {
-          await invoke("profile_switch", { id: profileId }).catch(() => {});
+          switchedOk = await invoke("profile_switch", { id: profileId }).then(() => true).catch(() => false);
+        }
+        if (!switchedOk) {
+          const profiles = await invoke<Array<{ id: string; updated_at: string }>>("profile_list").catch(() => []);
+          if (Array.isArray(profiles) && profiles.length > 0) {
+            const mostRecent = [...profiles].sort(
+              (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+            )[0];
+            switchedOk = await invoke("profile_switch", { id: mostRecent.id }).then(() => true).catch(() => false);
+            if (switchedOk) setActiveProfile(mostRecent.id);
+          }
         }
         const settings = await invoke<{ theme?: ThemeVariant }>("settings_get");
         // Only proceed when the backend actually returned settings (undefined = no backend / stub)
@@ -1851,7 +1872,7 @@ export default function App() {
       }
     }
     loadSettings();
-  }, [setTheme, setFirstLaunchComplete]);
+  }, [setTheme, setFirstLaunchComplete, setActiveProfile]);
 
   // ── Task 4: Listen for terminal:exit and ssh:disconnected to update tab status ──
   useEffect(() => {
