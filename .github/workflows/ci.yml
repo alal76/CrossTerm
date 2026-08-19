@@ -517,9 +517,21 @@ jobs:
 
       - name: Coverage gate — Rust ≥ 60%
         working-directory: src-tauri
+        # `--out Json --output-dir <dir>` writes a *file* at
+        # <dir>/tarpaulin-report.json (hardcoded name, per tarpaulin's own
+        # src/report/json.rs) — it does not print JSON to stdout at all
+        # (stdout carries the normal build/test progress text). The
+        # previous version piped stdout straight into `json.loads`, which
+        # can only ever fail to parse; both `2>/dev/null` redirects then
+        # swallowed that failure and `|| echo 0` silently substituted a
+        # fake "0%" that looked exactly like a real coverage regression
+        # instead of the script bug it actually was. Read the real file,
+        # and let a genuine tarpaulin failure fail loudly instead of
+        # being reinterpreted as "0% coverage".
         run: |
-          TOTAL=$(cargo tarpaulin --out Json --output-dir /tmp/tarp -- --test-threads=1 --skip test_ping_loopback 2>/dev/null \
-            | python3 -c "import json,sys; d=json.load(sys.stdin); print(round(d.get('coverage',0),1))" 2>/dev/null || echo 0)
+          rm -rf /tmp/tarp
+          cargo tarpaulin --out Json --output-dir /tmp/tarp -- --test-threads=1 --skip test_ping_loopback
+          TOTAL=$(python3 -c "import json; print(round(json.load(open('/tmp/tarp/tarpaulin-report.json')).get('coverage', 0), 1))")
           echo "Rust coverage: ${TOTAL}%"
           python3 -c "assert float('${TOTAL}') >= 60, f'Coverage {${TOTAL}}% below 60% gate'"
 
