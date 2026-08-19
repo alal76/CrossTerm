@@ -108,9 +108,41 @@ describe('NetworkExplorer', () => {
           cidr: '10.0.0.0/28',
           services: expect.arrayContaining(['ssh', 'rdp', 'vnc']),
           extra_ports: [],
+          snmp_communities: [],
+          extra_vendor_hints: [],
         },
       });
     });
+  });
+
+  it('does not launch a second overlapping scan when Enter is pressed again while one is already running', async () => {
+    // Regression: the Scan button's disabled={scanning} only guarded
+    // clicks — the CIDR input's Enter-key handler called handleScan()
+    // directly with no such check, so pressing Enter twice launched a
+    // second full scan on top of the first. Both then split the shared
+    // backend concurrency pool, degrading results for both (confirmed: the
+    // same subnet scanned alone found 31-32 real hosts, scanned again on
+    // top of itself found as few as 0-11).
+    let exploreStartCalls = 0;
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'network_local_subnets') return Promise.resolve([]);
+      if (cmd === 'network_explore_start') {
+        exploreStartCalls++;
+        return Promise.resolve(`scan-id-${String(exploreStartCalls)}`);
+      }
+      return Promise.resolve(undefined);
+    });
+    renderWithToast(<NetworkExplorer />);
+    const input = screen.getByPlaceholderText(/192\.168/);
+    fireEvent.change(input, { target: { value: '10.0.0.0/28' } });
+
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(exploreStartCalls).toBe(1));
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    // Give any accidental second call a chance to fire before asserting.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(exploreStartCalls).toBe(1);
   });
 
   it('shows empty state when no results', () => {
@@ -151,6 +183,55 @@ describe('NetworkExplorer', () => {
     const extraInput = screen.getByPlaceholderText(/Extra ports/);
     fireEvent.change(extraInput, { target: { value: '2222, 8080' } });
     expect(extraInput).toHaveValue('2222, 8080');
+  });
+
+  it('persists extra ports, SNMP communities, and vendor hints to settings on blur, and reloads them on mount', async () => {
+    let savedSettings: Record<string, unknown> = {};
+    mockInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === 'network_local_subnets') return Promise.resolve([]);
+      if (cmd === 'settings_get') return Promise.resolve(savedSettings);
+      if (cmd === 'settings_update') {
+        savedSettings = (args as { settings?: Record<string, unknown> } | undefined)?.settings ?? savedSettings;
+        return Promise.resolve(undefined);
+      }
+      return Promise.resolve(undefined);
+    });
+    const { unmount } = renderWithToast(<NetworkExplorer />);
+    fireEvent.click(screen.getByText('Service Filters'));
+
+    const extraPortsField = screen.getByPlaceholderText(/Extra ports/);
+    fireEvent.change(extraPortsField, { target: { value: '9000, 9001' } });
+    fireEvent.blur(extraPortsField);
+    await waitFor(() =>
+      expect(mockInvoke).toHaveBeenCalledWith('settings_update', {
+        settings: expect.objectContaining({ network_scan_extra_ports: '9000, 9001' }),
+      }),
+    );
+
+    const communitiesField = screen.getByPlaceholderText(/SNMP communities/);
+    fireEvent.change(communitiesField, { target: { value: 'private' } });
+    fireEvent.blur(communitiesField);
+    await waitFor(() =>
+      expect(mockInvoke).toHaveBeenCalledWith('settings_update', {
+        settings: expect.objectContaining({ network_scan_snmp_communities: 'private' }),
+      }),
+    );
+
+    const vendorHintsField = screen.getByPlaceholderText(/vendor keywords/);
+    fireEvent.change(vendorHintsField, { target: { value: 'HIKVISION, QNAP' } });
+    fireEvent.blur(vendorHintsField);
+    await waitFor(() =>
+      expect(mockInvoke).toHaveBeenCalledWith('settings_update', {
+        settings: expect.objectContaining({ network_scan_vendor_hints: 'HIKVISION, QNAP' }),
+      }),
+    );
+
+    unmount();
+    renderWithToast(<NetworkExplorer />);
+    fireEvent.click(screen.getByText('Service Filters'));
+    expect(await screen.findByPlaceholderText(/Extra ports/)).toHaveValue('9000, 9001');
+    expect(screen.getByPlaceholderText(/SNMP communities/)).toHaveValue('private');
+    expect(screen.getByPlaceholderText(/vendor keywords/)).toHaveValue('HIKVISION, QNAP');
   });
 
   it('shows a Stop button while scanning and calls network_explore_stop', async () => {
@@ -200,6 +281,47 @@ describe('NetworkExplorer', () => {
     expect(screen.getByText(/subject org: Linuxserver\.io/)).toBeInTheDocument();
     expect(screen.getByText(/_home-assistant\._tcp\.local\./)).toBeInTheDocument();
     expect(screen.getByText(/port 22: "OpenSSH 10\.0p2 Debian-7"/)).toBeInTheDocument();
+  });
+
+  it('does not drop a straggling host whose explore_host_found lands after progress hits 100%', async () => {
+    // Regression test: `hosts_scanned` advances at each host's fast pass,
+    // which races that same host's own `explore_host_found` emission fired
+    // right after. A host still mid-flight when the *last* (often a fast,
+    // not-found) host ticks the counter to total_hosts must not be dropped
+    // just because its scan_id would otherwise have already been retired.
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'network_local_subnets') return Promise.resolve([]);
+      if (cmd === 'network_explore_start') return Promise.resolve('scan-id-123');
+      return Promise.resolve(undefined);
+    });
+    renderWithToast(<NetworkExplorer />);
+    fireEvent.change(screen.getByPlaceholderText(/192\.168/), { target: { value: '10.0.0.0/28' } });
+    fireEvent.click(screen.getByTestId('scan-start-btn'));
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith('network_explore_start', expect.anything()));
+
+    act(() => {
+      handlers['network:explore_host_found']({
+        payload: { scan_id: 'scan-id-123', result: mockResult },
+      });
+    });
+    expect(await screen.findByText('192.168.1.11')).toBeInTheDocument();
+
+    // Progress reaches 100% — this used to retire the scan_id from the
+    // active set and silently swallow any still-in-flight found events.
+    act(() => {
+      handlers['network:explore_progress']({
+        payload: { scan_id: 'scan-id-123', hosts_scanned: 16, total_hosts: 16, hosts_found: 2 },
+      });
+    });
+
+    const strayResult: ExploreResult = { ...mockResult, ip: '192.168.1.99', hostname: undefined, mdns: [] };
+    act(() => {
+      handlers['network:explore_host_found']({
+        payload: { scan_id: 'scan-id-123', result: strayResult },
+      });
+    });
+
+    expect(await screen.findByText('192.168.1.99')).toBeInTheDocument();
   });
 
   it('merges an mDNS update event into an already-rendered row by IP', async () => {

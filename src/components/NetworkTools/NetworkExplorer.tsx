@@ -129,6 +129,11 @@ function parseExtraPorts(input: string): number[] {
   return [...new Set(ports)];
 }
 
+function parseCommaList(input: string): string[] {
+  if (!input.trim()) return [];
+  return [...new Set(input.split(',').map((c) => c.trim()).filter(Boolean))];
+}
+
 const SERVICE_PORT_COLORS: Record<string, string> = {
   ssh: 'bg-green-500/20 text-green-400',
   rdp: 'bg-blue-500/20 text-blue-400',
@@ -319,6 +324,8 @@ export default function NetworkExplorer() {
   const [results, setResults] = useState<ExploreResult[]>([]);
   const [progressMap, setProgressMap] = useState<Map<string, ExploreProgress>>(new Map());
   const [extraPortsInput, setExtraPortsInput] = useState('');
+  const [snmpCommunitiesInput, setSnmpCommunitiesInput] = useState('');
+  const [vendorHintsInput, setVendorHintsInput] = useState('');
   const [selectedServices, setSelectedServices] = useState<Set<string>>(
     () => new Set(DEFAULT_SELECTED_SERVICES)
   );
@@ -362,8 +369,32 @@ export default function NetworkExplorer() {
         if (labels && typeof labels === 'object') {
           setDeviceLabels(labels as Record<string, string>);
         }
+        const savedExtraPorts = s.network_scan_extra_ports;
+        if (typeof savedExtraPorts === 'string' && savedExtraPorts) {
+          setExtraPortsInput(savedExtraPorts);
+        }
+        const savedCommunities = s.network_scan_snmp_communities;
+        if (typeof savedCommunities === 'string' && savedCommunities) {
+          setSnmpCommunitiesInput(savedCommunities);
+        }
+        const savedVendorHints = s.network_scan_vendor_hints;
+        if (typeof savedVendorHints === 'string' && savedVendorHints) {
+          setVendorHintsInput(savedVendorHints);
+        }
       })
       .catch(() => {}); // graceful degradation in browser/stub mode
+  }, []);
+
+  const commitSetting = useCallback(async (key: string, value: string) => {
+    if ((settingsRef.current?.[key] ?? '') === value) return; // unchanged, skip the write
+    try {
+      const base = settingsRef.current ?? (await invoke<Record<string, unknown>>('settings_get'));
+      const updated = { ...base, [key]: value };
+      settingsRef.current = updated;
+      await invoke('settings_update', { settings: updated });
+    } catch {
+      // Best-effort persistence; the field still works for this session either way.
+    }
   }, []);
 
   const deviceLabelKey = useCallback((result: ExploreResult) => result.mac_address ?? result.ip, []);
@@ -417,22 +448,39 @@ export default function NetworkExplorer() {
   }, []);
 
   useEffect(() => {
+    // Not gated on activeScanIdsRef: `network:explore_progress` (below)
+    // removes a scan_id from the active set the moment `hosts_scanned`
+    // reaches `total_hosts` — but that counter advances at each host's fast
+    // port-scan/ping pass, which races the *same* host's own
+    // `explore_host_found` emission (fired right after, still within that
+    // pass). Whichever handful of hosts are still mid-flight when the very
+    // last (usually fast, not-found) host ticks the counter to 100% would
+    // have their scan_id gone from the active set by the time their own
+    // found-event lands here — silently dropping them from `results` and
+    // leaving only however many happened to finish first. Same race, same
+    // fix already applied to `explore_host_enriched`/`explore_mdns_update`
+    // below; merging by IP instead of blind-appending keeps this safe if a
+    // genuinely stale scan's straggler ever lands after a new scan started.
     const unlistenHost = listen<ExploreHostFound>(
       'network:explore_host_found',
       (event) => {
-        if (activeScanIdsRef.current.has(event.payload.scan_id)) {
-          let result = event.payload.result;
-          const pendingMdns = mdnsRecordsRef.current[result.ip];
-          if (pendingMdns && pendingMdns.length > 0) {
-            result = {
-              ...result,
-              mdns: pendingMdns,
-              hostname: result.hostname || deriveMdnsHostname(pendingMdns),
-              evidence: [...result.evidence, ...deriveMdnsEvidence(pendingMdns)],
-            };
-          }
-          setResults((prev) => [...prev, result]);
+        let result = event.payload.result;
+        const pendingMdns = mdnsRecordsRef.current[result.ip];
+        if (pendingMdns && pendingMdns.length > 0) {
+          result = {
+            ...result,
+            mdns: pendingMdns,
+            hostname: result.hostname || deriveMdnsHostname(pendingMdns),
+            evidence: [...result.evidence, ...deriveMdnsEvidence(pendingMdns)],
+          };
         }
+        setResults((prev) => {
+          const idx = prev.findIndex((r) => r.ip === result.ip);
+          if (idx === -1) return [...prev, result];
+          const next = [...prev];
+          next[idx] = result;
+          return next;
+        });
       }
     );
 
@@ -562,6 +610,17 @@ export default function NetworkExplorer() {
   }, []);
 
   const handleScan = useCallback(async () => {
+    // The Scan button's own `disabled={scanning}` only guards clicks — the
+    // CIDR input's Enter-key handler calls this directly with no such
+    // check, so pressing Enter more than once (e.g. out of impatience
+    // while a scan is running) launched a second full set of scans on top
+    // of the first. Both scans then split the shared concurrency pool
+    // (see NetworkState::scan_semaphore), degrading results for both —
+    // confirmed: the same subnet scanned alone found 31-32 real hosts,
+    // scanned again on top of itself found as few as 0-11. Guard here,
+    // once, so every trigger path (button, Enter key, any future one) is
+    // covered by the same check.
+    if (scanning) return;
     const cidrs = cidr.split(',').map((c) => c.trim()).filter(Boolean);
     if (cidrs.length === 0) return;
 
@@ -574,12 +633,14 @@ export default function NetworkExplorer() {
 
     const services: ServiceFilter[] = Array.from(selectedServices) as ServiceFilter[];
     const extra_ports = parseExtraPorts(extraPortsInput);
+    const snmp_communities = parseCommaList(snmpCommunitiesInput);
+    const extra_vendor_hints = parseCommaList(vendorHintsInput);
 
     let launched = 0;
     for (const c of cidrs) {
       try {
         const id = await invoke<string>('network_explore_start', {
-          target: { cidr: c, services, extra_ports },
+          target: { cidr: c, services, extra_ports, snmp_communities, extra_vendor_hints },
         });
         if (id) {
           activeScanIdsRef.current.add(id);
@@ -593,7 +654,7 @@ export default function NetworkExplorer() {
     if (launched === 0) {
       setScanning(false);
     }
-  }, [cidr, selectedServices, extraPortsInput]);
+  }, [scanning, cidr, selectedServices, extraPortsInput, snmpCommunitiesInput, vendorHintsInput]);
 
   const handleStop = useCallback(async () => {
     const ids = Array.from(activeScanIdsRef.current);
@@ -1013,7 +1074,30 @@ export default function NetworkExplorer() {
                     type="text"
                     value={extraPortsInput}
                     onChange={(e) => setExtraPortsInput(e.target.value)}
+                    onBlur={(e) => commitSetting('network_scan_extra_ports', e.target.value)}
                     placeholder={t('network.extraPortsPlaceholder')}
+                    className="flex-1 rounded border border-border-default bg-surface-primary px-2 py-1 text-xs text-text-primary placeholder:text-text-disabled focus:border-border-focus focus:outline-none"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Plus size={12} className="text-text-secondary shrink-0" />
+                  <input
+                    type="text"
+                    value={snmpCommunitiesInput}
+                    onChange={(e) => setSnmpCommunitiesInput(e.target.value)}
+                    onBlur={(e) => commitSetting('network_scan_snmp_communities', e.target.value)}
+                    placeholder={t('network.snmpCommunitiesPlaceholder')}
+                    className="flex-1 rounded border border-border-default bg-surface-primary px-2 py-1 text-xs text-text-primary placeholder:text-text-disabled focus:border-border-focus focus:outline-none"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Plus size={12} className="text-text-secondary shrink-0" />
+                  <input
+                    type="text"
+                    value={vendorHintsInput}
+                    onChange={(e) => setVendorHintsInput(e.target.value)}
+                    onBlur={(e) => commitSetting('network_scan_vendor_hints', e.target.value)}
+                    placeholder={t('network.vendorHintsPlaceholder')}
                     className="flex-1 rounded border border-border-default bg-surface-primary px-2 py-1 text-xs text-text-primary placeholder:text-text-disabled focus:border-border-focus focus:outline-none"
                   />
                 </div>
