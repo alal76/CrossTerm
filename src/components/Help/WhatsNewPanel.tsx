@@ -2,11 +2,16 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { X, Sparkles } from "lucide-react";
 
-const APP_VERSION = "2.0.5";
+const APP_VERSION = "2.0.6";
 const DISMISSED_VERSION_KEY = "crossterm:whats-new-dismissed";
 
 const RELEASE_NOTES = `
 ## What's New in CrossTerm ${APP_VERSION}
+
+### Bug Fixes
+- Fixed saving a session for most protocol-specific session types silently dropping every field the connection actually needs beyond host/port/username: Proxmox Console (node, VMID, resource type, realm, password), VNC and RDP passwords, RDP domain, NetConf and X11 Forwarding private keys, Docker Logs container ID, and Kubernetes Port-Forward pod name/namespace were all collected nowhere in the editor, so those sessions connected with blank required fields no matter what you'd entered elsewhere (this is what caused the Proxmox Console session reported against 192.168.0.251 to fall back to a bare VNC connection attempt instead). The editor now shows the correct fields for whichever session type is selected, and validates the ones each type actually requires before allowing Save.
+
+## CrossTerm 2.0.5
 
 ### Bug Fixes
 - Fixed the native macOS/Windows/Linux menu bar's Settings submenu items (General, Appearance, ... Advanced) all opening to the same generic first page — clicking "Advanced" now actually opens Advanced, not General.
