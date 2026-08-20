@@ -105,17 +105,24 @@ export default function RemoteFileBrowser() {
       setError(null);
       try {
         const id = await invoke<string>("sftp_open", { connectionId });
-        if (!cancelled) {
-          setSftpSessionId(id);
-          // Get home directory
-          try {
-            const home = await invoke<string>("ssh_exec", { connectionId, command: "echo $HOME" });
-            const homePath = home.trim() || "/";
-            if (!cancelled) setRemotePath(homePath);
-          } catch {
-            if (!cancelled) setRemotePath("/");
-          }
+        if (cancelled) return;
+        // Resolve the home directory before setting sftpSessionId — the
+        // "reload on session/path change" effect below fires on either
+        // changing, so setting sftpSessionId first (with remotePath still
+        // at its "/" default) used to fire that effect twice in quick
+        // succession: once for "/" and again moments later for the real
+        // home path, racing two overlapping sftp_list calls for no reason.
+        // Setting both together in one render means it only fires once.
+        let homePath = "/";
+        try {
+          const home = await invoke<string>("ssh_exec", { connectionId, command: "echo $HOME" });
+          homePath = home.trim() || "/";
+        } catch {
+          homePath = "/";
         }
+        if (cancelled) return;
+        setRemotePath(homePath);
+        setSftpSessionId(id);
       } catch (e) {
         if (!cancelled) setError(String(e));
       } finally {
