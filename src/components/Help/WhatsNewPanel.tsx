@@ -2,11 +2,19 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { X, Sparkles } from "lucide-react";
 
-const APP_VERSION = "2.0.7";
+const APP_VERSION = "2.0.8";
 const DISMISSED_VERSION_KEY = "crossterm:whats-new-dismissed";
 
 const RELEASE_NOTES = `
 ## What's New in CrossTerm ${APP_VERSION}
+
+### New Features
+- **Multiple connection options per discovered host** — if Network Explorer detects more than one connectable service on the same host (e.g. both SSH and a Proxmox API), Connect now offers a dropdown to pick which one, instead of always connecting via whichever service happened to win an internal priority order and leaving the others unreachable from that row.
+
+### Bug Fixes
+- Fixed a real race in the Remote Files browser: opening an SFTP session set the active session before its home directory had finished resolving, so the directory listing was sometimes fetched twice in a row for two different paths in quick succession. Directory listings — including the empty-directory state — are now fetched exactly once, for the correct path.
+
+## CrossTerm 2.0.7
 
 ### Bug Fixes
 - Fixed the Cloud Dashboard (sidebar → Cloud) for AWS, Azure, and GCP: most buttons called backend commands that either didn't exist or expected different parameter names, so instance lists, start/stop, storage browsing, cost summaries, and Cloud Shell all silently failed and showed "No resources found" with no visible error. All three providers' panels now call the real, matching backend commands.
