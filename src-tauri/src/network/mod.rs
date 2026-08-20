@@ -5203,19 +5203,26 @@ mod tests {
 
     #[tokio::test]
     async fn test_grab_banner_reads_first_line() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        // 500ms, then 5000ms, both still flaked occasionally on GitHub's CI
+        // runners: the real cause wasn't insufficient margin, it was using
+        // `tokio::spawn` for the server side, which competes for the same
+        // tokio worker-thread pool as the other ~600 tests running
+        // concurrently in this binary — under enough contention, getting
+        // the spawned task's accept()+write() actually *scheduled* could
+        // occasionally take longer than any reasonable client-side
+        // timeout. A real OS thread with a blocking listener is scheduled
+        // by the OS independently of tokio's executor, so it can't be
+        // starved by tokio task contention the way `tokio::spawn` can.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            if let Ok((mut stream, _)) = listener.accept().await {
-                let _ = stream.write_all(b"SSH-2.0-OpenSSH_9.6\r\nignored second line\r\n").await;
+        std::thread::spawn(move || {
+            use std::io::Write;
+            if let Ok((mut stream, _)) = listener.accept() {
+                let _ = stream.write_all(b"SSH-2.0-OpenSSH_9.6\r\nignored second line\r\n");
             }
         });
 
-        // 500ms was tight enough to occasionally lose the race against
-        // scheduling the spawned accept-and-write task on a loaded CI
-        // runner (same root cause as test_enrich_port_dispatches_banner_first
-        // below) — give it the same generous margin.
-        let banner = grab_banner(addr.ip(), addr.port(), Duration::from_millis(5000)).await;
+        let banner = grab_banner(addr.ip(), addr.port(), Duration::from_millis(2000)).await;
         assert_eq!(banner.as_deref(), Some("SSH-2.0-OpenSSH_9.6"));
     }
 
@@ -5559,16 +5566,27 @@ mod tests {
         // to bind the *real* well-known port (3306/MySQL: in BANNER_FIRST_PORTS,
         // and unlike 21/22/25/110/143 it doesn't need root to bind). Skips
         // gracefully if something else already owns the port on this machine.
-        let listener = match tokio::net::TcpListener::bind("127.0.0.1:3306").await {
+        let listener = match std::net::TcpListener::bind("127.0.0.1:3306") {
             Ok(l) => l,
             Err(e) => {
                 eprintln!("skipping: could not bind 127.0.0.1:3306 ({e})");
                 return;
             }
         };
-        tokio::spawn(async move {
-            if let Ok((mut stream, _)) = listener.accept().await {
-                let _ = stream.write_all(b"\x4a\x00\x00\x00\x0a8.0.34\x00mysql banner\r\n").await;
+        // 500ms, then 2000ms, then 5000ms were all tight enough to
+        // occasionally flake on GitHub's CI runners — but enrich_port caps
+        // its internal probe_timeout at 2000ms regardless of what's passed
+        // in (`timeout.min(Duration::from_millis(2000))`), so the 5000ms
+        // attempt never actually bought any real margin past 2000ms; the
+        // real cause was `tokio::spawn` competing for the same worker-pool
+        // as the ~600 other tests running concurrently in this binary. A
+        // real OS thread with a blocking listener is scheduled by the OS
+        // independently of tokio's executor, removing that contention
+        // entirely (same fix as test_grab_banner_reads_first_line above).
+        std::thread::spawn(move || {
+            use std::io::Write;
+            if let Ok((mut stream, _)) = listener.accept() {
+                let _ = stream.write_all(b"\x4a\x00\x00\x00\x0a8.0.34\x00mysql banner\r\n");
             }
         });
 
@@ -5578,16 +5596,10 @@ mod tests {
             protocol: "tcp".to_string(),
             ..Default::default()
         };
-        // 500ms, then 2000ms, were both tight enough to occasionally lose
-        // the race against scheduling the spawned accept-and-write task on
-        // a loaded CI runner (observed flaky specifically on GitHub's
-        // macOS runner even at 2000ms) — this is a real loopback round
-        // trip plus task scheduling, not just a network call, so give it
-        // real margin rather than continuing to nudge it up in small steps.
         let enriched = enrich_port(
             IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
             open_port,
-            Duration::from_millis(5000),
+            Duration::from_millis(2000),
         ).await;
 
         assert!(enriched.banner.is_some(), "expected a banner to be grabbed from the canned MySQL greeting");
