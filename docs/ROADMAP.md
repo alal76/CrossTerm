@@ -2,9 +2,10 @@
 ### Becoming the Premium Network & Connectivity Platform
 
 **Document owner:** Product  
-**Last updated:** 2026-08-15  
-**Current version:** 1.0.0 (all v0.3–v1.2 roadmap phases complete; protocol-breadth expansion merged to `main` 2026-08-15)  
-**Horizon:** 18 months (v0.7 → v1.2)
+**Last updated:** 2026-08-20  
+**Current shipped version:** 2.0.8 (patch-per-fix versioning as of 2.0.1 — see `versioning_policy`; unrelated to the `v0.3–v1.2` phase labels below, which track this roadmap's own milestones, not the app's package version)  
+**Horizon:** 18 months (v0.7 → v1.2)  
+**Reliability note (2026-08-20):** a spot-check of `GAP-ANALYSIS.md`'s "100% complete" claims (see that document's Audit Note) found several features this roadmap and that document both describe as done are actually dead code or stubs — biometric unlock, plugin lifecycle hooks, macro broadcast, community plugin registry install, and the Android build pipeline (never started at all). This roadmap's own "Strengths" table below has not been independently re-verified beyond correcting the biometric-unlock line; treat other claims here with the same caution until checked against real code.
 
 ---
 
@@ -12,12 +13,12 @@
 
 ### Strengths
 
-CrossTerm has an unusually deep technical foundation for a v0.2 product:
+CrossTerm has an unusually deep technical foundation:
 
 | Domain | Current capability |
 |--------|--------------------|
 | Protocols | SSH, SFTP/SCP, RDP, VNC, Telnet, Serial, FTP/FTPS, WSL, Cloud Shell, Kubernetes Exec, Docker Exec, Mosh, WinRM/PowerShell, WebSocket Terminal, TN3270, TN5250, IPMI SOL, Redfish, NETCONF/YANG, SNMP (v1/v2c/v3), SMB/CIFS, WebDAV, gRPC Explorer, MQTT, Kubernetes Port-Forward, Docker Logs, SPICE Console, Proxmox Console, Rlogin, X11 Forwarding, NFS Explorer — 32 session types total, all wired end-to-end as of the `feat/protocol-breadth` branch (§6, Protocol Breadth) |
-| Security | AES-256-GCM vault, Argon2id KDF, biometric unlock, per-profile audit log, zeroize-on-drop key memory |
+| Security | AES-256-GCM vault, Argon2id KDF, per-profile audit log, zeroize-on-drop key memory. (Biometric unlock is UI-visible but not functional — see Reliability note above.) |
 | Cloud | AWS (EC2, S3, cost), Azure (VMs, Blob, subscriptions), GCP (Compute, GCS) |
 | Automation | Send/Expect macro engine, snippet library, session recording & playback |
 | Network | TCP/ICMP scanner with 8-method parallel hostname resolution (mDNS, ARP, gateway-direct DNS, TLS cert CN, ...), service/version fingerprinting, Tailscale peer awareness, WiFi analysis (macOS CoreWLAN), Aircrack security tooling, port forward manager, WakeOnLAN — see §3 "Network Discovery" for how this stacks up against Angry IP Scanner / Advanced IP Scanner |
