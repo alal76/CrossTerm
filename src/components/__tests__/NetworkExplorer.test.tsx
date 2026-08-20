@@ -34,6 +34,7 @@ const mockResult: ExploreResult = {
   os_guess: 'Linux/Unix',
   response_time_ms: 4.5,
   suggested_session_type: 'ssh',
+  candidate_session_types: ['ssh'],
   ttl: 64,
   open_ports: [
     {
@@ -520,6 +521,7 @@ describe('NetworkExplorer', () => {
       os_guess: 'Linux/macOS/BSD-like (TTL 64)',
       response_time_ms: 12,
       suggested_session_type: 'ssh',
+      candidate_session_types: ['ssh'],
       ttl: 64,
       open_ports: [{ port: 22, service_name: 'ssh', protocol: 'tcp' }],
       mdns: [],
@@ -598,6 +600,7 @@ describe('NetworkExplorer', () => {
       os_guess: 'Linux/macOS/BSD-like (TTL 64)',
       response_time_ms: 12,
       suggested_session_type: 'ssh',
+      candidate_session_types: ['ssh'],
       ttl: 64,
       open_ports: [{ port: 22, service_name: 'ssh', protocol: 'tcp' }],
       mdns: [],
@@ -818,6 +821,7 @@ describe('NetworkExplorer', () => {
       os_guess: 'Linux/macOS/BSD-like (TTL 64)',
       response_time_ms: 5,
       suggested_session_type: svcType,
+      candidate_session_types: [svcType],
       ttl: 64,
       open_ports: [{ port, service_name: svcType, protocol: svcType === 'snmp' || svcType === 'ipmi' ? 'udp' : 'tcp' }],
       mdns: [],
@@ -835,6 +839,58 @@ describe('NetworkExplorer', () => {
       expect(sessions).toHaveLength(1);
       expect(sessions[0].type).toBe(expectedType);
       expect(sessions[0].connection.port).toBe(port);
+    });
+  });
+
+  it('offers a dropdown of every connectable service when a host has more than one, and connects using the chosen one', async () => {
+    useSessionStore.setState({ sessions: [], openTabs: [], activeTabId: null });
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'network_local_subnets') return Promise.resolve([]);
+      if (cmd === 'network_explore_start') return Promise.resolve('scan-id-123');
+      return Promise.resolve(undefined);
+    });
+    renderWithToast(<NetworkExplorer />);
+    fireEvent.change(screen.getByPlaceholderText(/192\.168/), { target: { value: '10.0.0.0/28' } });
+    fireEvent.click(screen.getByTestId('scan-start-btn'));
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith('network_explore_start', expect.anything()));
+
+    // A host with both SSH and a Proxmox API open — previously the Connect
+    // button could only ever offer SSH (the higher-priority guess), with no
+    // way to reach the Proxmox console from this row at all.
+    const result: ExploreResult = {
+      ip: '192.168.1.60',
+      hostname: undefined,
+      mac_address: undefined,
+      mac_vendor: undefined,
+      os_guess: 'Linux/macOS/BSD-like (TTL 64)',
+      response_time_ms: 5,
+      suggested_session_type: 'ssh',
+      candidate_session_types: ['ssh', 'proxmox'],
+      ttl: 64,
+      open_ports: [
+        { port: 22, service_name: 'ssh', protocol: 'tcp' },
+        { port: 8006, service_name: 'proxmox', protocol: 'tcp' },
+      ],
+      mdns: [],
+      evidence: [],
+    };
+    act(() => {
+      handlers['network:explore_host_found']({ payload: { scan_id: 'scan-id-123', result } });
+    });
+    await screen.findByText('192.168.1.60');
+
+    // Single-candidate rows render a plain button with no dropdown — this
+    // row's Connect is the dropdown-toggle button instead.
+    fireEvent.click(screen.getByText('Connect'));
+    expect(await screen.findByText('PROXMOX')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('PROXMOX'));
+
+    await waitFor(() => {
+      const sessions = useSessionStore.getState().sessions;
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].type).toBe(SessionType.ProxmoxConsole);
+      expect(sessions[0].connection.port).toBe(8006);
     });
   });
 });

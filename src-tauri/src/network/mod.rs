@@ -304,6 +304,12 @@ pub struct ExploreResult {
     pub response_time_ms: f64,
     /// Quick-connect session type derived from the highest-priority open port.
     pub suggested_session_type: Option<String>,
+    /// Every connectable session type detected, in priority order — lets
+    /// the UI offer a choice for hosts running more than one connectable
+    /// service (e.g. both SSH and a Proxmox API). Always contains
+    /// `suggested_session_type` as its first element when that's `Some`.
+    #[serde(default)]
+    pub candidate_session_types: Vec<String>,
     /// ICMP TTL from the ping reply, used as a fallback OS-family signal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ttl: Option<u8>,
@@ -554,6 +560,42 @@ fn refine_suggested_type(current: Option<String>, open_ports: &[OpenPort]) -> Op
         return Some("webdav".to_string());
     }
     current
+}
+
+/// All connectable session types detected from open ports, in priority
+/// order — unlike `suggest_session_type` (which collapses to a single
+/// best guess, kept as-is for the early ports-only phase and for backward
+/// compatibility), this lets the UI offer every viable option for a host
+/// running multiple connectable services at once (e.g. both SSH and a
+/// Proxmox API), instead of only ever surfacing whichever one happens to
+/// win the priority order.
+fn suggest_session_types(open_ports: &[OpenPort]) -> Vec<String> {
+    let ports: Vec<u16> = open_ports.iter().map(|p| p.port).collect();
+    SUGGEST_TYPE_PRIORITY_PORTS
+        .iter()
+        .filter(|&&p| ports.contains(&p))
+        .map(|&p| guess_service(p))
+        .collect()
+}
+
+/// Same idea as `refine_suggested_type` but appends rather than replaces —
+/// Redfish/WebDAV can't be told apart from a generic web server by port
+/// number alone, so they're added to the candidate list only once
+/// enrichment has confirmed their HTTP-level signature.
+fn refine_suggested_types(mut candidates: Vec<String>, open_ports: &[OpenPort]) -> Vec<String> {
+    let redfish = open_ports
+        .iter()
+        .any(|p| REDFISH_PROBE_PORTS.contains(&p.port) && p.version.as_deref().is_some_and(|v| v.starts_with("Redfish")));
+    if redfish && !candidates.iter().any(|c| c == "redfish") {
+        candidates.push("redfish".to_string());
+    }
+    let webdav = open_ports
+        .iter()
+        .any(|p| WEBDAV_PROBE_PORTS.contains(&p.port) && p.version.as_deref() == Some("WebDAV"));
+    if webdav && !candidates.iter().any(|c| c == "webdav") {
+        candidates.push("webdav".to_string());
+    }
+    candidates
 }
 
 /// Common ports to scan by default.
@@ -2341,6 +2383,7 @@ pub async fn network_explore_start(
                     }
                 }
                 let suggested_session_type = suggest_session_type(&open_ports);
+                let candidate_session_types = suggest_session_types(&open_ports);
                 let early_result = ExploreResult {
                     ip: ip.to_string(),
                     hostname: None,
@@ -2350,6 +2393,7 @@ pub async fn network_explore_start(
                     os_guess: early_os_guess,
                     response_time_ms: start.elapsed().as_secs_f64() * 1000.0,
                     suggested_session_type: suggested_session_type.clone(),
+                    candidate_session_types,
                     ttl,
                     mdns: Vec::new(),
                     evidence: early_evidence,
@@ -2384,6 +2428,7 @@ pub async fn network_explore_start(
                 // now that that's available, rather than never suggesting
                 // them at all.
                 let suggested_session_type = refine_suggested_type(suggested_session_type, &open_ports);
+                let candidate_session_types = refine_suggested_types(suggest_session_types(&open_ports), &open_ports);
                 let result = ExploreResult {
                     ip: ip.to_string(),
                     hostname,
@@ -2393,6 +2438,7 @@ pub async fn network_explore_start(
                     os_guess,
                     response_time_ms: response_time,
                     suggested_session_type,
+                    candidate_session_types,
                     ttl,
                     mdns: Vec::new(),
                     evidence,
@@ -2503,6 +2549,7 @@ pub async fn run_explore_and_dump(
             let mac_vendor = if let Some(ref mac) = mac_address { lookup_mac_vendor(mac).await } else { None };
             let (os_guess, evidence) = guess_os(&open_ports, ttl, &[]);
             let suggested_session_type = suggest_session_type(&open_ports);
+            let candidate_session_types = suggest_session_types(&open_ports);
             Some(ExploreResult {
                 ip: ip.to_string(),
                 hostname,
@@ -2512,6 +2559,7 @@ pub async fn run_explore_and_dump(
                 os_guess,
                 response_time_ms: 0.0,
                 suggested_session_type,
+                candidate_session_types,
                 ttl,
                 mdns: Vec::new(),
                 evidence,
@@ -4746,6 +4794,62 @@ mod tests {
 
         // Empty
         assert_eq!(suggest_session_type(&[]), None);
+    }
+
+    #[test]
+    fn test_suggest_session_types_returns_every_candidate_in_priority_order() {
+        // A host with both SSH and a Proxmox API open — the exact scenario
+        // that motivated adding this alongside the single-best-guess
+        // suggest_session_type, which would only ever surface "ssh".
+        let ports = vec![
+            OpenPort { port: 8006, service_name: "proxmox".to_string(), protocol: "tcp".to_string(), ..Default::default() },
+            OpenPort { port: 22, service_name: "ssh".to_string(), protocol: "tcp".to_string(), ..Default::default() },
+        ];
+        assert_eq!(suggest_session_types(&ports), vec!["ssh".to_string(), "proxmox".to_string()]);
+    }
+
+    #[test]
+    fn test_suggest_session_types_single_candidate_matches_suggest_session_type() {
+        let ports = vec![
+            OpenPort { port: 3389, service_name: "rdp".to_string(), protocol: "tcp".to_string(), ..Default::default() },
+        ];
+        assert_eq!(suggest_session_types(&ports), vec!["rdp".to_string()]);
+        assert_eq!(suggest_session_type(&ports), Some("rdp".to_string()));
+    }
+
+    #[test]
+    fn test_suggest_session_types_empty_when_no_connectable_service() {
+        let ports = vec![
+            OpenPort { port: 80, service_name: "http".to_string(), protocol: "tcp".to_string(), ..Default::default() },
+        ];
+        assert!(suggest_session_types(&ports).is_empty());
+        assert!(suggest_session_types(&[]).is_empty());
+    }
+
+    #[test]
+    fn test_refine_suggested_types_appends_redfish_without_removing_existing_candidates() {
+        let open_ports = vec![
+            OpenPort { port: 22, service_name: "ssh".to_string(), protocol: "tcp".to_string(), ..Default::default() },
+            OpenPort {
+                port: 443, service_name: "https".to_string(), protocol: "tcp".to_string(),
+                version: Some("Redfish 1.6.0".to_string()), ..Default::default()
+            },
+        ];
+        let candidates = refine_suggested_types(suggest_session_types(&open_ports), &open_ports);
+        assert_eq!(candidates, vec!["ssh".to_string(), "redfish".to_string()]);
+    }
+
+    #[test]
+    fn test_refine_suggested_types_does_not_duplicate_an_already_present_candidate() {
+        // webdav's port (80) is also in SUGGEST_TYPE_PRIORITY_PORTS's
+        // territory only via refine, not the priority list itself, so this
+        // guards against ever double-adding it if that changes.
+        let open_ports = vec![OpenPort {
+            port: 80, service_name: "http".to_string(), protocol: "tcp".to_string(),
+            version: Some("WebDAV".to_string()), ..Default::default()
+        }];
+        let candidates = refine_suggested_types(suggest_session_types(&open_ports), &open_ports);
+        assert_eq!(candidates, vec!["webdav".to_string()]);
     }
 
     #[test]

@@ -702,6 +702,8 @@ export interface ExploreResult {
   os_guess?: string;
   response_time_ms: number;
   suggested_session_type?: string;
+  /** Every connectable session type detected, in priority order — lets the UI offer a choice for hosts running more than one connectable service. */
+  candidate_session_types: string[];
   /** ICMP TTL from the ping reply, used as a fallback OS-family signal. */
   ttl?: number;
   /** mDNS/Bonjour service records observed for this IP. */

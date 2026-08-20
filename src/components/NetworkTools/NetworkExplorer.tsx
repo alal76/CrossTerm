@@ -314,6 +314,75 @@ function classifyDeviceType(result: ExploreResult): DeviceType {
   return 'unknown';
 }
 
+// Anchored dropdown offering every connectable service detected on a host
+// (e.g. both SSH and a Proxmox API) instead of only ever connecting via
+// whichever one wins SUGGEST_TYPE_PRIORITY_PORTS's priority order — same
+// toggle-button-plus-anchored-panel idiom as HelpMenu.tsx.
+function ConnectMenu({
+  result,
+  candidates,
+  onConnect,
+}: {
+  readonly result: ExploreResult;
+  readonly candidates: string[];
+  readonly onConnect: (result: ExploreResult, svcType: string) => void;
+}) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (
+        menuRef.current && !menuRef.current.contains(e.target as Node) &&
+        btnRef.current && !btnRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [open]);
+
+  return (
+    <div className="relative inline-block text-left">
+      <button
+        ref={btnRef}
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-accent-primary hover:bg-surface-elevated transition-colors"
+      >
+        <PlugZap size={12} />
+        {t('network.connect')}
+        <ChevronDown size={10} />
+      </button>
+      {open && (
+        <div
+          ref={menuRef}
+          className="absolute right-0 top-full z-[8000] mt-1 min-w-[160px] rounded-lg border border-border-default bg-surface-elevated py-1 shadow-[var(--shadow-3)]"
+        >
+          {candidates.map((svcType) => {
+            const port =
+              result.open_ports.find((p) => p.service_name === svcType)?.port ??
+              SERVICE_DEFAULT_PORTS[svcType];
+            return (
+              <button
+                key={svcType}
+                onClick={() => { setOpen(false); onConnect(result, svcType); }}
+                className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-xs text-text-secondary transition-colors hover:bg-surface-secondary hover:text-text-primary"
+              >
+                <span>{SESSION_ICON[svcType] ?? ''} {svcType.toUpperCase()}</span>
+                {port !== undefined && <span className="text-text-disabled">{port}</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function NetworkExplorer() {
   const { t } = useTranslation();
   const { addSession, openTab } = useSessionStore();
@@ -694,6 +763,7 @@ export default function NetworkExplorer() {
               open_ports: [],
               os_guess: peer.os,
               response_time_ms: 0,
+              candidate_session_types: [],
               mdns: [],
               evidence: [note],
             });
@@ -725,12 +795,7 @@ export default function NetworkExplorer() {
     }
   }, [results, toast]);
 
-  const handleConnect = useCallback(async (result: ExploreResult) => {
-    const svcType = result.suggested_session_type;
-    if (!svcType) {
-      toast('warning', `No connectable service detected for ${result.hostname ?? result.ip}`);
-      return;
-    }
+  const handleConnect = useCallback(async (result: ExploreResult, svcType: string) => {
     const sessionType = SESSION_TYPE_MAP[svcType];
     if (!sessionType) {
       toast('info', `${svcType.toUpperCase()} is not directly connectable from CrossTerm`);
@@ -1330,15 +1395,22 @@ export default function NetworkExplorer() {
                             : '—'}
                         </td>
                         <td className="px-3 py-2 text-right">
-                          {result.suggested_session_type && SESSION_TYPE_MAP[result.suggested_session_type] && (
-                            <button
-                              onClick={() => handleConnect(result)}
-                              className="flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-accent-primary hover:bg-surface-elevated transition-colors"
-                            >
-                              <PlugZap size={12} />
-                              {t('network.connect')}
-                            </button>
-                          )}
+                          {(() => {
+                            const candidates = result.candidate_session_types.filter((c) => SESSION_TYPE_MAP[c]);
+                            if (candidates.length === 0) return null;
+                            if (candidates.length === 1) {
+                              return (
+                                <button
+                                  onClick={() => handleConnect(result, candidates[0])}
+                                  className="flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-accent-primary hover:bg-surface-elevated transition-colors"
+                                >
+                                  <PlugZap size={12} />
+                                  {t('network.connect')}
+                                </button>
+                              );
+                            }
+                            return <ConnectMenu result={result} candidates={candidates} onConnect={handleConnect} />;
+                          })()}
                         </td>
                       </tr>
                       {isExpanded && (
