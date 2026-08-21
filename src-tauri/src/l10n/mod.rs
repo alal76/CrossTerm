@@ -201,12 +201,23 @@ fn merge_translations(
 /// `"en_US.UTF-8"` -> `"en"`, `"fr_FR"` -> `"fr"`. Falls back to `"en"` for
 /// an empty input (mirrors the caller's env-var-missing fallback).
 fn extract_language_code(locale_env: &str) -> String {
-    locale_env
+    // Strip the encoding suffix (e.g. ".UTF-8") *before* splitting on '_' —
+    // POSIX locales without a region component (like Ubuntu/Debian's
+    // default "C.UTF-8") have no underscore at all, so splitting on '_'
+    // first left the ".UTF-8" suffix in place for those.
+    let without_encoding = locale_env.split('.').next().unwrap_or(locale_env);
+    let lang = without_encoding
         .split('_')
         .next()
         .filter(|s| !s.is_empty())
-        .unwrap_or("en")
-        .to_string()
+        .unwrap_or("en");
+    // "C" and "POSIX" are the locale-less defaults, not real language
+    // codes — fall back to "en" the same way a missing LANG/LC_ALL does.
+    if lang.eq_ignore_ascii_case("C") || lang.eq_ignore_ascii_case("POSIX") {
+        "en".to_string()
+    } else {
+        lang.to_string()
+    }
 }
 
 // ── Tauri Commands ──────────────────────────────────────────────────────
@@ -525,6 +536,18 @@ mod tests {
         assert_eq!(extract_language_code("fr_FR"), "fr");
         assert_eq!(extract_language_code("de"), "de");
         assert_eq!(extract_language_code(""), "en");
+    }
+
+    #[test]
+    fn test_extract_language_code_strips_encoding_suffix_with_no_region() {
+        // "C.UTF-8" is Ubuntu/Debian's default LANG with no region
+        // component at all (no '_') — splitting on '_' first used to leave
+        // the ".UTF-8" suffix in place, returning "C.UTF-8" wholesale
+        // instead of a real language code. This is exactly what GitHub's
+        // Ubuntu CI runners report, which made this a live CI failure.
+        assert_eq!(extract_language_code("C.UTF-8"), "en");
+        assert_eq!(extract_language_code("POSIX"), "en");
+        assert_eq!(extract_language_code("ja.UTF-8"), "ja");
     }
 
     // ── l10n_detect_system_locale ────────────────────────────────────
