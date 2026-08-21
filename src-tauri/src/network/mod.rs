@@ -5331,6 +5331,183 @@ mod tests {
         assert_eq!(result, None);
     }
 
+    // Note: grab_banner itself (the connect_bound + grab_banner_from_stream
+    // wrapper) is deliberately *not* exercised here against a real TCP
+    // loopback listener. See grab_banner_from_stream's doc comment above —
+    // three separate rounds of trying to make exactly that real-socket
+    // round trip reliable under GitHub CI's scheduling variance (wider
+    // client timeout; tokio::spawn -> real OS thread for the server side)
+    // all still flaked, so it was replaced with the duplex-pipe test
+    // (test_grab_banner_reads_first_line, above) that exercises the same
+    // parsing logic without depending on real scheduling timing. Reviving a
+    // real-TCP version here would just reintroduce the same known flake.
+
+    #[tokio::test]
+    async fn test_probe_http_extracts_server_header_and_title() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let mut buf = [0u8; 512];
+                let _ = stream.read(&mut buf).await;
+                let body = "<html><head><title>Router Admin</title></head><body>hi</body></html>";
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nServer: lighttpd/1.4.55\r\nContent-Length: {}\r\n\r\n{}",
+                    body.len(), body
+                );
+                let _ = stream.write_all(response.as_bytes()).await;
+            }
+        });
+
+        let (server, title) = probe_http(addr.ip(), addr.port(), false, Duration::from_millis(500))
+            .await
+            .expect("expected a probe_http result from a well-formed HTTP response");
+        assert_eq!(server.as_deref(), Some("lighttpd/1.4.55"));
+        assert_eq!(title.as_deref(), Some("Router Admin"));
+    }
+
+    #[tokio::test]
+    async fn test_probe_http_none_for_non_http_response() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let mut buf = [0u8; 512];
+                let _ = stream.read(&mut buf).await;
+                let _ = stream.write_all(b"not an http response\r\n").await;
+            }
+        });
+
+        let result = probe_http(addr.ip(), addr.port(), false, Duration::from_millis(500)).await;
+        assert_eq!(result, None);
+    }
+
+    #[tokio::test]
+    async fn test_probe_udp_returns_the_reply_datagram() {
+        let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let addr = socket.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut buf = [0u8; 512];
+            if let Ok((n, from)) = socket.recv_from(&mut buf).await {
+                assert_eq!(&buf[..n], b"ping");
+                let _ = socket.send_to(b"pong", from).await;
+            }
+        });
+
+        let result = probe_udp(addr.ip(), addr.port(), b"ping", Duration::from_millis(500)).await;
+        assert_eq!(result.as_deref(), Some(&b"pong"[..]));
+    }
+
+    #[tokio::test]
+    async fn test_probe_udp_none_when_nothing_replies() {
+        // Bind a real socket but never read/reply from it — probe_udp must
+        // time out rather than hang.
+        let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let addr = socket.local_addr().unwrap();
+
+        let result = probe_udp(addr.ip(), addr.port(), b"ping", Duration::from_millis(200)).await;
+        assert_eq!(result, None);
+    }
+
+    #[tokio::test]
+    async fn test_probe_snmp_parses_sys_descr_from_a_real_udp_round_trip() {
+        let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let addr = socket.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut buf = [0u8; 512];
+            if let Ok((_n, from)) = socket.recv_from(&mut buf).await {
+                // Canned SNMPv1 GetResponse carrying sysDescr.0 as an OCTET
+                // STRING (tag 0x04) — matches the shape parse_snmp_response
+                // scans for, wrapped in an outer BER SEQUENCE (tag 0x30) so
+                // the leading-byte check also passes.
+                let sys_descr = b"Linux test-host 6.1.0";
+                let mut octet_string = vec![0x04u8, sys_descr.len() as u8];
+                octet_string.extend_from_slice(sys_descr);
+                let mut reply = vec![0x30u8, (octet_string.len() + 2) as u8, 0x02, 0x00];
+                reply.extend_from_slice(&octet_string);
+                let _ = socket.send_to(&reply, from).await;
+            }
+        });
+
+        let result = probe_snmp(addr.ip(), addr.port(), Duration::from_millis(500), "public").await;
+        assert_eq!(result.as_deref(), Some("Linux test-host 6.1.0"));
+    }
+
+    #[tokio::test]
+    async fn test_probe_snmp_any_finds_the_one_community_that_replies() {
+        let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let addr = socket.local_addr().unwrap();
+        tokio::spawn(async move {
+            // Only reply to a request encoding the "secret" community
+            // string — proves probe_snmp_any surfaces whichever of several
+            // tried communities the agent actually accepts, not just the
+            // first one tried.
+            loop {
+                let mut buf = [0u8; 512];
+                match socket.recv_from(&mut buf).await {
+                    Ok((n, from)) if buf[..n].windows(6).any(|w| w == b"secret") => {
+                        let _ = socket.send_to(&[0x30, 0x02, 0x02, 0x00], from).await;
+                        break;
+                    }
+                    Ok(_) => continue,
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let communities = vec!["public".to_string(), "private".to_string(), "secret".to_string()];
+        let result = probe_snmp_any(addr.ip(), addr.port(), Duration::from_millis(500), &communities).await;
+        assert_eq!(result.as_deref(), Some("SNMP agent"));
+    }
+
+    #[tokio::test]
+    async fn test_probe_snmp_any_none_when_no_community_gets_a_reply() {
+        // Bind to grab a real, momentarily-valid ephemeral port, then drop
+        // the socket immediately so nothing is listening on it by the time
+        // probe_snmp_any sends to it — it must time out (or see an
+        // immediate send/recv error) and surface None rather than hang.
+        let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let addr = socket.local_addr().unwrap();
+        drop(socket);
+
+        let communities = vec!["public".to_string()];
+        let result = probe_snmp_any(addr.ip(), addr.port(), Duration::from_millis(200), &communities).await;
+        assert_eq!(result, None);
+    }
+
+    #[tokio::test]
+    async fn test_probe_ipmi_accepts_a_real_rmcp_presence_pong() {
+        let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let addr = socket.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut buf = [0u8; 512];
+            if let Ok((_n, from)) = socket.recv_from(&mut buf).await {
+                // Real RMCP Presence Pong shape: same header as the ping,
+                // ASF message type 0x40 (Pong) at offset 8.
+                let pong = [0x06, 0x00, 0xFF, 0x06, 0x00, 0x00, 0x11, 0xBE, 0x40, 0x00, 0x00, 0x00];
+                let _ = socket.send_to(&pong, from).await;
+            }
+        });
+
+        let result = probe_ipmi(addr.ip(), addr.port(), Duration::from_millis(500)).await;
+        assert_eq!(result, Some(()));
+    }
+
+    #[tokio::test]
+    async fn test_probe_ipmi_none_for_a_reply_that_is_not_a_presence_pong() {
+        let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let addr = socket.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut buf = [0u8; 512];
+            if let Ok((_n, from)) = socket.recv_from(&mut buf).await {
+                let _ = socket.send_to(b"not an rmcp pong", from).await;
+            }
+        });
+
+        let result = probe_ipmi(addr.ip(), addr.port(), Duration::from_millis(500)).await;
+        assert_eq!(result, None);
+    }
+
     #[test]
     fn test_parse_tailscale_status_extracts_self_and_peers() {
         // Trimmed real `tailscale status --json` shape captured on this
