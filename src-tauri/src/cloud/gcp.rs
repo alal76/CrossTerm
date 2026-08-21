@@ -320,25 +320,34 @@ pub async fn cloud_gcp_activate_config(name: String) -> Result<(), CloudError> {
     Ok(())
 }
 
-#[tauri::command]
-pub async fn cloud_gcp_list_instances(
-    project: String,
-    zone: Option<String>,
-) -> Result<Vec<GcpInstance>, CloudError> {
+/// Build the `gcloud compute instances list` argument list, optionally
+/// scoping to a zone. Split out from the command so the optional-arg
+/// branch is unit-testable without invoking `gcloud`.
+fn gcp_list_instances_args(project: &str, zone: &Option<String>) -> Vec<String> {
     let mut args = vec![
         "compute".to_string(),
         "instances".to_string(),
         "list".to_string(),
         "--project".to_string(),
-        project,
+        project.to_string(),
         "--format".to_string(),
         "json".to_string(),
     ];
 
     if let Some(z) = zone {
         args.push("--zones".to_string());
-        args.push(z);
+        args.push(z.clone());
     }
+
+    args
+}
+
+#[tauri::command]
+pub async fn cloud_gcp_list_instances(
+    project: String,
+    zone: Option<String>,
+) -> Result<Vec<GcpInstance>, CloudError> {
+    let args = gcp_list_instances_args(&project, &zone);
 
     let output = tokio::process::Command::new("gcloud")
         .args(&args)
@@ -471,16 +480,23 @@ pub async fn cloud_gcp_list_buckets(project: String) -> Result<Vec<GcsBucket>, C
     parse_buckets(&output.stdout)
 }
 
+/// Build the `gs://` path for `gcloud storage objects list`, appending the
+/// prefix segment only when non-empty. Split out so this branch is
+/// unit-testable without invoking `gcloud`.
+fn gcs_object_path(bucket: &str, prefix: &str) -> String {
+    if prefix.is_empty() {
+        format!("gs://{}", bucket)
+    } else {
+        format!("gs://{}/{}", bucket, prefix)
+    }
+}
+
 #[tauri::command]
 pub async fn cloud_gcp_list_objects(
     bucket: String,
     prefix: String,
 ) -> Result<Vec<GcsObject>, CloudError> {
-    let path = if prefix.is_empty() {
-        format!("gs://{}", bucket)
-    } else {
-        format!("gs://{}/{}", bucket, prefix)
-    };
+    let path = gcs_object_path(&bucket, &prefix);
 
     let output = tokio::process::Command::new("gcloud")
         .args([
@@ -566,25 +582,34 @@ pub async fn cloud_gcp_log_tail(
 
 // ── P2-CLOUD-24: GKE kubectl integration ────────────────────────────────
 
+/// Build the `gcloud container clusters get-credentials` argument list,
+/// optionally scoping to a project. Split out so the optional-arg branch
+/// is unit-testable without invoking `gcloud`.
+fn gke_get_credentials_args(cluster: &str, zone: &str, project: &Option<String>) -> Vec<String> {
+    let mut args = vec![
+        "container".to_string(),
+        "clusters".to_string(),
+        "get-credentials".to_string(),
+        cluster.to_string(),
+        "--zone".to_string(),
+        zone.to_string(),
+    ];
+
+    if let Some(p) = project {
+        args.push("--project".to_string());
+        args.push(p.clone());
+    }
+
+    args
+}
+
 #[tauri::command]
 pub async fn cloud_gcp_gke_get_credentials(
     cluster: String,
     zone: String,
     project: Option<String>,
 ) -> Result<String, CloudError> {
-    let mut args = vec![
-        "container".to_string(),
-        "clusters".to_string(),
-        "get-credentials".to_string(),
-        cluster.clone(),
-        "--zone".to_string(),
-        zone,
-    ];
-
-    if let Some(p) = &project {
-        args.push("--project".to_string());
-        args.push(p.clone());
-    }
+    let args = gke_get_credentials_args(&cluster, &zone, &project);
 
     let output = tokio::process::Command::new("gcloud")
         .args(&args)
@@ -868,5 +893,70 @@ mod tests {
     fn test_gcp_parse_objects_empty() {
         let objects = parse_objects(b"[]").unwrap();
         assert!(objects.is_empty());
+    }
+
+    #[test]
+    fn test_gcp_list_instances_args_without_zone() {
+        let args = gcp_list_instances_args("my-project", &None);
+        assert_eq!(
+            args,
+            vec!["compute", "instances", "list", "--project", "my-project", "--format", "json"]
+        );
+    }
+
+    #[test]
+    fn test_gcp_list_instances_args_with_zone() {
+        let args = gcp_list_instances_args("my-project", &Some("us-central1-a".to_string()));
+        assert_eq!(
+            args,
+            vec![
+                "compute",
+                "instances",
+                "list",
+                "--project",
+                "my-project",
+                "--format",
+                "json",
+                "--zones",
+                "us-central1-a"
+            ]
+        );
+    }
+
+    #[test]
+    fn test_gcs_object_path_empty_prefix_omits_trailing_slash() {
+        assert_eq!(gcs_object_path("my-bucket", ""), "gs://my-bucket");
+    }
+
+    #[test]
+    fn test_gcs_object_path_with_prefix_appends_segment() {
+        assert_eq!(gcs_object_path("my-bucket", "logs/2024"), "gs://my-bucket/logs/2024");
+    }
+
+    #[test]
+    fn test_gke_get_credentials_args_without_project() {
+        let args = gke_get_credentials_args("my-cluster", "us-central1-a", &None);
+        assert_eq!(
+            args,
+            vec!["container", "clusters", "get-credentials", "my-cluster", "--zone", "us-central1-a"]
+        );
+    }
+
+    #[test]
+    fn test_gke_get_credentials_args_with_project() {
+        let args = gke_get_credentials_args("my-cluster", "us-central1-a", &Some("proj-1".to_string()));
+        assert_eq!(
+            args,
+            vec![
+                "container",
+                "clusters",
+                "get-credentials",
+                "my-cluster",
+                "--zone",
+                "us-central1-a",
+                "--project",
+                "proj-1"
+            ]
+        );
     }
 }

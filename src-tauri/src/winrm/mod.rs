@@ -772,6 +772,28 @@ mod tests {
         assert_eq!(d.exit_code, 1);
     }
 
+    // ── winrm_post auth dispatch ──────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_winrm_post_kerberos_auth_returns_unsupported_error() {
+        // The Kerberos branch returns immediately without touching the
+        // network, so this is exercisable without a live WinRM server —
+        // unlike the Basic/Ntlm branches which need a real endpoint.
+        let config = WinRmConfig {
+            host: "10.0.0.1".into(),
+            port: 5985,
+            username: "u".into(),
+            password: "p".into(),
+            use_tls: false,
+            auth: WinRmAuth::Kerberos,
+            verify_tls: true,
+        };
+        let client = build_client(&config).unwrap();
+        let url = endpoint_url(&config);
+        let result = winrm_post(&client, &url, &config, "<body/>").await;
+        assert!(matches!(result, Err(WinRmError::KerberosUnsupported)));
+    }
+
     #[test]
     fn test_winrm_session_serde_roundtrip() {
         let session = WinRmSession {

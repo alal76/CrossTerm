@@ -247,8 +247,9 @@ pub async fn cloud_azure_set_subscription(id: String) -> Result<(), CloudError> 
     Ok(())
 }
 
-#[tauri::command]
-pub async fn cloud_azure_login(method: AzureLoginMethod) -> Result<(), CloudError> {
+/// Build the `az login` argument list for a given login method. Split out
+/// so the method -> flag mapping is unit-testable without invoking `az`.
+fn azure_login_args(method: &AzureLoginMethod) -> Vec<String> {
     let mut args = vec!["login".to_string()];
 
     match method {
@@ -262,6 +263,13 @@ pub async fn cloud_azure_login(method: AzureLoginMethod) -> Result<(), CloudErro
             // Default behavior
         }
     }
+
+    args
+}
+
+#[tauri::command]
+pub async fn cloud_azure_login(method: AzureLoginMethod) -> Result<(), CloudError> {
+    let args = azure_login_args(&method);
 
     let output = tokio::process::Command::new("az")
         .args(&args)
@@ -278,16 +286,15 @@ pub async fn cloud_azure_login(method: AzureLoginMethod) -> Result<(), CloudErro
     Ok(())
 }
 
-#[tauri::command]
-pub async fn cloud_azure_list_vms(
-    subscription: String,
-    resource_group: Option<String>,
-) -> Result<Vec<AzureVm>, CloudError> {
+/// Build the `az vm list` argument list, optionally scoping to a resource
+/// group. Split out from the command so the optional-arg branch is
+/// unit-testable without invoking `az`.
+fn azure_list_vms_args(subscription: &str, resource_group: &Option<String>) -> Vec<String> {
     let mut args = vec![
         "vm".to_string(),
         "list".to_string(),
         "--subscription".to_string(),
-        subscription,
+        subscription.to_string(),
         "--show-details".to_string(),
         "--output".to_string(),
         "json".to_string(),
@@ -295,8 +302,18 @@ pub async fn cloud_azure_list_vms(
 
     if let Some(rg) = resource_group {
         args.push("--resource-group".to_string());
-        args.push(rg);
+        args.push(rg.clone());
     }
+
+    args
+}
+
+#[tauri::command]
+pub async fn cloud_azure_list_vms(
+    subscription: String,
+    resource_group: Option<String>,
+) -> Result<Vec<AzureVm>, CloudError> {
+    let args = azure_list_vms_args(&subscription, &resource_group);
 
     let output = tokio::process::Command::new("az")
         .args(&args)
@@ -699,6 +716,72 @@ mod tests {
         assert_eq!(vms[1].status, "VM deallocated");
         assert_eq!(vms[1].public_ip, None); // empty string filtered
         assert_eq!(vms[1].size, "Standard_D4s_v3");
+    }
+
+    #[test]
+    fn test_azure_parse_vms_missing_fields_default() {
+        // A VM entry missing location/powerState/hardwareProfile/id entirely
+        // should fall back to defaults instead of erroring.
+        let json = r#"[{ "name": "bare-vm" }]"#;
+        let vms = parse_vms(json).unwrap();
+        assert_eq!(vms.len(), 1);
+        assert_eq!(vms[0].name, "bare-vm");
+        assert_eq!(vms[0].id, "");
+        assert_eq!(vms[0].resource_group, "");
+        assert_eq!(vms[0].location, "");
+        assert_eq!(vms[0].status, "Unknown");
+        assert_eq!(vms[0].public_ip, None);
+        assert_eq!(vms[0].private_ip, None);
+        assert_eq!(vms[0].size, "");
+    }
+
+    #[test]
+    fn test_azure_login_args_interactive_has_no_extra_flag() {
+        assert_eq!(azure_login_args(&AzureLoginMethod::Interactive), vec!["login"]);
+    }
+
+    #[test]
+    fn test_azure_login_args_device_code() {
+        assert_eq!(
+            azure_login_args(&AzureLoginMethod::DeviceCode),
+            vec!["login", "--use-device-code"]
+        );
+    }
+
+    #[test]
+    fn test_azure_login_args_managed_identity() {
+        assert_eq!(
+            azure_login_args(&AzureLoginMethod::ManagedIdentity),
+            vec!["login", "--identity"]
+        );
+    }
+
+    #[test]
+    fn test_azure_list_vms_args_without_resource_group() {
+        let args = azure_list_vms_args("sub-1", &None);
+        assert_eq!(
+            args,
+            vec!["vm", "list", "--subscription", "sub-1", "--show-details", "--output", "json"]
+        );
+    }
+
+    #[test]
+    fn test_azure_list_vms_args_with_resource_group() {
+        let args = azure_list_vms_args("sub-1", &Some("myRG".to_string()));
+        assert_eq!(
+            args,
+            vec![
+                "vm",
+                "list",
+                "--subscription",
+                "sub-1",
+                "--show-details",
+                "--output",
+                "json",
+                "--resource-group",
+                "myRG"
+            ]
+        );
     }
 
     #[test]
