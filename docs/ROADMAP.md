@@ -170,7 +170,7 @@ The following issues were identified through heuristic evaluation against Nielse
 The goal is to make what exists reliable enough that users recommend it. No new protocols. Every engineering-hour goes to stability, test coverage, and the two highest-friction onboarding gaps.
 
 #### Stability & quality
-- [ ] Backend unit test coverage ≥ 60% — **NOT DONE, but real progress**: real measured Rust *line* coverage (tarpaulin) was 29.24% as of 2026-08-21 morning, raised to **37.06%** the same day via ~200 new tests across 26 modules (2 real bugs found and fixed along the way: a malformed-packet panic in IPMI response parsing, and a probed-ESSID parsing bug that silently dropped all but the first network in airodump-ng CSV output). The remaining gap is concentrated in modules dominated by real network/OS-connection code (plugin_rt, websocket_term, mosh, mqtt, redfish, rlogin, security, serial, spice, and others) that resist unit testing without dedicated mock infrastructure — a separate, larger effort. Test *count* (384 Rust tests) was previously and incorrectly treated as a proxy for line coverage; it isn't.
+- [ ] Backend unit test coverage ≥ 60% — **NOT DONE, but real progress**: real measured Rust *line* coverage (tarpaulin) was 29.24% as of 2026-08-21 morning, raised to 37.06% via ~200 new tests across 26 modules (round 1; 2 real bugs found and fixed along the way: a malformed-packet panic in IPMI response parsing, and a probed-ESSID parsing bug that silently dropped all but the first network in airodump-ng CSV output), then to **41.58%** (5612/13498 lines) the same day via a second round of ~150 more tests across cloud/rdp/vnc/winrm, misc-protocol (kube_forward, mosh, mqtt, notifications, plugin_rt, redfish, rlogin, serial, websocket_term, window), app-logic (config, docker_logs, importer, recording, snippets, terminal), and security/keymgr/editor modules. The remaining gap is concentrated in modules dominated by real network/OS-connection code (sftp, ssh, network, ftp, spice, proxmox, and others) that resist unit testing without dedicated mock infrastructure — a separate, larger effort. Test *count* (1278 Rust tests as of this round) was previously and incorrectly treated as a proxy for line coverage; it isn't.
 - [ ] Frontend test coverage ≥ 75% — not independently re-verified against real numbers; treat with the same caution as the line above until checked.
 - [x] Structured error taxonomy: all Tauri invoke errors return typed `AppError { code, message, detail }` — no raw strings to the UI (DONE v0.3.0)
 - [x] CI coverage *reporting*: `cargo tarpaulin` + `@vitest/coverage-v8` upload reports as artifacts (DONE). The hard 60% *gate* that used to sit on top of this was removed 2026-08-21 — real coverage was measurable for the first time that day (after fixing a stdout-vs-file parsing bug) and immediately failed it. Reintroduce a gate once coverage is raised enough to justify a real threshold.
@@ -355,7 +355,7 @@ Not part of the original v0.3–v1.2 phase sequence — a separately-scoped init
 | Mean time to connect (new user, 3 hosts) | > 15 min | ≤ 5 min | ≤ 3 min |
 | P99 SSH connection establishment | Unknown | ≤ 2 s | ≤ 1.5 s |
 | Frontend test coverage | ~45% | ≥ 75% | ≥ 85% |
-| Backend test coverage | 37.06% (measured, 2026-08-21) | ≥ 60% | ≥ 75% |
+| Backend test coverage | 41.58% (measured, 2026-08-21) | ≥ 60% | ≥ 75% |
 | Enterprise customers (≥ 50 seats) | 0 | 0 | ≥ 3 |
 
 ---
