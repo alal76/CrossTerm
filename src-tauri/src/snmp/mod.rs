@@ -1025,4 +1025,193 @@ mod tests {
         let (type_name, _) = describe_value(0x82, &[]);
         assert_eq!(type_name, "EndOfMibView");
     }
+
+    #[test]
+    fn test_ber_length_uses_short_and_both_long_forms() {
+        assert_eq!(ber_length(0), vec![0]);
+        assert_eq!(ber_length(127), vec![127]);
+        assert_eq!(ber_length(128), vec![0x81, 128]);
+        assert_eq!(ber_length(255), vec![0x81, 255]);
+        assert_eq!(ber_length(256), vec![0x82, 1, 0]);
+        assert_eq!(ber_length(300), vec![0x82, 1, 44]);
+    }
+
+    #[test]
+    fn test_ber_tlv_h_reports_correct_header_length_for_each_length_form() {
+        let (_, h) = ber_tlv_h(0x04, &vec![0u8; 10]);
+        assert_eq!(h, 2); // tag + 1-byte length
+        let (_, h) = ber_tlv_h(0x04, &vec![0u8; 200]);
+        assert_eq!(h, 3); // tag + 0x81 + 1 length byte
+        let (_, h) = ber_tlv_h(0x04, &vec![0u8; 300]);
+        assert_eq!(h, 4); // tag + 0x82 + 2 length bytes
+    }
+
+    #[test]
+    fn test_display_octet_string_falls_back_to_hex_for_non_printable_bytes() {
+        assert_eq!(display_octet_string(b"hello"), "hello");
+        assert_eq!(display_octet_string(&[0x00, 0x01, 0xFF]), "00 01 FF");
+    }
+
+    #[test]
+    fn test_hex_string_formats_uppercase_pairs() {
+        assert_eq!(hex_string(&[0xDE, 0xAD, 0xBE, 0xEF]), "DE AD BE EF");
+        assert_eq!(hex_string(&[]), "");
+    }
+
+    #[test]
+    fn test_ber_read_u64_big_endian() {
+        assert_eq!(ber_read_u64(&[0x00, 0x00, 0x01, 0x00]), 256);
+        assert_eq!(ber_read_u64(&[0xFF, 0xFF, 0xFF, 0xFF]), 0xFFFF_FFFF);
+    }
+
+    #[test]
+    fn test_ber_oid_with_fewer_than_two_arcs_encodes_empty_value() {
+        let encoded = ber_oid("1");
+        let (node, _) = ber_parse_one(&encoded).unwrap();
+        assert_eq!(node.tag, 0x06);
+        assert!(node.value.is_empty());
+    }
+
+    #[test]
+    fn test_ber_parse_one_returns_none_on_truncated_input() {
+        assert!(ber_parse_one(&[]).is_none());
+        assert!(ber_parse_one(&[0x02]).is_none()); // tag with no length byte
+        assert!(ber_parse_one(&[0x02, 0x05, 0x01]).is_none()); // length says 5, only 1 byte present
+    }
+
+    #[test]
+    fn test_ber_parse_one_rejects_malformed_long_form_length() {
+        // 0x84 => 4 length bytes claimed, but none follow.
+        assert!(ber_parse_one(&[0x04, 0x84]).is_none());
+        // 0x80 => "indefinite length" (0 length-bytes), not supported here.
+        assert!(ber_parse_one(&[0x04, 0x80]).is_none());
+    }
+
+    #[test]
+    fn test_parse_pdu_returns_none_when_fields_are_missing() {
+        // A PDU needs request-id, error-status, error-index, varbind-list (4 fields).
+        let short_pdu = ber_tlv(0xA0, &ber_integer(1));
+        let (node, _) = ber_parse_one(&short_pdu).unwrap();
+        assert!(parse_pdu(&node).is_none());
+    }
+
+    #[test]
+    fn test_build_var_bind_list_wraps_oid_and_null_in_nested_sequences() {
+        let vbl = build_var_bind_list("1.3.6.1.2.1.1.1.0");
+        let (outer, _) = ber_parse_one(&vbl).unwrap();
+        assert_eq!(outer.tag, 0x30);
+        let inner_seqs = ber_parse_all(outer.value);
+        assert_eq!(inner_seqs.len(), 1);
+        let pair = ber_parse_all(inner_seqs[0].value);
+        assert_eq!(pair.len(), 2);
+        assert_eq!(pair[0].tag, 0x06); // OID
+        assert_eq!(pair[1].tag, 0x05); // NULL
+    }
+
+    #[test]
+    fn test_build_pdu_encodes_request_id_and_repeaters() {
+        let pdu = build_pdu(PDU_GET_NEXT, 99, "1.3.6.1.2.1.1.1.0", Some(2), Some(10));
+        let (node, _) = ber_parse_one(&pdu).unwrap();
+        assert_eq!(node.tag, PDU_GET_NEXT);
+        let fields = ber_parse_all(node.value);
+        assert_eq!(ber_read_int(fields[0].value), 99); // request-id
+        assert_eq!(ber_read_int(fields[1].value), 2); // non-repeaters
+        assert_eq!(ber_read_int(fields[2].value), 10); // max-repetitions
+    }
+
+    #[test]
+    fn test_build_v1v2c_message_encodes_version_and_community() {
+        let msg = build_v1v2c_message(&SnmpVersion::V2c, "public", PDU_GET, 1, "1.3.6.1.2.1.1.1.0");
+        let (top, _) = ber_parse_one(&msg).unwrap();
+        let fields = ber_parse_all(top.value);
+        assert_eq!(ber_read_int(fields[0].value), 1); // v2c -> version 1
+        assert_eq!(fields[1].value, b"public");
+        assert_eq!(fields[2].tag, PDU_GET);
+
+        let msg_v1 = build_v1v2c_message(&SnmpVersion::V1, "public", PDU_GET, 1, "1.3.6.1.2.1.1.1.0");
+        let (top, _) = ber_parse_one(&msg_v1).unwrap();
+        let fields = ber_parse_all(top.value);
+        assert_eq!(ber_read_int(fields[0].value), 0); // v1 -> version 0
+    }
+
+    #[test]
+    fn test_derive_v3_keys_no_auth_no_priv_when_passphrases_absent() {
+        let cfg = SnmpConfig {
+            host: "h".into(), port: 161, version: SnmpVersion::V3,
+            community: None, username: Some("admin".into()),
+            auth_passphrase: None, auth_protocol: None,
+            priv_passphrase: None, priv_protocol: None, timeout_ms: 1000,
+        };
+        let keys = derive_v3_keys(&cfg, b"engine-id");
+        assert!(keys.auth.is_none());
+        assert!(keys.privacy.is_none());
+    }
+
+    #[test]
+    fn test_derive_v3_keys_auth_only_when_no_priv_passphrase() {
+        let cfg = SnmpConfig {
+            host: "h".into(), port: 161, version: SnmpVersion::V3,
+            community: None, username: Some("admin".into()),
+            auth_passphrase: Some("authpass123".into()), auth_protocol: Some(SnmpV3AuthProtocol::Sha1),
+            priv_passphrase: None, priv_protocol: None, timeout_ms: 1000,
+        };
+        let keys = derive_v3_keys(&cfg, b"engine-id");
+        assert!(keys.auth.is_some());
+        assert!(keys.privacy.is_none());
+    }
+
+    #[test]
+    fn test_derive_v3_keys_authpriv_produces_16_byte_privacy_key() {
+        let cfg = SnmpConfig {
+            host: "h".into(), port: 161, version: SnmpVersion::V3,
+            community: None, username: Some("admin".into()),
+            auth_passphrase: Some("authpass123".into()), auth_protocol: Some(SnmpV3AuthProtocol::Md5),
+            priv_passphrase: Some("privpass123".into()), priv_protocol: Some(SnmpV3PrivProtocol::Aes128),
+            timeout_ms: 1000,
+        };
+        let keys = derive_v3_keys(&cfg, b"engine-id");
+        assert!(keys.auth.is_some());
+        assert_eq!(keys.privacy.unwrap().len(), 16);
+    }
+
+    #[test]
+    fn test_snmp_error_display_and_serialize() {
+        let err = SnmpError::NotFound("s1".into());
+        assert_eq!(err.to_string(), "Session not found: s1");
+        assert_eq!(serde_json::to_string(&err).unwrap(), "\"Session not found: s1\"");
+
+        assert_eq!(SnmpError::Timeout.to_string(), "Timeout — no response from agent");
+        assert_eq!(SnmpError::AuthFailed.to_string(), "SNMPv3 authentication failed");
+    }
+
+    #[test]
+    fn test_snmp_config_and_session_serde_round_trip() {
+        let cfg = SnmpConfig {
+            host: "10.0.0.1".into(), port: 161, version: SnmpVersion::V2c,
+            community: Some("public".into()), username: None,
+            auth_passphrase: None, auth_protocol: None,
+            priv_passphrase: None, priv_protocol: None, timeout_ms: 2000,
+        };
+        let json = serde_json::to_string(&cfg).unwrap();
+        let restored: SnmpConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.host, "10.0.0.1");
+        assert!(restored.version == SnmpVersion::V2c);
+
+        let session = SnmpSession { id: "sess1".into(), host: "10.0.0.1".into(), version: SnmpVersion::V3 };
+        let restored: SnmpSession = serde_json::from_str(&serde_json::to_string(&session).unwrap()).unwrap();
+        assert_eq!(restored.version, SnmpVersion::V3);
+    }
+
+    #[test]
+    fn test_snmp_var_bind_serde_round_trip() {
+        let vb = SnmpVarBind { oid: "1.3.6.1.2.1.1.1.0".into(), value_type: "OctetString".into(), value: "Linux".into() };
+        let restored: SnmpVarBind = serde_json::from_str(&serde_json::to_string(&vb).unwrap()).unwrap();
+        assert_eq!(restored.oid, "1.3.6.1.2.1.1.1.0");
+    }
+
+    #[test]
+    fn test_snmp_state_new_starts_empty() {
+        let state = SnmpState::new();
+        assert!(state.sessions.lock().unwrap().is_empty());
+    }
 }

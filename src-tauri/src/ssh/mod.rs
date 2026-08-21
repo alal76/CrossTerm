@@ -6,7 +6,6 @@ use russh::{ChannelId, ChannelMsg, Disconnect};
 use russh::CryptoVec;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
@@ -278,38 +277,30 @@ impl client::Handler for SshClientHandler {
 
         // Read existing known_hosts
         if known_hosts_path.exists() {
-            let file = std::fs::File::open(&known_hosts_path)
+            let content = std::fs::read_to_string(&known_hosts_path)
                 .map_err(|e| SshError::Io(e.to_string()))?;
-            let reader = BufReader::new(file);
-            for line in reader.lines() {
-                let line = line.map_err(|e| SshError::Io(e.to_string()))?;
-                let line = line.trim().to_string();
-                if line.is_empty() || line.starts_with('#') {
-                    continue;
+            match lookup_known_host(&content, &host_key, &fingerprint) {
+                KnownHostLookup::Match => {
+                    // Match — accept silently
+                    return Ok(true);
                 }
-                let parts: Vec<&str> = line.splitn(3, ' ').collect();
-                if parts.len() == 3 && parts[0] == host_key {
-                    // Found existing entry
-                    if parts[2] == fingerprint {
-                        // Match — accept silently
-                        return Ok(true);
-                    } else {
-                        // Key changed — tell the frontend what changed, then reject
-                        let _ = self.app_handle.emit(
-                            "ssh:host_key_changed",
-                            SshHostKeyChangedEvent {
-                                host: self.host.clone(),
-                                port: self.port,
-                                old_key_type: parts[1].to_string(),
-                                old_fingerprint: parts[2].to_string(),
-                                new_key_type: algorithm,
-                                new_fingerprint: fingerprint,
-                                detected_at: chrono::Utc::now().to_rfc3339(),
-                            },
-                        );
-                        return Err(SshError::HostKeyChanged(host_key));
-                    }
+                KnownHostLookup::Changed { old_key_type, old_fingerprint } => {
+                    // Key changed — tell the frontend what changed, then reject
+                    let _ = self.app_handle.emit(
+                        "ssh:host_key_changed",
+                        SshHostKeyChangedEvent {
+                            host: self.host.clone(),
+                            port: self.port,
+                            old_key_type,
+                            old_fingerprint,
+                            new_key_type: algorithm,
+                            new_fingerprint: fingerprint,
+                            detected_at: chrono::Utc::now().to_rfc3339(),
+                        },
+                    );
+                    return Err(SshError::HostKeyChanged(host_key));
                 }
+                KnownHostLookup::NotFound => {}
             }
         }
 
@@ -508,6 +499,58 @@ fn known_hosts_file_path() -> std::path::PathBuf {
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join("CrossTerm")
         .join("known_hosts")
+}
+
+/// Result of scanning known_hosts content for a given `host:port` entry.
+enum KnownHostLookup {
+    NotFound,
+    Match,
+    Changed {
+        old_key_type: String,
+        old_fingerprint: String,
+    },
+}
+
+/// Pure lookup over known_hosts file *content* (not the filesystem) so the
+/// core TOFU/MITM decision logic in `check_server_key` can be unit tested
+/// without touching the real known_hosts file on disk.
+fn lookup_known_host(content: &str, host_key: &str, fingerprint: &str) -> KnownHostLookup {
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let parts: Vec<&str> = line.splitn(3, ' ').collect();
+        if parts.len() == 3 && parts[0] == host_key {
+            if parts[2] == fingerprint {
+                return KnownHostLookup::Match;
+            } else {
+                return KnownHostLookup::Changed {
+                    old_key_type: parts[1].to_string(),
+                    old_fingerprint: parts[2].to_string(),
+                };
+            }
+        }
+    }
+    KnownHostLookup::NotFound
+}
+
+/// Pure filter used by `ssh_forget_host_key`: drops any non-comment,
+/// non-blank line whose `host:port` prefix matches `host_key`, keeping
+/// everything else (including comments/blank lines) untouched.
+fn filter_known_hosts_content(content: &str, host_key: &str) -> String {
+    let prefix = format!("{} ", host_key);
+    let filtered: Vec<&str> = content
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                return true;
+            }
+            !trimmed.starts_with(&prefix)
+        })
+        .collect();
+    filtered.join("\n") + "\n"
 }
 
 #[allow(clippy::field_reassign_with_default)]
@@ -1691,18 +1734,9 @@ pub async fn ssh_forget_host_key(host: String, port: u16) -> Result<(), SshError
     let content = std::fs::read_to_string(&known_hosts_path)
         .map_err(|e| SshError::Io(e.to_string()))?;
 
-    let filtered: Vec<&str> = content
-        .lines()
-        .filter(|line| {
-            let trimmed = line.trim();
-            if trimmed.is_empty() || trimmed.starts_with('#') {
-                return true;
-            }
-            !trimmed.starts_with(&format!("{} ", host_key))
-        })
-        .collect();
+    let filtered = filter_known_hosts_content(&content, &host_key);
 
-    std::fs::write(&known_hosts_path, filtered.join("\n") + "\n")
+    std::fs::write(&known_hosts_path, filtered)
         .map_err(|e| SshError::Io(e.to_string()))?;
 
     Ok(())
@@ -2885,5 +2919,221 @@ mod tests {
         assert!(json.contains("\"cipher_algorithm\":null"));
         assert!(json.contains("\"kex_algorithm\":null"));
         assert!(json.contains("\"latency_ms\":null"));
+    }
+
+    // ── lookup_known_host (pure TOFU/MITM decision logic) ────────────────
+
+    #[test]
+    fn test_lookup_known_host_not_found_on_empty_content() {
+        let result = lookup_known_host("", "example.com:22", "SHA256:abc");
+        assert!(matches!(result, KnownHostLookup::NotFound));
+    }
+
+    #[test]
+    fn test_lookup_known_host_skips_comments_and_blank_lines() {
+        let content = "\n# comment\nexample.com:22 ssh-ed25519 SHA256:abc\n";
+        let result = lookup_known_host(content, "example.com:22", "SHA256:abc");
+        assert!(matches!(result, KnownHostLookup::Match));
+    }
+
+    #[test]
+    fn test_lookup_known_host_matches_fingerprint() {
+        let content = "host1:22 ssh-ed25519 SHA256:aaa\nhost2:22 ssh-rsa SHA256:bbb\n";
+        let result = lookup_known_host(content, "host2:22", "SHA256:bbb");
+        assert!(matches!(result, KnownHostLookup::Match));
+    }
+
+    #[test]
+    fn test_lookup_known_host_detects_changed_key() {
+        let content = "host1:22 ssh-ed25519 SHA256:old_fp\n";
+        let result = lookup_known_host(content, "host1:22", "SHA256:new_fp");
+        match result {
+            KnownHostLookup::Changed { old_key_type, old_fingerprint } => {
+                assert_eq!(old_key_type, "ssh-ed25519");
+                assert_eq!(old_fingerprint, "SHA256:old_fp");
+            }
+            _ => panic!("expected Changed variant"),
+        }
+    }
+
+    #[test]
+    fn test_lookup_known_host_not_found_for_different_host() {
+        let content = "host1:22 ssh-ed25519 SHA256:aaa\n";
+        let result = lookup_known_host(content, "host2:22", "SHA256:aaa");
+        assert!(matches!(result, KnownHostLookup::NotFound));
+    }
+
+    #[test]
+    fn test_lookup_known_host_requires_exact_host_key_match() {
+        // "host1:2" should not match "host1:22" — this is why the filter
+        // logic below appends a trailing space to the prefix.
+        let content = "host1:22 ssh-ed25519 SHA256:aaa\n";
+        let result = lookup_known_host(content, "host1:2", "SHA256:aaa");
+        assert!(matches!(result, KnownHostLookup::NotFound));
+    }
+
+    #[test]
+    fn test_lookup_known_host_malformed_line_ignored() {
+        // Only two fields — doesn't match the "host algo fingerprint" shape.
+        let content = "host1:22 onlytwoparts\n";
+        let result = lookup_known_host(content, "host1:22", "SHA256:aaa");
+        assert!(matches!(result, KnownHostLookup::NotFound));
+    }
+
+    // ── filter_known_hosts_content (pure ssh_forget_host_key logic) ──────
+
+    #[test]
+    fn test_filter_known_hosts_content_removes_matching_host() {
+        let content = "host1:22 ssh-ed25519 SHA256:aaa\nhost2:22 ssh-rsa SHA256:bbb\n";
+        let filtered = filter_known_hosts_content(content, "host1:22");
+        assert!(!filtered.contains("host1:22"));
+        assert!(filtered.contains("host2:22"));
+    }
+
+    #[test]
+    fn test_filter_known_hosts_content_preserves_comments_and_blank_lines() {
+        let content = "# a comment\n\nhost1:22 ssh-ed25519 SHA256:aaa\n";
+        let filtered = filter_known_hosts_content(content, "host1:22");
+        assert!(filtered.contains("# a comment"));
+        assert!(!filtered.contains("host1:22"));
+    }
+
+    #[test]
+    fn test_filter_known_hosts_content_does_not_remove_prefix_collisions() {
+        // "host1:2" is a substring-prefix of "host1:22 ..." but must not be
+        // treated as a match — the trailing space in the filter prefix
+        // prevents "host1:2" from eating "host1:22"'s entry.
+        let content = "host1:22 ssh-ed25519 SHA256:aaa\n";
+        let filtered = filter_known_hosts_content(content, "host1:2");
+        assert!(filtered.contains("host1:22"), "unrelated host:port entry should survive: {filtered}");
+    }
+
+    #[test]
+    fn test_filter_known_hosts_content_no_match_leaves_content_intact() {
+        let content = "host1:22 ssh-ed25519 SHA256:aaa\n";
+        let filtered = filter_known_hosts_content(content, "nonexistent:22");
+        assert!(filtered.contains("host1:22"));
+    }
+
+    // ── ssh_list_keys (real filesystem, isolated temp dir) ────────────────
+
+    #[tokio::test]
+    async fn test_ssh_list_keys_empty_dir_returns_empty_vec() {
+        let dir = std::env::temp_dir().join(format!("ssh_list_keys_empty_{}", Uuid::new_v4()));
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        let result = ssh_list_keys(dir.to_string_lossy().to_string()).await.unwrap();
+        assert!(result.is_empty());
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn test_ssh_list_keys_nonexistent_dir_returns_empty_vec() {
+        let dir = std::env::temp_dir().join(format!("ssh_list_keys_missing_{}", Uuid::new_v4()));
+        let result = ssh_list_keys(dir.to_string_lossy().to_string()).await.unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_ssh_list_keys_filters_to_pub_files_and_sorts() {
+        let dir = std::env::temp_dir().join(format!("ssh_list_keys_filter_{}", Uuid::new_v4()));
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        tokio::fs::write(dir.join("zeta.pub"), b"key-z").await.unwrap();
+        tokio::fs::write(dir.join("alpha.pub"), b"key-a").await.unwrap();
+        tokio::fs::write(dir.join("id_ed25519"), b"private-key-data").await.unwrap();
+        tokio::fs::write(dir.join("notes.txt"), b"not a key").await.unwrap();
+
+        let result = ssh_list_keys(dir.to_string_lossy().to_string()).await.unwrap();
+        assert_eq!(result.len(), 2, "should only list .pub files, got: {result:?}");
+        // Sorted lexicographically — alpha.pub before zeta.pub.
+        assert!(result[0].ends_with("alpha.pub"));
+        assert!(result[1].ends_with("zeta.pub"));
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    // ── ssh_generate_key (real filesystem, isolated temp dir) ─────────────
+
+    #[tokio::test]
+    async fn test_ssh_generate_key_ed25519_creates_key_pair() {
+        let dir = std::env::temp_dir().join(format!("ssh_gen_key_{}", Uuid::new_v4()));
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        let key_path = dir.join("id_test").to_string_lossy().to_string();
+
+        let fingerprint = ssh_generate_key(
+            "ed25519".to_string(),
+            Some("test-comment".to_string()),
+            None,
+            key_path.clone(),
+        )
+        .await
+        .expect("ed25519 key generation should succeed");
+
+        assert!(fingerprint.starts_with("SHA256:"), "got: {fingerprint}");
+        assert!(tokio::fs::metadata(&key_path).await.is_ok(), "private key file should exist");
+        let pub_path = format!("{}.pub", key_path);
+        assert!(tokio::fs::metadata(&pub_path).await.is_ok(), "public key file should exist");
+
+        let pub_content = tokio::fs::read_to_string(&pub_path).await.unwrap();
+        assert!(pub_content.contains("ssh-ed25519"));
+        assert!(pub_content.contains("test-comment"));
+
+        let priv_content = tokio::fs::read_to_string(&key_path).await.unwrap();
+        assert!(priv_content.contains("BEGIN OPENSSH PRIVATE KEY"));
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn test_ssh_generate_key_with_passphrase_encrypts_private_key() {
+        let dir = std::env::temp_dir().join(format!("ssh_gen_key_pass_{}", Uuid::new_v4()));
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        let key_path = dir.join("id_test_enc").to_string_lossy().to_string();
+
+        ssh_generate_key(
+            "ed25519".to_string(),
+            None,
+            Some("supersecret".to_string()),
+            key_path.clone(),
+        )
+        .await
+        .expect("encrypted key generation should succeed");
+
+        let priv_content = tokio::fs::read_to_string(&key_path).await.unwrap();
+        assert!(priv_content.contains("BEGIN OPENSSH PRIVATE KEY"));
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn test_ssh_generate_key_unsupported_type_errors() {
+        let dir = std::env::temp_dir().join(format!("ssh_gen_key_bad_{}", Uuid::new_v4()));
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        let key_path = dir.join("id_bad").to_string_lossy().to_string();
+
+        let result = ssh_generate_key("dsa".to_string(), None, None, key_path).await;
+        assert!(result.is_err());
+        match result {
+            Err(SshError::Key(msg)) => assert!(msg.contains("Unsupported key type")),
+            other => panic!("expected SshError::Key, got {other:?}"),
+        }
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn test_ssh_generate_key_rsa_creates_key_pair() {
+        let dir = std::env::temp_dir().join(format!("ssh_gen_key_rsa_{}", Uuid::new_v4()));
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        let key_path = dir.join("id_rsa_test").to_string_lossy().to_string();
+
+        let fingerprint = ssh_generate_key("rsa".to_string(), None, None, key_path.clone())
+            .await
+            .expect("rsa key generation should succeed");
+        assert!(fingerprint.starts_with("SHA256:"));
+
+        let pub_content = tokio::fs::read_to_string(format!("{}.pub", key_path)).await.unwrap();
+        assert!(pub_content.contains("ssh-rsa"));
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 }

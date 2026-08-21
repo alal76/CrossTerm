@@ -915,4 +915,170 @@ mod tests {
         let pixels = extract_rect_rgba(&img, &rect);
         assert_eq!(pixels.len(), 4 * 4 * 4); // 4x4 rect × 4 bpp
     }
+
+    #[test]
+    fn test_extract_rect_rgba_full_image_from_origin() {
+        // InclusiveRectangle bounds are inclusive on both ends, so a rect
+        // covering the whole 4x3 image runs right=width-1, bottom=height-1.
+        let img = DecodedImage::new(PixelFormat::RgbA32, 4, 3);
+        let rect = InclusiveRectangle { left: 0, top: 0, right: 3, bottom: 2 };
+        let pixels = extract_rect_rgba(&img, &rect);
+        assert_eq!(pixels.len(), 4 * 3 * 4);
+    }
+
+    #[test]
+    fn test_extract_rect_rgba_single_pixel() {
+        let img = DecodedImage::new(PixelFormat::RgbA32, 10, 10);
+        let rect = InclusiveRectangle { left: 5, top: 5, right: 5, bottom: 5 };
+        let pixels = extract_rect_rgba(&img, &rect);
+        assert_eq!(pixels.len(), 4); // 1x1 rect x 4 bpp
+    }
+
+    #[test]
+    fn test_rdp_error_display_and_serialize_round_trip() {
+        let cases: Vec<(RdpError, &str)> = vec![
+            (RdpError::NotFound("abc".into()), "Connection not found: abc"),
+            (RdpError::ConnectionFailed("x".into()), "Connection failed: x"),
+            (RdpError::InvalidConfig("y".into()), "Invalid configuration: y"),
+            (RdpError::AuthFailed("z".into()), "Authentication failed: z"),
+            (RdpError::Protocol("p".into()), "Protocol error: p"),
+            (RdpError::Clipboard("c".into()), "Clipboard error: c"),
+            (RdpError::Io("i".into()), "IO error: i"),
+        ];
+        for (err, expected) in cases {
+            assert_eq!(err.to_string(), expected);
+            let json = serde_json::to_string(&err).unwrap();
+            assert_eq!(json, format!("\"{expected}\""));
+        }
+    }
+
+    #[test]
+    fn test_rdp_error_from_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::Other, "boom");
+        let err: RdpError = io_err.into();
+        assert!(matches!(err, RdpError::Io(msg) if msg == "boom"));
+    }
+
+    #[test]
+    fn test_make_connector_config_defaults_to_1920x1080() {
+        let cfg = make_connector_config(&make_config());
+        assert_eq!(cfg.desktop_size.width, 1920);
+        assert_eq!(cfg.desktop_size.height, 1080);
+        assert_eq!(cfg.client_name, "CrossTerm");
+        assert!(cfg.enable_tls);
+        assert!(!cfg.enable_credssp);
+        assert!(!cfg.autologon);
+        assert!(cfg.enable_server_pointer);
+    }
+
+    #[test]
+    fn test_make_connector_config_honors_custom_dimensions() {
+        let mut c = make_config();
+        c.width = Some(800);
+        c.height = Some(600);
+        let cfg = make_connector_config(&c);
+        assert_eq!(cfg.desktop_size.width, 800);
+        assert_eq!(cfg.desktop_size.height, 600);
+    }
+
+    #[test]
+    fn test_make_connector_config_carries_credentials() {
+        let cfg = make_connector_config(&make_config());
+        match cfg.credentials {
+            Credentials::UsernamePassword { username, password } => {
+                assert_eq!(username, "user");
+                assert_eq!(password, "pass");
+            }
+            _ => panic!("expected UsernamePassword credentials"),
+        }
+    }
+
+    #[test]
+    fn test_make_tls_config_disables_resumption() {
+        let cfg = make_tls_config();
+        let debug = format!("{:?}", cfg.resumption);
+        assert!(debug.contains("Disabled"), "expected disabled resumption, got {debug}");
+    }
+
+    #[test]
+    fn test_no_cert_verifier_accepts_any_server_cert() {
+        let verifier = NoCertVerifier;
+        let cert = CertificateDer::from(vec![0x30, 0x03, 0x02, 0x01, 0x00]);
+        let server_name = ServerName::try_from("example.com").unwrap();
+        let result = verifier.verify_server_cert(&cert, &[], &server_name, &[], UnixTime::now());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_no_cert_verifier_supported_schemes_are_comprehensive() {
+        let verifier = NoCertVerifier;
+        let schemes = verifier.supported_verify_schemes();
+        assert_eq!(schemes.len(), 13);
+        assert!(schemes.contains(&SignatureScheme::ED25519));
+        assert!(schemes.contains(&SignatureScheme::RSA_PKCS1_SHA256));
+    }
+
+    #[test]
+    fn test_rdp_key_and_mouse_event_serde_round_trip() {
+        let key = RdpKeyEvent { scan_code: 0x1e, pressed: true, extended: false };
+        let json = serde_json::to_string(&key).unwrap();
+        let restored: RdpKeyEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.scan_code, 0x1e);
+        assert!(restored.pressed);
+
+        let mouse = RdpMouseEvent { x: 10, y: 20, button: RdpMouseButton::Left, event_type: RdpMouseEventType::Down };
+        let json = serde_json::to_string(&mouse).unwrap();
+        assert!(json.contains("\"x\":10"));
+        assert!(json.contains("\"left\""));
+        assert!(json.contains("\"down\""));
+    }
+
+    #[test]
+    fn test_rdp_recording_format_serializes_snake_case() {
+        assert_eq!(serde_json::to_string(&RdpRecordingFormat::Mp4).unwrap(), "\"mp4\"");
+        assert_eq!(serde_json::to_string(&RdpRecordingFormat::Webm).unwrap(), "\"webm\"");
+    }
+
+    #[test]
+    fn test_rdp_connection_status_error_variant_round_trips() {
+        let status = RdpConnectionStatus::Error("boom".into());
+        let json = serde_json::to_string(&status).unwrap();
+        let restored: RdpConnectionStatus = serde_json::from_str(&json).unwrap();
+        assert!(matches!(restored, RdpConnectionStatus::Error(msg) if msg == "boom"));
+    }
+
+    #[test]
+    fn test_rdp_gateway_monitor_and_drive_mapping_serde() {
+        let gw = RdpGateway { host: "gw.local".into(), port: 443, username: "u".into(), credential_ref: Some("ref1".into()) };
+        let json = serde_json::to_string(&gw).unwrap();
+        let restored: RdpGateway = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.host, "gw.local");
+        assert_eq!(restored.credential_ref.as_deref(), Some("ref1"));
+
+        let monitors = RdpMonitorConfig { span_all: true, selected_monitors: vec![0, 1] };
+        let restored: RdpMonitorConfig = serde_json::from_str(&serde_json::to_string(&monitors).unwrap()).unwrap();
+        assert!(restored.span_all);
+        assert_eq!(restored.selected_monitors, vec![0, 1]);
+
+        let mapping = DriveMapping { name: "Home".into(), local_path: "/home/user".into() };
+        let restored: DriveMapping = serde_json::from_str(&serde_json::to_string(&mapping).unwrap()).unwrap();
+        assert_eq!(restored.local_path, "/home/user");
+    }
+
+    #[test]
+    fn test_rdp_clipboard_and_redirection_config_serde() {
+        let clip = RdpClipboardData { text: Some("hi".into()), files: None, image_png_base64: None };
+        let restored: RdpClipboardData = serde_json::from_str(&serde_json::to_string(&clip).unwrap()).unwrap();
+        assert_eq!(restored.text.as_deref(), Some("hi"));
+
+        let redir = RdpRedirectionConfig {
+            drives: vec![DriveMapping { name: "D".into(), local_path: "/d".into() }],
+            printer: true,
+            audio: RdpAudioMode::Both,
+            smart_card: false,
+        };
+        let restored: RdpRedirectionConfig = serde_json::from_str(&serde_json::to_string(&redir).unwrap()).unwrap();
+        assert!(restored.printer);
+        assert_eq!(restored.drives.len(), 1);
+    }
 }

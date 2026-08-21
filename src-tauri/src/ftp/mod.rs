@@ -664,4 +664,193 @@ mod tests {
         let _state = FtpState::new();
         // Just verify construction doesn't panic
     }
+
+    #[test]
+    fn test_parse_list_line_too_few_fields_returns_none() {
+        assert!(parse_list_line("drwxr-xr-x 2 user group 4096").is_none());
+    }
+
+    #[test]
+    fn test_parse_list_line_blank_returns_none() {
+        assert!(parse_list_line("   ").is_none());
+    }
+
+    #[test]
+    fn test_parse_list_line_unparseable_size_defaults_to_zero() {
+        let line = "-rw-r--r--  1 user group   notanumber Feb 28 09:30 file.txt";
+        let entry = parse_list_line(line).unwrap();
+        assert_eq!(entry.size, 0);
+    }
+
+    #[test]
+    fn test_ftp_error_serializes_to_display_string() {
+        let err = FtpError::PathNotFound("/tmp/x".into());
+        assert_eq!(err.to_string(), "Path not found: /tmp/x");
+        let json = serde_json::to_string(&err).unwrap();
+        assert_eq!(json, "\"Path not found: /tmp/x\"");
+    }
+
+    // ── Local-loopback protocol tests ───────────────────────────────────
+    //
+    // These spin up a fake FTP server on 127.0.0.1 (ephemeral port) within
+    // the test process itself — no real network access and nothing that
+    // could hang in CI — to exercise FtpControl's request/response framing,
+    // multi-line parsing, and PASV address parsing, which otherwise require
+    // a live TCP peer to drive.
+
+    #[tokio::test]
+    async fn read_response_parses_a_single_line_reply() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let _ = stream.write_all(b"220 Welcome to fake FTP\r\n").await;
+            }
+        });
+
+        let client = TcpStream::connect(addr).await.unwrap();
+        let mut ctrl = FtpControl::from_stream(client);
+        let (code, text) = ctrl.read_response().await.unwrap();
+        assert_eq!(code, 220);
+        assert_eq!(text, "Welcome to fake FTP");
+    }
+
+    #[tokio::test]
+    async fn read_response_joins_multiline_reply_body() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let _ = stream
+                    .write_all(b"211-Features:\r\n MLST\r\n211 End\r\n")
+                    .await;
+            }
+        });
+
+        let client = TcpStream::connect(addr).await.unwrap();
+        let mut ctrl = FtpControl::from_stream(client);
+        let (code, text) = ctrl.read_response().await.unwrap();
+        assert_eq!(code, 211);
+        assert_eq!(text, "Features:\n MLST\nEnd");
+    }
+
+    #[tokio::test]
+    async fn read_response_rejects_a_too_short_line() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let _ = stream.write_all(b"ab\r\n").await;
+            }
+        });
+
+        let client = TcpStream::connect(addr).await.unwrap();
+        let mut ctrl = FtpControl::from_stream(client);
+        let err = ctrl.read_response().await.unwrap_err();
+        assert!(matches!(err, FtpError::Protocol(_)));
+    }
+
+    #[tokio::test]
+    async fn expect_maps_530_and_550_to_richer_errors() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let _ = stream.write_all(b"530 Not logged in\r\n").await;
+                let _ = stream.write_all(b"550 No such file\r\n").await;
+            }
+        });
+
+        let client = TcpStream::connect(addr).await.unwrap();
+        let mut ctrl = FtpControl::from_stream(client);
+
+        let err = ctrl.expect(230).await.unwrap_err();
+        assert!(matches!(err, FtpError::PermissionDenied(_)));
+
+        let err = ctrl.expect(200).await.unwrap_err();
+        assert!(matches!(err, FtpError::PathNotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn expect_maps_unrecognized_mismatch_to_protocol_error() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let _ = stream.write_all(b"500 Syntax error\r\n").await;
+            }
+        });
+
+        let client = TcpStream::connect(addr).await.unwrap();
+        let mut ctrl = FtpControl::from_stream(client);
+        let err = ctrl.expect(200).await.unwrap_err();
+        assert!(matches!(err, FtpError::Protocol(_)));
+    }
+
+    #[tokio::test]
+    async fn send_cmd_appends_crlf() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let mut buf = [0u8; 64];
+                let n = stream.read(&mut buf).await.unwrap();
+                let _ = tx.send(buf[..n].to_vec());
+            }
+        });
+
+        let client = TcpStream::connect(addr).await.unwrap();
+        let mut ctrl = FtpControl::from_stream(client);
+        ctrl.send_cmd("USER bob").await.unwrap();
+
+        let received = rx.await.unwrap();
+        assert_eq!(received, b"USER bob\r\n");
+    }
+
+    #[tokio::test]
+    async fn open_passive_parses_pasv_reply_and_connects_to_data_port() {
+        let data_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let data_port = data_listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let _ = data_listener.accept().await;
+        });
+
+        let control_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let control_addr = control_listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = control_listener.accept().await {
+                // Read the "PASV\r\n" command (ignored — content isn't checked).
+                let mut buf = [0u8; 64];
+                let _ = stream.read(&mut buf).await;
+                let p1 = data_port / 256;
+                let p2 = data_port % 256;
+                let reply = format!("227 Entering Passive Mode (127,0,0,1,{p1},{p2})\r\n");
+                let _ = stream.write_all(reply.as_bytes()).await;
+            }
+        });
+
+        let client = TcpStream::connect(control_addr).await.unwrap();
+        let mut ctrl = FtpControl::from_stream(client);
+        let data_stream = ctrl.open_passive().await.unwrap();
+        assert_eq!(data_stream.peer_addr().unwrap().port(), data_port);
+    }
+
+    #[tokio::test]
+    async fn open_passive_rejects_a_malformed_reply() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let mut buf = [0u8; 64];
+                let _ = stream.read(&mut buf).await;
+                let _ = stream.write_all(b"227 Entering Passive Mode without parens\r\n").await;
+            }
+        });
+
+        let client = TcpStream::connect(addr).await.unwrap();
+        let mut ctrl = FtpControl::from_stream(client);
+        let err = ctrl.open_passive().await.unwrap_err();
+        assert!(matches!(err, FtpError::Protocol(_)));
+    }
 }

@@ -955,6 +955,232 @@ mod tests {
         let result = substitute_variables("Connect to ${host} on ${port}", &vars);
         assert_eq!(result, "Connect to srv on 22");
     }
+
+    // ── count_steps ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_count_steps_flat() {
+        let steps = vec![
+            MacroStep::Send { data: "a".into() },
+            MacroStep::Wait { duration_ms: 1 },
+        ];
+        assert_eq!(count_steps(&steps), 2);
+    }
+
+    #[test]
+    fn test_count_steps_nested_conditional_and_loop() {
+        let steps = vec![
+            MacroStep::Send { data: "a".into() },
+            MacroStep::Conditional {
+                condition: "x".into(),
+                then_steps: vec![
+                    MacroStep::Send { data: "b".into() },
+                    MacroStep::Send { data: "c".into() },
+                ],
+                else_steps: vec![MacroStep::Send { data: "d".into() }],
+            },
+            MacroStep::Loop {
+                count: 3,
+                steps: vec![
+                    MacroStep::Send { data: "e".into() },
+                    MacroStep::Wait { duration_ms: 1 },
+                ],
+            },
+        ];
+        // 1 (send) + 1 (conditional) + 2 (then) + 1 (else) + 1 (loop) + 2 (loop body) = 8
+        assert_eq!(count_steps(&steps), 8);
+    }
+
+    #[test]
+    fn test_count_steps_empty() {
+        assert_eq!(count_steps(&[]), 0);
+    }
+
+    // ── dry_run_macro: unknown step type ────────────────────────────────
+
+    #[test]
+    fn test_dry_run_unknown_step() {
+        let steps = vec![serde_json::json!({ "type": "frobnicate" })];
+        let results = dry_run_macro(&steps);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].step_type, "frobnicate");
+        assert!(!results[0].would_match);
+        assert_eq!(results[0].duration_ms, 0);
+        assert!(results[0].simulated_output.contains("UNKNOWN STEP"));
+    }
+
+    #[test]
+    fn test_dry_run_missing_type_field() {
+        let steps = vec![serde_json::json!({ "foo": "bar" })];
+        let results = dry_run_macro(&steps);
+        assert_eq!(results[0].step_type, "unknown");
+        assert!(!results[0].would_match);
+    }
+
+    // ── advance_date_by_one ──────────────────────────────────────────────
+
+    #[test]
+    fn test_advance_date_mid_month() {
+        assert_eq!(advance_date_by_one("2026-01-15"), Some("2026-01-16".to_string()));
+    }
+
+    #[test]
+    fn test_advance_date_month_boundary() {
+        assert_eq!(advance_date_by_one("2026-01-31"), Some("2026-02-01".to_string()));
+        assert_eq!(advance_date_by_one("2026-04-30"), Some("2026-05-01".to_string()));
+    }
+
+    #[test]
+    fn test_advance_date_year_boundary() {
+        assert_eq!(advance_date_by_one("2026-12-31"), Some("2027-01-01".to_string()));
+    }
+
+    #[test]
+    fn test_advance_date_leap_year_february() {
+        // 2028 is a leap year
+        assert_eq!(advance_date_by_one("2028-02-28"), Some("2028-02-29".to_string()));
+        assert_eq!(advance_date_by_one("2028-02-29"), Some("2028-03-01".to_string()));
+    }
+
+    #[test]
+    fn test_advance_date_non_leap_year_february() {
+        // 2026 is not a leap year
+        assert_eq!(advance_date_by_one("2026-02-28"), Some("2026-03-01".to_string()));
+    }
+
+    #[test]
+    fn test_advance_date_century_non_leap_year() {
+        // 1900 is divisible by 100 but not 400 -> not a leap year
+        assert_eq!(advance_date_by_one("1900-02-28"), Some("1900-03-01".to_string()));
+    }
+
+    #[test]
+    fn test_advance_date_invalid_format() {
+        assert_eq!(advance_date_by_one("not-a-date"), None);
+        assert_eq!(advance_date_by_one("2026-13"), None);
+    }
+
+    // ── parse_cron_next: additional edge cases ──────────────────────────
+
+    #[test]
+    fn test_cron_interval_wraps_to_next_day() {
+        let result = parse_cron_next("*/30 * * * *", "2026-01-01T23:45:00Z");
+        assert_eq!(result, Some("2026-01-02T00:00:00Z".to_string()));
+    }
+
+    #[test]
+    fn test_cron_specific_minute_same_hour() {
+        let result = parse_cron_next("45 * * * *", "2026-01-01T10:10:00Z");
+        assert_eq!(result, Some("2026-01-01T10:45:00Z".to_string()));
+    }
+
+    #[test]
+    fn test_cron_specific_minute_next_hour() {
+        let result = parse_cron_next("10 * * * *", "2026-01-01T10:15:00Z");
+        assert_eq!(result, Some("2026-01-01T11:10:00Z".to_string()));
+    }
+
+    #[test]
+    fn test_cron_specific_minute_wraps_to_next_day() {
+        let result = parse_cron_next("30 * * * *", "2026-01-01T23:45:00Z");
+        assert_eq!(result, Some("2026-01-02T00:30:00Z".to_string()));
+    }
+
+    #[test]
+    fn test_cron_invalid_field_count() {
+        assert_eq!(parse_cron_next("* * * *", "2026-01-01T10:00:00Z"), None);
+    }
+
+    #[test]
+    fn test_cron_interval_zero_is_invalid() {
+        assert_eq!(parse_cron_next("*/0 * * * *", "2026-01-01T10:00:00Z"), None);
+    }
+
+    #[test]
+    fn test_cron_minute_out_of_range() {
+        assert_eq!(parse_cron_next("60 * * * *", "2026-01-01T10:00:00Z"), None);
+    }
+
+    #[test]
+    fn test_cron_malformed_timestamp() {
+        assert_eq!(parse_cron_next("*/5 * * * *", "not-a-timestamp"), None);
+    }
+
+    // ── apply_expect_captures: additional cases ─────────────────────────
+
+    #[test]
+    fn test_apply_expect_captures_invalid_regex_returns_empty() {
+        let caps = apply_expect_captures("(unterminated", "some text");
+        assert!(caps.is_empty());
+    }
+
+    #[test]
+    fn test_apply_expect_captures_mixed_named_and_positional() {
+        let caps = apply_expect_captures(r"(\w+):(?P<port>\d+)", "host:22");
+        // positional group 1 captures "host"
+        assert_eq!(caps.get("1").map(|s| s.as_str()), Some("host"));
+        // named group "port" captures "22"
+        assert_eq!(caps.get("port").map(|s| s.as_str()), Some("22"));
+    }
+
+    // ── substitute_variables: additional cases ──────────────────────────
+
+    #[test]
+    fn test_substitute_variables_unknown_var_left_intact() {
+        let vars = HashMap::new();
+        let result = substitute_variables("Hello ${name}!", &vars);
+        assert_eq!(result, "Hello ${name}!");
+    }
+
+    #[test]
+    fn test_substitute_variables_no_closing_brace() {
+        let vars = HashMap::new();
+        let result = substitute_variables("Hello ${name", &vars);
+        assert_eq!(result, "Hello ${name");
+    }
+
+    #[test]
+    fn test_substitute_variables_no_placeholders() {
+        let vars = HashMap::new();
+        let result = substitute_variables("plain text", &vars);
+        assert_eq!(result, "plain text");
+    }
+
+    // ── macro schedules (module-level global store) ─────────────────────
+
+    #[test]
+    fn test_macro_schedule_store_add_list_delete() {
+        let schedule_id = format!("sched-{}", Uuid::new_v4());
+        let schedule = MacroSchedule {
+            id: schedule_id.clone(),
+            macro_id: "macro-1".into(),
+            session_id: "session-1".into(),
+            cron_expression: "*/5 * * * *".into(),
+            enabled: true,
+            last_run: None,
+            next_run: None,
+            run_count: 0,
+        };
+
+        {
+            let schedules = get_schedules();
+            let mut list = schedules.lock().unwrap();
+            list.push(schedule.clone());
+        }
+
+        {
+            let schedules = get_schedules();
+            let list = schedules.lock().unwrap();
+            assert!(list.iter().any(|s| s.id == schedule_id));
+        }
+
+        {
+            let schedules = get_schedules();
+            let mut list = schedules.lock().unwrap();
+            list.retain(|s| s.id != schedule_id);
+            assert!(!list.iter().any(|s| s.id == schedule_id));
+        }
+    }
 }
 
 // ════════════════════════════════════════════════════════════════════════════

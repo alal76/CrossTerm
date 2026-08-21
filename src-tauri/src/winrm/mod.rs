@@ -606,4 +606,180 @@ mod tests {
     fn test_extract_stream_chunks_empty_when_stream_absent() {
         assert_eq!(extract_stream_chunks("<rsp:ReceiveResponse/>", "stdout"), Vec::<u8>::new());
     }
+
+    // ── receive/signal/delete envelopes ──────────────────────────────
+
+    #[test]
+    fn test_receive_envelope_includes_shell_and_command_id() {
+        let xml = receive_envelope("shell-abc", "cmd-123");
+        assert!(xml.contains("shell-abc"));
+        assert!(xml.contains("cmd-123"));
+        assert!(xml.contains("windows/shell/Receive"));
+        assert!(xml.contains("<rsp:DesiredStream CommandId=\"cmd-123\">stdout stderr</rsp:DesiredStream>"));
+    }
+
+    #[test]
+    fn test_signal_envelope_includes_shell_and_command_id_and_terminate_signal() {
+        let xml = signal_envelope("shell-xyz", "cmd-789");
+        assert!(xml.contains("shell-xyz"));
+        assert!(xml.contains("<rsp:Signal CommandId=\"cmd-789\">"));
+        assert!(xml.contains("signal/terminate"));
+        assert!(xml.contains("windows/shell/Signal"));
+    }
+
+    #[test]
+    fn test_delete_shell_envelope_includes_shell_id_and_delete_action() {
+        let xml = delete_shell_envelope("shell-del-1");
+        assert!(xml.contains("shell-del-1"));
+        assert!(xml.contains("2004/09/transfer/Delete"));
+    }
+
+    // ── xml_escape ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_xml_escape_all_special_characters() {
+        assert_eq!(xml_escape("&"), "&amp;");
+        assert_eq!(xml_escape("<"), "&lt;");
+        assert_eq!(xml_escape(">"), "&gt;");
+        assert_eq!(xml_escape("\""), "&quot;");
+        assert_eq!(xml_escape("'"), "&apos;");
+        assert_eq!(xml_escape("plain text"), "plain text");
+    }
+
+    #[test]
+    fn test_xml_escape_combined_and_ordering() {
+        // '&' must be escaped first so that escaping '<' etc. doesn't
+        // double-escape the ampersands it just introduced.
+        let escaped = xml_escape(r#"<tag attr="a & b">'text'</tag>"#);
+        assert_eq!(escaped, "&lt;tag attr=&quot;a &amp; b&quot;&gt;&apos;text&apos;&lt;/tag&gt;");
+    }
+
+    // ── WinRmError ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_winrm_error_display_all_variants() {
+        assert_eq!(WinRmError::NotFound("sess-1".into()).to_string(), "Connection not found: sess-1");
+        assert_eq!(WinRmError::AuthFailed.to_string(), "Authentication failed");
+        assert_eq!(WinRmError::CommandFailed("boom".into()).to_string(), "Command failed: boom");
+        assert_eq!(WinRmError::Http("timeout".into()).to_string(), "HTTP error: timeout");
+        assert_eq!(WinRmError::Xml("bad xml".into()).to_string(), "XML parse error: bad xml");
+        assert_eq!(
+            WinRmError::KerberosUnsupported.to_string(),
+            "Kerberos auth is not yet supported for WinRM — use NTLM or Basic"
+        );
+    }
+
+    #[test]
+    fn test_winrm_error_serialize_is_plain_string() {
+        let json = serde_json::to_string(&WinRmError::AuthFailed).unwrap();
+        assert_eq!(json, "\"Authentication failed\"");
+        assert!(json.starts_with('"') && json.ends_with('"'));
+    }
+
+    // ── b64_decode error path ────────────────────────────────────────
+
+    #[test]
+    fn test_b64_decode_invalid_input_errors() {
+        let result = b64_decode("not valid base64!!!");
+        assert!(result.is_err());
+        assert!(matches!(result, Err(WinRmError::AuthFailed)));
+    }
+
+    // ── build_client ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_build_client_succeeds_with_tls_verification_enabled() {
+        let config = WinRmConfig {
+            host: "10.0.0.1".into(), port: 5986, username: "u".into(), password: "p".into(),
+            use_tls: true, auth: WinRmAuth::Basic, verify_tls: true,
+        };
+        assert!(build_client(&config).is_ok());
+    }
+
+    #[test]
+    fn test_build_client_succeeds_with_tls_verification_disabled() {
+        let config = WinRmConfig {
+            host: "10.0.0.1".into(), port: 5986, username: "u".into(), password: "p".into(),
+            use_tls: true, auth: WinRmAuth::Basic, verify_tls: false,
+        };
+        assert!(build_client(&config).is_ok());
+    }
+
+    // ── WinRmState / winrm_list (pure state, no network) ────────────────
+
+    #[test]
+    fn test_winrm_state_new_is_empty() {
+        let state = WinRmState::new();
+        assert!(state.sessions.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_winrm_state_sessions_roundtrip() {
+        let state = WinRmState::new();
+        let config = WinRmConfig {
+            host: "192.168.1.10".into(), port: 5985, username: "administrator".into(),
+            password: "pw".into(), use_tls: false, auth: WinRmAuth::Ntlm, verify_tls: true,
+        };
+        state.sessions.lock().unwrap().insert("sess-1".to_string(), (config, "shell-99".to_string()));
+
+        // Mirrors winrm_list's mapping logic directly against the state,
+        // since tauri::State can't be constructed outside a running app.
+        let sessions = state.sessions.lock().unwrap();
+        let listed: Vec<WinRmSession> = sessions.iter().map(|(id, (cfg, shell_id))| WinRmSession {
+            id: id.clone(),
+            host: cfg.host.clone(),
+            username: cfg.username.clone(),
+            shell_id: shell_id.clone(),
+        }).collect();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, "sess-1");
+        assert_eq!(listed[0].host, "192.168.1.10");
+        assert_eq!(listed[0].username, "administrator");
+        assert_eq!(listed[0].shell_id, "shell-99");
+    }
+
+    // ── Serde round-trips for wire types ─────────────────────────────────
+
+    #[test]
+    fn test_winrm_auth_serde_snake_case() {
+        assert_eq!(serde_json::to_string(&WinRmAuth::Basic).unwrap(), "\"basic\"");
+        assert_eq!(serde_json::to_string(&WinRmAuth::Ntlm).unwrap(), "\"ntlm\"");
+        assert_eq!(serde_json::to_string(&WinRmAuth::Kerberos).unwrap(), "\"kerberos\"");
+        let d: WinRmAuth = serde_json::from_str("\"ntlm\"").unwrap();
+        assert_eq!(d, WinRmAuth::Ntlm);
+    }
+
+    #[test]
+    fn test_winrm_config_serde_roundtrip() {
+        let config = WinRmConfig {
+            host: "host1".into(), port: 5985, username: "u".into(), password: "p".into(),
+            use_tls: false, auth: WinRmAuth::Basic, verify_tls: true,
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let d: WinRmConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(d.host, "host1");
+        assert_eq!(d.port, 5985);
+        assert!(d.verify_tls);
+    }
+
+    #[test]
+    fn test_winrm_command_result_serde_roundtrip() {
+        let result = WinRmCommandResult { stdout: "out".into(), stderr: "err".into(), exit_code: 1 };
+        let json = serde_json::to_string(&result).unwrap();
+        let d: WinRmCommandResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(d.stdout, "out");
+        assert_eq!(d.stderr, "err");
+        assert_eq!(d.exit_code, 1);
+    }
+
+    #[test]
+    fn test_winrm_session_serde_roundtrip() {
+        let session = WinRmSession {
+            id: "s1".into(), host: "h1".into(), username: "u1".into(), shell_id: "sh1".into(),
+        };
+        let json = serde_json::to_string(&session).unwrap();
+        let d: WinRmSession = serde_json::from_str(&json).unwrap();
+        assert_eq!(d.id, "s1");
+        assert_eq!(d.shell_id, "sh1");
+    }
 }

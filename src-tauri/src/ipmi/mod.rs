@@ -242,6 +242,7 @@ fn build_rakp1(bmc_session_id: u32, console_rand: &[u8; 16], privilege: &IpmiPri
     msg
 }
 
+#[derive(Debug)]
 struct Rakp2 {
     status: u8,
     bmc_rand: [u8; 16],
@@ -554,11 +555,16 @@ struct IpmiResponse {
 
 fn parse_ipmi_response(msg: &[u8]) -> Option<IpmiResponse> {
     // rsAddr, netFn/rqLUN, checksum1, rqAddr, rqSeq/rqLUN, cmd, ccode, data..., checksum2
-    if msg.len() < 7 {
+    // Minimum valid length is 8 (6 header bytes + ccode + trailing
+    // checksum2), not 7 — a 7-byte message is missing checksum2 entirely.
+    // The old `< 7` guard let a malformed 7-byte packet from the network
+    // through to `msg[7..msg.len() - 1]` (i.e. `msg[7..6]`), where start
+    // > end panics the whole IPMI listener task on untrusted input.
+    if msg.len() < 8 {
         return None;
     }
     let completion_code = msg[6];
-    let data = msg[7..msg.len().saturating_sub(1)].to_vec();
+    let data = msg[7..msg.len() - 1].to_vec();
     Some(IpmiResponse { completion_code, data })
 }
 
@@ -1055,5 +1061,282 @@ mod tests {
         assert!(constant_time_eq(b"abc", b"abc"));
         assert!(!constant_time_eq(b"abc", b"abd"));
         assert!(!constant_time_eq(b"abc", b"ab"));
+    }
+
+    // ── rmcp_header / wrap_pre_session_packet ─────────────────────────
+
+    #[test]
+    fn test_rmcp_header_bytes() {
+        let header = rmcp_header();
+        assert_eq!(header, [0x06, 0x00, 0xFF, RMCP_CLASS_IPMI]);
+    }
+
+    #[test]
+    fn test_wrap_pre_session_packet_layout() {
+        let payload = [0xAA, 0xBB, 0xCC];
+        let msg = wrap_pre_session_packet(PAYLOAD_TYPE_RAKP1, &payload);
+        assert_eq!(&msg[0..4], &rmcp_header());
+        assert_eq!(msg[4], AUTHTYPE_RMCP_PLUS);
+        assert_eq!(msg[5], PAYLOAD_TYPE_RAKP1);
+        // session ID (4 bytes) + sequence number (4 bytes) = 0 pre-session
+        assert_eq!(&msg[6..10], &[0, 0, 0, 0]);
+        assert_eq!(&msg[10..14], &[0, 0, 0, 0]);
+        // payload length (u16 LE)
+        assert_eq!(&msg[14..16], &3u16.to_le_bytes());
+        assert_eq!(&msg[16..], &payload);
+    }
+
+    // ── extract_pre_session_payload ────────────────────────────────────
+
+    #[test]
+    fn test_extract_pre_session_payload_success() {
+        let payload = [0x01, 0x02, 0x03, 0x04];
+        let packet = wrap_pre_session_packet(PAYLOAD_TYPE_OPEN_SESSION_RESPONSE, &payload);
+        let extracted = extract_pre_session_payload(&packet, PAYLOAD_TYPE_OPEN_SESSION_RESPONSE).unwrap();
+        assert_eq!(extracted, payload);
+    }
+
+    #[test]
+    fn test_extract_pre_session_payload_too_short_errors() {
+        let data = [0u8; 10]; // < 14 bytes
+        let result = extract_pre_session_payload(&data, PAYLOAD_TYPE_OPEN_SESSION_RESPONSE);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_extract_pre_session_payload_wrong_auth_type_errors() {
+        let mut packet = wrap_pre_session_packet(PAYLOAD_TYPE_OPEN_SESSION_RESPONSE, &[0x01]);
+        packet[4] = 0x00; // not AUTHTYPE_RMCP_PLUS
+        let result = extract_pre_session_payload(&packet, PAYLOAD_TYPE_OPEN_SESSION_RESPONSE);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_extract_pre_session_payload_wrong_payload_type_errors() {
+        let packet = wrap_pre_session_packet(PAYLOAD_TYPE_RAKP2, &[0x01]);
+        let result = extract_pre_session_payload(&packet, PAYLOAD_TYPE_RAKP3);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("Unexpected payload type"));
+    }
+
+    #[test]
+    fn test_extract_pre_session_payload_truncated_errors() {
+        let mut packet = wrap_pre_session_packet(PAYLOAD_TYPE_RAKP2, &[0x01, 0x02, 0x03, 0x04]);
+        packet.truncate(17); // claims 4-byte payload but only 1 byte present
+        let result = extract_pre_session_payload(&packet, PAYLOAD_TYPE_RAKP2);
+        assert!(result.is_err());
+    }
+
+    // ── parse_rakp2 error paths ─────────────────────────────────────────
+
+    #[test]
+    fn test_parse_rakp2_too_short_errors() {
+        let data = [0u8; 2];
+        assert!(parse_rakp2(&data).is_err());
+    }
+
+    #[test]
+    fn test_parse_rakp2_error_status_errors() {
+        let mut data = vec![0u8; 40];
+        data[1] = 0x02; // error status
+        let result = parse_rakp2(&data);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("check username/privilege"));
+    }
+
+    #[test]
+    fn test_parse_rakp2_missing_rand_guid_errors() {
+        let mut data = vec![0u8; 20]; // status OK but < 40 bytes
+        data[1] = RAKP_STATUS_NO_ERRORS;
+        assert!(parse_rakp2(&data).is_err());
+    }
+
+    #[test]
+    fn test_parse_rakp2_missing_auth_code_defaults_to_empty() {
+        // Exactly 40 bytes: status/rand/guid present, auth code absent.
+        let mut data = vec![0u8; 40];
+        data[1] = RAKP_STATUS_NO_ERRORS;
+        let rakp2 = parse_rakp2(&data).unwrap();
+        assert!(rakp2.key_exchange_auth_code.is_empty());
+    }
+
+    // ── IpmiPrivilege / IpmiPowerAction wire values ──────────────────────
+
+    #[test]
+    fn test_ipmi_privilege_wire_values() {
+        assert_eq!(IpmiPrivilege::User.wire_value(), 0x02);
+        assert_eq!(IpmiPrivilege::Operator.wire_value(), 0x03);
+        assert_eq!(IpmiPrivilege::Administrator.wire_value(), 0x04);
+    }
+
+    #[test]
+    fn test_ipmi_power_action_wire_values() {
+        assert_eq!(IpmiPowerAction::Down.wire_value(), 0x00);
+        assert_eq!(IpmiPowerAction::Up.wire_value(), 0x01);
+        assert_eq!(IpmiPowerAction::Cycle.wire_value(), 0x02);
+        assert_eq!(IpmiPowerAction::HardReset.wire_value(), 0x03);
+    }
+
+    // ── parse_ipmi_response edge cases ───────────────────────────────────
+
+    #[test]
+    fn test_parse_ipmi_response_too_short_returns_none() {
+        let msg = [0u8; 5]; // < 7 bytes
+        assert!(parse_ipmi_response(&msg).is_none());
+    }
+
+    #[test]
+    fn test_parse_ipmi_response_minimal_length() {
+        // Exactly 8 bytes: no data, completion code at index 6, checksum2
+        // (unused by this parser) as the trailing byte.
+        let msg = [0x81, 0x04, 0x00, 0x20, 0x00, 0x01, 0x00, 0xAA];
+        let resp = parse_ipmi_response(&msg).unwrap();
+        assert_eq!(resp.completion_code, 0x00);
+        assert!(resp.data.is_empty());
+    }
+
+    #[test]
+    fn test_parse_ipmi_response_too_short_returns_none_instead_of_panicking() {
+        // A 7-byte message is missing the trailing checksum2 byte the real
+        // wire format always includes — must be rejected, not panic.
+        let msg = [0x81, 0x04, 0x00, 0x20, 0x00, 0x01, 0x00];
+        assert!(parse_ipmi_response(&msg).is_none());
+    }
+
+    // ── unwrap_active_packet edge cases ───────────────────────────────────
+
+    #[test]
+    fn test_unwrap_active_packet_too_short_returns_none() {
+        let crypto = SessionCrypto { bmc_session_id: 1, k1: [0x11; 20], k2: [0x22; 20] };
+        let data = [0u8; 5];
+        assert!(unwrap_active_packet(&crypto, &data).is_none());
+    }
+
+    #[test]
+    fn test_unwrap_active_packet_wrong_auth_type_returns_none() {
+        let crypto = SessionCrypto { bmc_session_id: 1, k1: [0x11; 20], k2: [0x22; 20] };
+        let mut packet = build_active_packet(&crypto, 1, PAYLOAD_TYPE_SOL, b"data");
+        packet[4] = 0x00; // corrupt AuthType
+        assert!(unwrap_active_packet(&crypto, &packet).is_none());
+    }
+
+    #[test]
+    fn test_unwrap_active_packet_unencrypted_unauthenticated_passthrough() {
+        // Hand-build a packet with encrypted=0, authenticated=0 (payload
+        // type byte high bits clear) to exercise the plaintext branch.
+        let crypto = SessionCrypto { bmc_session_id: 0x1234, k1: [0x11; 20], k2: [0x22; 20] };
+        let payload = b"plaintext-ipmi";
+        let mut msg = Vec::new();
+        msg.extend_from_slice(&rmcp_header());
+        msg.push(AUTHTYPE_RMCP_PLUS);
+        msg.push(PAYLOAD_TYPE_IPMI); // no 0xC0 bits set => unencrypted, unauthenticated
+        msg.extend_from_slice(&crypto.bmc_session_id.to_le_bytes());
+        msg.extend_from_slice(&1u32.to_le_bytes());
+        msg.extend_from_slice(&(payload.len() as u16).to_le_bytes());
+        msg.extend_from_slice(payload);
+
+        let unwrapped = unwrap_active_packet(&crypto, &msg).expect("plaintext packet should unwrap");
+        assert_eq!(unwrapped.payload_type, PAYLOAD_TYPE_IPMI);
+        assert_eq!(unwrapped.payload, payload);
+    }
+
+    // ── IpmiError ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_ipmi_error_display_all_variants() {
+        assert_eq!(IpmiError::NotFound("sess-1".into()).to_string(), "Session not found: sess-1");
+        assert_eq!(IpmiError::AuthFailed.to_string(), "Authentication failed");
+        assert_eq!(IpmiError::Rmcp("bad handshake".into()).to_string(), "RMCP/RAKP error: bad handshake");
+        let io_err = IpmiError::from(std::io::Error::new(std::io::ErrorKind::TimedOut, "timed out"));
+        assert!(io_err.to_string().contains("timed out"));
+    }
+
+    #[test]
+    fn test_ipmi_error_serialize_is_plain_string() {
+        let json = serde_json::to_string(&IpmiError::AuthFailed).unwrap();
+        assert_eq!(json, "\"Authentication failed\"");
+    }
+
+    // ── Serde round-trips ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_ipmi_config_serde_roundtrip() {
+        let config = IpmiConfig {
+            host: "10.0.0.5".into(), port: 623, username: "admin".into(),
+            password: "pw".into(), channel: 1, privilege: IpmiPrivilege::Administrator,
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let d: IpmiConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(d.host, "10.0.0.5");
+        assert_eq!(d.privilege, IpmiPrivilege::Administrator);
+    }
+
+    #[test]
+    fn test_ipmi_privilege_serde_snake_case() {
+        assert_eq!(serde_json::to_string(&IpmiPrivilege::User).unwrap(), "\"user\"");
+        assert_eq!(serde_json::to_string(&IpmiPrivilege::Operator).unwrap(), "\"operator\"");
+        assert_eq!(serde_json::to_string(&IpmiPrivilege::Administrator).unwrap(), "\"administrator\"");
+    }
+
+    #[test]
+    fn test_ipmi_power_action_serde_snake_case() {
+        assert_eq!(serde_json::to_string(&IpmiPowerAction::HardReset).unwrap(), "\"hard_reset\"");
+        assert_eq!(serde_json::to_string(&IpmiPowerAction::Up).unwrap(), "\"up\"");
+    }
+
+    #[test]
+    fn test_ipmi_session_serde_roundtrip() {
+        let session = IpmiSession { id: "s1".into(), host: "h1".into(), username: "u1".into() };
+        let json = serde_json::to_string(&session).unwrap();
+        let d: IpmiSession = serde_json::from_str(&json).unwrap();
+        assert_eq!(d.id, "s1");
+        assert_eq!(d.host, "h1");
+    }
+
+    #[test]
+    fn test_ipmi_sol_data_serde_roundtrip() {
+        let sol = IpmiSolData { session_id: "s1".into(), data: "console output".into() };
+        let json = serde_json::to_string(&sol).unwrap();
+        let d: IpmiSolData = serde_json::from_str(&json).unwrap();
+        assert_eq!(d.data, "console output");
+    }
+
+    #[test]
+    fn test_ipmi_power_status_serde_roundtrip() {
+        let status = IpmiPowerStatus { session_id: "s1".into(), powered_on: true };
+        let json = serde_json::to_string(&status).unwrap();
+        assert!(json.contains("\"powered_on\":true"));
+    }
+
+    // ── IpmiState (pure state; tauri::State can't be built outside a running app) ──
+
+    #[test]
+    fn test_ipmi_state_new_is_empty() {
+        let state = IpmiState::new();
+        assert!(state.sessions.lock().unwrap().is_empty());
+        assert!(state.conns.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_ipmi_state_list_and_disconnect_roundtrip() {
+        // Mirrors ipmi_list / ipmi_sol_disconnect against the state directly,
+        // since tauri::State can't be constructed outside a running app.
+        let state = IpmiState::new();
+        let session = IpmiSession { id: "sess-1".into(), host: "bmc.local".into(), username: "admin".into() };
+        state.sessions.lock().unwrap().insert("sess-1".to_string(), session);
+
+        let listed: Vec<IpmiSession> = state.sessions.lock().unwrap().values().cloned().collect();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].host, "bmc.local");
+
+        // Disconnect: remove from sessions map (mirrors ipmi_sol_disconnect).
+        let removed = state.sessions.lock().unwrap().remove("sess-1");
+        assert!(removed.is_some());
+        assert!(state.sessions.lock().unwrap().is_empty());
+
+        // Removing again should find nothing (mirrors the NotFound path).
+        let removed_again = state.sessions.lock().unwrap().remove("sess-1");
+        assert!(removed_again.is_none());
     }
 }

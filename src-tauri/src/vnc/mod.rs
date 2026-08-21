@@ -622,4 +622,106 @@ mod tests {
         let err = validate_config(&cfg).unwrap_err();
         assert!(matches!(err, VncError::InvalidConfig(_)));
     }
+
+    #[test]
+    fn vnc_error_display_and_serialize_round_trip() {
+        let cases: Vec<(VncError, &str)> = vec![
+            (VncError::NotFound("id1".into()), "Connection not found: id1"),
+            (VncError::ConnectionFailed("x".into()), "Connection failed: x"),
+            (VncError::InvalidConfig("y".into()), "Invalid configuration: y"),
+            (VncError::AuthFailed("z".into()), "Authentication failed: z"),
+            (VncError::Protocol("p".into()), "Protocol error: p"),
+            (VncError::Clipboard("c".into()), "Clipboard error: c"),
+            (VncError::Encoding("e".into()), "Encoding error: e"),
+            (VncError::Screenshot("s".into()), "Screenshot error: s"),
+            (VncError::ViewOnly, "View-only mode: input rejected"),
+            (VncError::Io("i".into()), "IO error: i"),
+        ];
+        for (err, expected) in cases {
+            assert_eq!(err.to_string(), expected);
+            let json = serde_json::to_string(&err).unwrap();
+            assert_eq!(json, format!("\"{expected}\""));
+        }
+    }
+
+    #[test]
+    fn vnc_error_from_io_error_wraps_message() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::ConnectionReset, "reset");
+        let err: VncError = io_err.into();
+        assert!(matches!(err, VncError::Io(msg) if msg == "reset"));
+    }
+
+    #[test]
+    fn vnc_state_new_starts_with_no_connections() {
+        let state = VncState::new();
+        assert!(state.connections.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn vnc_config_serde_round_trip_preserves_optional_fields() {
+        let cfg = sample_config();
+        let json = serde_json::to_string(&cfg).unwrap();
+        let restored: VncConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.host, cfg.host);
+        assert_eq!(restored.port, cfg.port);
+        assert_eq!(restored.password.as_deref(), Some("hunter2"));
+        assert!(restored.vnc_auth);
+        assert!(!restored.vencrypt);
+    }
+
+    #[test]
+    fn vnc_encoding_variants_serialize_snake_case() {
+        assert_eq!(serde_json::to_string(&VncEncoding::CopyRect).unwrap(), "\"copy_rect\"");
+        assert_eq!(serde_json::to_string(&VncEncoding::Zrle).unwrap(), "\"zrle\"");
+        assert_eq!(serde_json::to_string(&VncEncoding::CursorPseudo).unwrap(), "\"cursor_pseudo\"");
+    }
+
+    #[test]
+    fn vnc_scaling_mode_serde_round_trip() {
+        for mode in [VncScalingMode::FitToWindow, VncScalingMode::Scroll, VncScalingMode::OneToOne] {
+            let json = serde_json::to_string(&mode).unwrap();
+            let restored: VncScalingMode = serde_json::from_str(&json).unwrap();
+            assert_eq!(format!("{restored:?}"), format!("{mode:?}"));
+        }
+    }
+
+    #[test]
+    fn vnc_security_type_and_rfb_version_serde_round_trip() {
+        for t in [VncSecurityType::None, VncSecurityType::VncAuth, VncSecurityType::VeNCryptTls, VncSecurityType::VeNCryptX509] {
+            let json = serde_json::to_string(&t).unwrap();
+            let restored: VncSecurityType = serde_json::from_str(&json).unwrap();
+            assert_eq!(format!("{restored:?}"), format!("{t:?}"));
+        }
+        assert_eq!(serde_json::to_string(&VncRfbVersion::V33).unwrap(), "\"v33\"");
+        let restored: VncRfbVersion = serde_json::from_str("\"v38\"").unwrap();
+        assert!(matches!(restored, VncRfbVersion::V38));
+    }
+
+    #[test]
+    fn vnc_connection_status_error_variant_uses_custom_rename() {
+        let status = VncConnectionStatus::Error("boom".into());
+        let json = serde_json::to_string(&status).unwrap();
+        assert!(json.contains("\"error\""));
+        let restored: VncConnectionStatus = serde_json::from_str(&json).unwrap();
+        assert!(matches!(restored, VncConnectionStatus::Error(msg) if msg == "boom"));
+    }
+
+    #[test]
+    fn vnc_connection_info_serde_round_trip() {
+        let info = VncConnectionInfo {
+            id: "abc".into(),
+            host: "10.0.0.5".into(),
+            port: 5901,
+            status: VncConnectionStatus::Connected,
+            width: 1024,
+            height: 768,
+            view_only: true,
+            scaling_mode: VncScalingMode::OneToOne,
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        let restored: VncConnectionInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.id, "abc");
+        assert_eq!(restored.width, 1024);
+        assert!(restored.view_only);
+    }
 }
