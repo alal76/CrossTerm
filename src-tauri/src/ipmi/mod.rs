@@ -1016,6 +1016,46 @@ mod tests {
     }
 
     #[test]
+    fn test_verify_rakp2_auth_code_rejects_wrong_length_auth_code() {
+        // received_auth_code.len() == 20 is checked before comparing bytes;
+        // a short/absent auth code (e.g. RAKP-None servers) must fail closed.
+        let ok = verify_rakp2_auth_code(
+            "hunter2", 1, 2, &[0x11; 16], &[0x22; 16], &[0x33; 16], 0x14, "admin", &[],
+        );
+        assert!(!ok);
+    }
+
+    #[test]
+    fn test_verify_rakp2_auth_code_rejects_tampered_auth_code() {
+        let password = "hunter2";
+        let username = "admin";
+        let role_byte = 0x14;
+        let console_session_id = 1u32;
+        let bmc_session_id = 2u32;
+        let console_rand = [0x11u8; 16];
+        let bmc_rand = [0x22u8; 16];
+        let bmc_guid = [0x33u8; 16];
+
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&console_session_id.to_le_bytes());
+        buf.extend_from_slice(&bmc_session_id.to_le_bytes());
+        buf.extend_from_slice(&console_rand);
+        buf.extend_from_slice(&bmc_rand);
+        buf.extend_from_slice(&bmc_guid);
+        buf.push(role_byte);
+        buf.push(username.len() as u8);
+        buf.extend_from_slice(username.as_bytes());
+        let mut correct = hmac_sha1(&password_key(password), &buf);
+        correct[0] ^= 0xFF; // tamper with one byte
+
+        let ok = verify_rakp2_auth_code(
+            password, console_session_id, bmc_session_id, &console_rand, &bmc_rand, &bmc_guid,
+            role_byte, username, &correct,
+        );
+        assert!(!ok);
+    }
+
+    #[test]
     fn test_password_key_pads_short_passwords_and_truncates_long_ones() {
         let short = password_key("abc");
         assert_eq!(&short[..3], b"abc");

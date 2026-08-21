@@ -851,6 +851,39 @@ mod tests {
         assert!(hunks.is_empty());
     }
 
+    // detect_language_from_extension: exercise every remaining match arm not
+    // already covered by test_language_detection / test_editor_detect_language_command.
+    #[test]
+    fn test_language_detection_covers_remaining_extensions() {
+        assert_eq!(detect_language_from_extension("app.js"), "javascript");
+        assert_eq!(detect_language_from_extension("app.jsx"), "javascriptreact");
+        assert_eq!(detect_language_from_extension("index.html"), "html");
+        assert_eq!(detect_language_from_extension("index.htm"), "html");
+        assert_eq!(detect_language_from_extension("Cargo.toml"), "toml");
+        assert_eq!(detect_language_from_extension("Main.java"), "java");
+        assert_eq!(detect_language_from_extension("main.c"), "c");
+        assert_eq!(detect_language_from_extension("main.cpp"), "cpp");
+        assert_eq!(detect_language_from_extension("main.cc"), "cpp");
+        assert_eq!(detect_language_from_extension("main.cxx"), "cpp");
+        assert_eq!(detect_language_from_extension("header.h"), "cpp");
+        assert_eq!(detect_language_from_extension("header.hpp"), "cpp");
+        assert_eq!(detect_language_from_extension("script.rb"), "ruby");
+        assert_eq!(detect_language_from_extension("index.php"), "php");
+        assert_eq!(detect_language_from_extension("query.sql"), "sql");
+        assert_eq!(detect_language_from_extension("data.xml"), "xml");
+        assert_eq!(detect_language_from_extension("notes.txt"), "plaintext");
+        assert_eq!(detect_language_from_extension("notes.text"), "plaintext");
+        assert_eq!(detect_language_from_extension("app.conf"), "ini");
+        assert_eq!(detect_language_from_extension("app.cfg"), "ini");
+        assert_eq!(detect_language_from_extension("app.ini"), "ini");
+        assert_eq!(detect_language_from_extension("build.zsh"), "shell");
+        assert_eq!(detect_language_from_extension("build.bash"), "shell");
+        assert_eq!(detect_language_from_extension("data.yml"), "yaml");
+        assert_eq!(detect_language_from_extension("readme.markdown"), "markdown");
+        // Uppercase extension is lowercased before matching.
+        assert_eq!(detect_language_from_extension("Main.RS"), "rust");
+    }
+
     #[test]
     fn test_editor_error_io_variant() {
         let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");

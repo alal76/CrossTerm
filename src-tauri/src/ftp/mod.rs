@@ -683,6 +683,17 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_list_line_preserves_multiple_spaces_in_filename() {
+        // The filename is reconstructed by walking the raw line (skipping 8
+        // fixed tokens) rather than re-joining split_whitespace() fields, so
+        // internal multi-space runs in the name itself must survive intact.
+        let line = "-rw-r--r--  1 user group   100 Jan  1 12:00 my   file.txt";
+        let entry = parse_list_line(line).unwrap();
+        assert_eq!(entry.name, "my   file.txt");
+        assert_eq!(entry.size, 100);
+    }
+
+    #[test]
     fn test_ftp_error_serializes_to_display_string() {
         let err = FtpError::PathNotFound("/tmp/x".into());
         assert_eq!(err.to_string(), "Path not found: /tmp/x");
