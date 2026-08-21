@@ -33,7 +33,7 @@ describe("WhatsNewPanel", () => {
     render(<WhatsNewPanel />);
 
     expect(screen.getByText("What's New")).toBeInTheDocument();
-    expect(screen.getByText("What's New in CrossTerm 2.0.9")).toBeInTheDocument();
+    expect(screen.getByText("What's New in CrossTerm 2.0.10")).toBeInTheDocument();
 
     // Should show release notes content — "New Features" and "Bug Fixes"
     // each appear once per version section (this version's notes plus the
@@ -55,7 +55,7 @@ describe("WhatsNewPanel", () => {
     await user.click(dismissBtn);
 
     // Panel should be hidden
-    expect(screen.queryByText("What's New in CrossTerm 2.0.9")).not.toBeInTheDocument();
+    expect(screen.queryByText("What's New in CrossTerm 2.0.10")).not.toBeInTheDocument();
   });
 
   it("FT-H-08: 'Don't show again' persists to localStorage", async () => {
@@ -66,14 +66,14 @@ describe("WhatsNewPanel", () => {
     await user.click(dontShowBtn);
 
     // Panel should be hidden
-    expect(screen.queryByText("What's New in CrossTerm 2.0.9")).not.toBeInTheDocument();
+    expect(screen.queryByText("What's New in CrossTerm 2.0.10")).not.toBeInTheDocument();
 
     // localStorage should have the dismissed version
-    expect(localStorage.getItem("crossterm:whats-new-dismissed")).toBe("2.0.9");
+    expect(localStorage.getItem("crossterm:whats-new-dismissed")).toBe("2.0.10");
   });
 
   it("FT-H-08: does not render when version is already dismissed", () => {
-    localStorage.setItem("crossterm:whats-new-dismissed", "2.0.9");
+    localStorage.setItem("crossterm:whats-new-dismissed", "2.0.10");
 
     render(<WhatsNewPanel />);
 

@@ -2,11 +2,16 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { X, Sparkles } from "lucide-react";
 
-const APP_VERSION = "2.0.9";
+const APP_VERSION = "2.0.10";
 const DISMISSED_VERSION_KEY = "crossterm:whats-new-dismissed";
 
 const RELEASE_NOTES = `
 ## What's New in CrossTerm ${APP_VERSION}
+
+### Under the Hood
+- No user-facing changes in this release. Substantially expanded automated test coverage across cloud provider integrations (AWS/Azure/GCP), RDP/VNC/WinRM, and several other backend modules, as part of an ongoing effort to raise real measured test coverage.
+
+## CrossTerm 2.0.9
 
 ### Bug Fixes
 - Fixed the system-language auto-detection silently failing on Linux: machines with no region-specific locale set (reporting "C.UTF-8" instead of e.g. "en_US.UTF-8", the default on most Linux distributions and CI systems) were returned the raw locale string instead of a real language code.
