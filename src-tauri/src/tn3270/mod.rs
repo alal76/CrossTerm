@@ -868,4 +868,141 @@ mod tests {
         let records = reader.feed(&[0x03, IAC, EOR]);
         assert_eq!(records, vec![vec![0x01, 0x02, 0x03]]);
     }
+
+    #[test]
+    fn test_record_reader_skips_interleaved_negotiation() {
+        // DO OPT_BINARY interleaved mid-record should be skipped (3-byte
+        // IAC/cmd/opt form), leaving only the real data bytes in the record.
+        let mut reader = RecordReader::new();
+        let raw = [0x01u8, IAC, DO, OPT_BINARY, 0x02, IAC, EOR];
+        let records = reader.feed(&raw);
+        assert_eq!(records, vec![vec![0x01, 0x02]]);
+    }
+
+    #[test]
+    fn test_model_terminal_type_all_models() {
+        assert_eq!(model_terminal_type(&Tn3270Model::Model2), "IBM-3278-2-E");
+        assert_eq!(model_terminal_type(&Tn3270Model::Model3), "IBM-3278-3-E");
+        assert_eq!(model_terminal_type(&Tn3270Model::Model4), "IBM-3278-4-E");
+        assert_eq!(model_terminal_type(&Tn3270Model::Model5), "IBM-3278-5-E");
+    }
+
+    #[test]
+    fn test_tn3270_model_dimensions_all() {
+        assert_eq!(Tn3270Model::Model2.dimensions(), (24, 80));
+        assert_eq!(Tn3270Model::Model3.dimensions(), (32, 80));
+        assert_eq!(Tn3270Model::Model4.dimensions(), (43, 80));
+        assert_eq!(Tn3270Model::Model5.dimensions(), (27, 132));
+    }
+
+    #[test]
+    fn test_decode_address_masks_high_bits() {
+        // Only the low 6 bits of each byte participate in addressing; any
+        // higher bits set (e.g. from the bit6-encoded wire form) must not
+        // affect the decoded address.
+        assert_eq!(decode_address(0xC0, 0xC0), decode_address(0x00, 0x00));
+        assert_eq!(decode_address(0x3F, 0x3F), 63 * 64 + 63);
+    }
+
+    #[test]
+    fn test_screen_buffer_erase_resets_state() {
+        let mut screen = ScreenBuffer::new(24, 80);
+        screen.cells[0].ebcdic = b'X';
+        screen.cursor_addr = 42;
+        screen.buf_addr = 10;
+        screen.erase();
+        assert_eq!(screen.cells[0].ebcdic, 0);
+        assert_eq!(screen.cursor_addr, 0);
+        assert_eq!(screen.buf_addr, 0);
+    }
+
+    #[test]
+    fn test_field_attr_for_no_fields_is_unprotected() {
+        // A freshly-created (unformatted) screen has no field-start cells at
+        // all, so field_attr_for must return None and is_protected must be
+        // false everywhere.
+        let screen = ScreenBuffer::new(24, 80);
+        assert_eq!(screen.field_attr_for(0), None);
+        assert!(!screen.is_protected(0));
+        assert!(!screen.is_protected(1919));
+    }
+
+    #[test]
+    fn test_process_command_empty_data_does_not_panic() {
+        let mut screen = ScreenBuffer::new(24, 80);
+        process_command(&mut screen, &[]);
+        // Screen should remain untouched.
+        assert_eq!(screen.cursor_addr, 0);
+        assert_eq!(screen.buf_addr, 0);
+    }
+
+    #[test]
+    fn test_process_command_read_commands_are_noop() {
+        let mut screen = ScreenBuffer::new(24, 80);
+        screen.cells[0].ebcdic = b'X';
+        process_command(&mut screen, &[CMD_RB, 0xAA, 0xBB]);
+        process_command(&mut screen, &[CMD_RM, 0xAA, 0xBB]);
+        process_command(&mut screen, &[CMD_WSF, 0xAA, 0xBB]);
+        // None of these carry orders to apply; the buffer must be unchanged.
+        assert_eq!(screen.cells[0].ebcdic, b'X');
+    }
+
+    #[test]
+    fn test_process_command_sfe_order_applies_basic_attribute() {
+        let mut screen = ScreenBuffer::new(24, 80);
+        let mut data = vec![CMD_EW, 0x00, ORDER_SBA];
+        data.extend_from_slice(&encode_address(0));
+        // SFE with one attribute pair: type 0xC0 (basic 3270 attribute) = protected (0x20)
+        data.push(ORDER_SFE);
+        data.push(1); // pair_count
+        data.push(0xC0);
+        data.push(0x20); // protected
+        process_command(&mut screen, &data);
+
+        assert!(screen.cells[0].field_start);
+        assert!(screen.cells[0].protected);
+    }
+
+    #[test]
+    fn test_process_command_eua_order_erases_unprotected_range() {
+        let mut screen = ScreenBuffer::new(24, 80);
+        // Write some data into cells 0..5, then EUA over that range.
+        let mut data = vec![CMD_EW, 0x00, ORDER_SBA];
+        data.extend_from_slice(&encode_address(0));
+        for _ in 0..5 {
+            data.push(b'.');
+        }
+        process_command(&mut screen, &data);
+        for cell in &screen.cells[0..5] {
+            assert_eq!(cell.ebcdic, b'.');
+        }
+
+        // Use CMD_W (no implicit erase) so this call genuinely exercises EUA
+        // overwriting the previously-written cells, rather than relying on
+        // CMD_EW's own erase to blank them first.
+        let mut erase_data = vec![CMD_W, 0x00, ORDER_SBA];
+        erase_data.extend_from_slice(&encode_address(0));
+        erase_data.push(ORDER_EUA);
+        erase_data.extend_from_slice(&encode_address(5));
+        process_command(&mut screen, &erase_data);
+        for cell in &screen.cells[0..5] {
+            assert_eq!(cell.ebcdic, 0x40);
+        }
+    }
+
+    #[test]
+    fn test_screen_snapshot_reflects_buffer_state() {
+        let mut screen = ScreenBuffer::new(24, 80);
+        let mut data = vec![CMD_EW, 0x00, ORDER_SBA];
+        data.extend_from_slice(&encode_address(0));
+        data.push(ORDER_IC);
+        process_command(&mut screen, &data);
+
+        let snapshot = screen_snapshot("sess-1", &screen);
+        assert_eq!(snapshot.session_id, "sess-1");
+        assert_eq!(snapshot.rows, 24);
+        assert_eq!(snapshot.cols, 80);
+        assert_eq!(snapshot.cursor_addr, 0);
+        assert_eq!(snapshot.cells.len(), 24 * 80);
+    }
 }
