@@ -171,6 +171,44 @@ fn default_translations_for(locale: &str) -> HashMap<String, String> {
     entries
 }
 
+/// Returns `Ok(())` if `locale` is one of the codes in `available`, or a
+/// descriptive `UnsupportedLocale` error otherwise. Split out from the
+/// individual Tauri commands (which all perform this exact check) so the
+/// validation logic is unit-testable without a live `L10nState`.
+fn validate_locale(available: &[LocaleInfo], locale: &str) -> Result<(), L10nError> {
+    if available.iter().any(|l| l.code == locale) {
+        Ok(())
+    } else {
+        Err(L10nError::UnsupportedLocale(locale.to_string()))
+    }
+}
+
+/// Layer any custom-translation overrides for a locale on top of its
+/// built-in defaults. Overrides win on key collision.
+fn merge_translations(
+    mut entries: HashMap<String, String>,
+    overrides: Option<&HashMap<String, String>>,
+) -> HashMap<String, String> {
+    if let Some(overrides) = overrides {
+        for (k, v) in overrides {
+            entries.insert(k.clone(), v.clone());
+        }
+    }
+    entries
+}
+
+/// Extract the bare language code from a POSIX-style locale string, e.g.
+/// `"en_US.UTF-8"` -> `"en"`, `"fr_FR"` -> `"fr"`. Falls back to `"en"` for
+/// an empty input (mirrors the caller's env-var-missing fallback).
+fn extract_language_code(locale_env: &str) -> String {
+    locale_env
+        .split('_')
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("en")
+        .to_string()
+}
+
 // ── Tauri Commands ──────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -195,9 +233,7 @@ pub fn l10n_set_locale(
     locale: String,
 ) -> Result<(), L10nError> {
     let available = state.available_locales.lock().unwrap();
-    if !available.iter().any(|l| l.code == locale) {
-        return Err(L10nError::UnsupportedLocale(locale));
-    }
+    validate_locale(&available, &locale)?;
     drop(available);
 
     let mut current = state.current_locale.lock().unwrap();
@@ -211,20 +247,14 @@ pub fn l10n_get_translations(
     locale: String,
 ) -> Result<TranslationBundle, L10nError> {
     let available = state.available_locales.lock().unwrap();
-    if !available.iter().any(|l| l.code == locale) {
-        return Err(L10nError::UnsupportedLocale(locale.clone()));
-    }
+    validate_locale(&available, &locale)?;
     drop(available);
 
-    let mut entries = default_translations_for(&locale);
+    let defaults = default_translations_for(&locale);
 
     // Merge custom translations on top
     let custom = state.custom_translations.lock().unwrap();
-    if let Some(overrides) = custom.get(&locale) {
-        for (k, v) in overrides {
-            entries.insert(k.clone(), v.clone());
-        }
-    }
+    let entries = merge_translations(defaults, custom.get(&locale));
 
     Ok(TranslationBundle {
         locale,
@@ -241,9 +271,7 @@ pub fn l10n_set_custom_translation(
     value: String,
 ) -> Result<(), L10nError> {
     let available = state.available_locales.lock().unwrap();
-    if !available.iter().any(|l| l.code == locale) {
-        return Err(L10nError::UnsupportedLocale(locale.clone()));
-    }
+    validate_locale(&available, &locale)?;
     drop(available);
 
     let mut custom = state.custom_translations.lock().unwrap();
@@ -260,18 +288,12 @@ pub fn l10n_export_translations(
     locale: String,
 ) -> Result<String, L10nError> {
     let available = state.available_locales.lock().unwrap();
-    if !available.iter().any(|l| l.code == locale) {
-        return Err(L10nError::UnsupportedLocale(locale.clone()));
-    }
+    validate_locale(&available, &locale)?;
     drop(available);
 
-    let mut entries = default_translations_for(&locale);
+    let defaults = default_translations_for(&locale);
     let custom = state.custom_translations.lock().unwrap();
-    if let Some(overrides) = custom.get(&locale) {
-        for (k, v) in overrides {
-            entries.insert(k.clone(), v.clone());
-        }
-    }
+    let entries = merge_translations(defaults, custom.get(&locale));
 
     serde_json::to_string_pretty(&entries)
         .map_err(|e| L10nError::ExportError(e.to_string()))
@@ -284,9 +306,7 @@ pub fn l10n_import_translations(
     data: String,
 ) -> Result<u32, L10nError> {
     let available = state.available_locales.lock().unwrap();
-    if !available.iter().any(|l| l.code == locale) {
-        return Err(L10nError::UnsupportedLocale(locale.clone()));
-    }
+    validate_locale(&available, &locale)?;
     drop(available);
 
     let imported: HashMap<String, String> = serde_json::from_str(&data)
@@ -323,11 +343,7 @@ pub fn l10n_detect_system_locale() -> Result<String, L10nError> {
         .unwrap_or_else(|_| "en_US.UTF-8".to_string());
 
     // Extract the language code (e.g., "en" from "en_US.UTF-8")
-    let code = locale
-        .split('_')
-        .next()
-        .unwrap_or("en")
-        .to_string();
+    let code = extract_language_code(&locale);
 
     Ok(code)
 }
@@ -420,5 +436,153 @@ mod tests {
         // French is LTR
         let french = locales.iter().find(|l| l.code == "fr").unwrap();
         assert!(!french.rtl);
+    }
+
+    // ── default_translations_for ─────────────────────────────────────
+
+    #[test]
+    fn test_default_translations_for_en() {
+        let entries = default_translations_for("en");
+        assert_eq!(entries.get("app.name").unwrap(), "CrossTerm");
+        assert!(entries.contains_key("app.tagline"));
+    }
+
+    #[test]
+    fn test_default_translations_for_fr_ar_he() {
+        let fr = default_translations_for("fr");
+        assert!(fr.get("app.tagline").unwrap().contains("distant"));
+
+        let ar = default_translations_for("ar");
+        assert_eq!(ar.get("app.name").unwrap(), "CrossTerm");
+        assert!(ar.contains_key("app.tagline"));
+
+        let he = default_translations_for("he");
+        assert_eq!(he.get("app.name").unwrap(), "CrossTerm");
+        assert!(he.contains_key("app.tagline"));
+    }
+
+    #[test]
+    fn test_default_translations_for_unmapped_locale_falls_back() {
+        // "de", "ja", etc. hit the catch-all `_` branch: only app.name, no tagline.
+        let de = default_translations_for("de");
+        assert_eq!(de.get("app.name").unwrap(), "CrossTerm");
+        assert!(!de.contains_key("app.tagline"));
+
+        let unknown = default_translations_for("xx");
+        assert_eq!(unknown.get("app.name").unwrap(), "CrossTerm");
+        assert_eq!(unknown.len(), 1);
+    }
+
+    // ── validate_locale ───────────────────────────────────────────────
+
+    #[test]
+    fn test_validate_locale_accepts_known_code() {
+        let state = make_state();
+        let available = state.available_locales.lock().unwrap();
+        assert!(validate_locale(&available, "en").is_ok());
+        assert!(validate_locale(&available, "ar").is_ok());
+    }
+
+    #[test]
+    fn test_validate_locale_rejects_unknown_code() {
+        let state = make_state();
+        let available = state.available_locales.lock().unwrap();
+        let err = validate_locale(&available, "tlh").unwrap_err();
+        assert!(matches!(err, L10nError::UnsupportedLocale(ref c) if c == "tlh"));
+    }
+
+    // ── merge_translations ───────────────────────────────────────────
+
+    #[test]
+    fn test_merge_translations_overrides_win() {
+        let mut defaults = HashMap::new();
+        defaults.insert("app.name".to_string(), "CrossTerm".to_string());
+        defaults.insert("app.tagline".to_string(), "Original".to_string());
+
+        let mut overrides = HashMap::new();
+        overrides.insert("app.tagline".to_string(), "Custom Tagline".to_string());
+        overrides.insert("greeting".to_string(), "Hi!".to_string());
+
+        let merged = merge_translations(defaults, Some(&overrides));
+        assert_eq!(merged.get("app.name").unwrap(), "CrossTerm");
+        assert_eq!(merged.get("app.tagline").unwrap(), "Custom Tagline");
+        assert_eq!(merged.get("greeting").unwrap(), "Hi!");
+    }
+
+    #[test]
+    fn test_merge_translations_no_overrides_returns_defaults_unchanged() {
+        let mut defaults = HashMap::new();
+        defaults.insert("app.name".to_string(), "CrossTerm".to_string());
+        let merged = merge_translations(defaults.clone(), None);
+        assert_eq!(merged, defaults);
+    }
+
+    // ── extract_language_code ────────────────────────────────────────
+
+    #[test]
+    fn test_extract_language_code_variants() {
+        assert_eq!(extract_language_code("en_US.UTF-8"), "en");
+        assert_eq!(extract_language_code("fr_FR"), "fr");
+        assert_eq!(extract_language_code("de"), "de");
+        assert_eq!(extract_language_code(""), "en");
+    }
+
+    // ── l10n_detect_system_locale ────────────────────────────────────
+
+    #[test]
+    fn test_l10n_detect_system_locale_returns_two_letter_code() {
+        // Whatever the CI/dev machine's actual LANG is, the result should
+        // always be a short language code, never the raw "xx_YY.ENCODING" string.
+        let code = l10n_detect_system_locale().unwrap();
+        assert!(!code.is_empty());
+        assert!(!code.contains('.'), "should strip encoding suffix: {code}");
+        assert!(!code.contains('_'), "should strip region suffix: {code}");
+    }
+
+    // ── L10nError ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_l10n_error_display() {
+        assert_eq!(
+            L10nError::UnsupportedLocale("xx".into()).to_string(),
+            "Unsupported locale: xx"
+        );
+        assert_eq!(
+            L10nError::MissingKey("app.name".into()).to_string(),
+            "Missing translation key: app.name"
+        );
+        assert_eq!(
+            L10nError::LoadError("bad json".into()).to_string(),
+            "Failed to load translations: bad json"
+        );
+        assert_eq!(
+            L10nError::ExportError("disk full".into()).to_string(),
+            "Failed to export translations: disk full"
+        );
+    }
+
+    #[test]
+    fn test_l10n_error_serialize() {
+        let err = L10nError::UnsupportedLocale("xx".into());
+        let json = serde_json::to_string(&err).unwrap();
+        assert_eq!(json, "\"Unsupported locale: xx\"");
+    }
+
+    // ── TranslationBundle / LocaleInfo serde ─────────────────────────
+
+    #[test]
+    fn test_translation_bundle_serde_roundtrip() {
+        let mut entries = HashMap::new();
+        entries.insert("k".to_string(), "v".to_string());
+        let bundle = TranslationBundle {
+            locale: "en".to_string(),
+            entries,
+            version: "1.0.0".to_string(),
+        };
+        let json = serde_json::to_string(&bundle).unwrap();
+        let de: TranslationBundle = serde_json::from_str(&json).unwrap();
+        assert_eq!(de.locale, "en");
+        assert_eq!(de.entries.get("k").unwrap(), "v");
+        assert_eq!(de.version, "1.0.0");
     }
 }

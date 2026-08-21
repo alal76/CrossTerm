@@ -354,6 +354,102 @@ mod tests {
         assert!(!has_permission(&member, &Permission::VaultWrite));
         assert!(!has_permission(&member, &Permission::ManageUsers));
     }
+
+    #[test]
+    fn test_permission_serde_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&Permission::ManageUsers).unwrap(),
+            "\"manage_users\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Permission::ViewAuditLog).unwrap(),
+            "\"view_audit_log\""
+        );
+        let de: Permission = serde_json::from_str("\"vault_share\"").unwrap();
+        assert_eq!(de, Permission::VaultShare);
+    }
+
+    #[test]
+    fn test_permission_hash_eq_dedup() {
+        use std::collections::HashSet;
+        let mut set = HashSet::new();
+        set.insert(Permission::VaultRead);
+        set.insert(Permission::VaultRead);
+        set.insert(Permission::VaultWrite);
+        assert_eq!(set.len(), 2);
+    }
+
+    #[test]
+    fn test_role_serde_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&Role::PowerUser).unwrap(),
+            "\"power_user\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Role::ReadOnly).unwrap(),
+            "\"read_only\""
+        );
+
+        let custom = Role::Custom(vec![Permission::SessionConnect]);
+        let json = serde_json::to_string(&custom).unwrap();
+        let de: Role = serde_json::from_str(&json).unwrap();
+        assert_eq!(de, custom);
+    }
+
+    #[test]
+    fn test_team_member_serde_roundtrip() {
+        let member = TeamMember {
+            id: "id-1".to_string(),
+            display_name: "Alice".to_string(),
+            email: Some("alice@example.com".to_string()),
+            role: Role::Admin,
+            public_key: Some("pubkey-bytes".to_string()),
+            added_at: "2026-01-01T00:00:00Z".to_string(),
+            last_active: Some("2026-01-02T00:00:00Z".to_string()),
+        };
+        let json = serde_json::to_string(&member).unwrap();
+        let de: TeamMember = serde_json::from_str(&json).unwrap();
+        assert_eq!(de.id, member.id);
+        assert_eq!(de.display_name, member.display_name);
+        assert_eq!(de.email, member.email);
+        assert_eq!(de.role, member.role);
+        assert_eq!(de.public_key, member.public_key);
+    }
+
+    #[test]
+    fn test_team_config_serde_roundtrip_with_members() {
+        let config = TeamConfig {
+            members: vec![make_member(Role::PowerUser)],
+            require_mfa: true,
+            session_timeout_minutes: 30,
+            allowed_ips: vec!["10.0.0.0/8".to_string()],
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let de: TeamConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(de.members.len(), 1);
+        assert!(de.require_mfa);
+        assert_eq!(de.session_timeout_minutes, 30);
+        assert_eq!(de.allowed_ips, vec!["10.0.0.0/8".to_string()]);
+    }
+
+    #[test]
+    fn test_rbac_state_new_starts_unloaded() {
+        let state = RbacState::new();
+        // Access the private field directly (test module is a descendant of
+        // the defining module, so this is allowed) to confirm the state
+        // starts empty and hasn't eagerly touched disk.
+        let guard = state.team_config.read().unwrap();
+        assert!(guard.is_none());
+    }
+
+    #[test]
+    fn test_config_path_shape() {
+        // Doesn't touch disk — just verifies the constructed path, so the
+        // real user data directory is never written to by this test.
+        let path = config_path().expect("data dir should resolve on any supported OS");
+        assert!(path.to_string_lossy().contains("crossterm"));
+        assert_eq!(path.file_name().unwrap(), "team_config.json");
+    }
 }
 
 // ── LDAP / AD group sync ───────────────────────────────────────────────────
@@ -448,5 +544,39 @@ mod ldap_tests {
         let result = rbac_ldap_sync().unwrap();
         assert!(!result.errors.is_empty());
         assert!(result.errors[0].contains("requires live"));
+    }
+
+    #[test]
+    fn test_ldap_test_connection_stub() {
+        let result = rbac_ldap_test_connection().unwrap();
+        assert_eq!(result, "ldap_connection_test_requires_live_server");
+    }
+
+    #[test]
+    fn test_ldap_group_mapping_serde_roundtrip() {
+        let mapping = LdapGroupMapping {
+            ldap_group_dn: "CN=Admins,DC=corp,DC=com".to_string(),
+            crossterm_role: "admin".to_string(),
+        };
+        let json = serde_json::to_string(&mapping).unwrap();
+        let de: LdapGroupMapping = serde_json::from_str(&json).unwrap();
+        assert_eq!(de.ldap_group_dn, mapping.ldap_group_dn);
+        assert_eq!(de.crossterm_role, mapping.crossterm_role);
+    }
+
+    #[test]
+    fn test_ldap_sync_result_serde_roundtrip() {
+        let result = LdapSyncResult {
+            synced_at: "2026-01-01T00:00:00Z".to_string(),
+            users_added: 3,
+            users_updated: 1,
+            users_removed: 0,
+            errors: vec![],
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        let de: LdapSyncResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(de.users_added, 3);
+        assert_eq!(de.users_updated, 1);
+        assert!(de.errors.is_empty());
     }
 }

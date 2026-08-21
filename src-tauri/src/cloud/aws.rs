@@ -644,6 +644,22 @@ pub async fn cloud_aws_cost_summary() -> Result<CostSummary, CloudError> {
 
     let json: serde_json::Value = serde_json::from_slice(&output.stdout)?;
 
+    Ok(parse_cost_response(
+        &json,
+        chrono::Utc::now().format("%Y-%m-01").to_string(),
+        chrono::Utc::now().format("%Y-%m-%d").to_string(),
+    ))
+}
+
+/// Parse the AWS Cost Explorer `get-cost-and-usage` JSON response into a
+/// `CostSummary`, summing per-service blended cost and tracking the reported
+/// currency unit. Split out from the Tauri command so this aggregation logic
+/// is unit-testable without invoking the real `aws` CLI.
+fn parse_cost_response(
+    json: &serde_json::Value,
+    start_date: String,
+    end_date: String,
+) -> CostSummary {
     let mut by_service = Vec::new();
     let mut total = 0.0;
     let mut currency = "USD".to_string();
@@ -682,13 +698,13 @@ pub async fn cloud_aws_cost_summary() -> Result<CostSummary, CloudError> {
         }
     }
 
-    Ok(CostSummary {
+    CostSummary {
         total_cost: total,
         currency,
-        start_date: chrono::Utc::now().format("%Y-%m-01").to_string(),
-        end_date: chrono::Utc::now().format("%Y-%m-%d").to_string(),
+        start_date,
+        end_date,
         by_service,
-    })
+    }
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────
@@ -842,5 +858,175 @@ aws_secret_access_key = je7MtGbClwBF/2Zp9Utk/h3yCo8nvbEXAMPLEKEY
         assert!(objects[0].etag.is_some());
         assert_eq!(objects[1].key, "docs/readme.md");
         assert_eq!(objects[1].storage_class, "STANDARD_IA");
+    }
+
+    #[test]
+    fn test_aws_parse_ec2_missing_reservations_errors() {
+        let json = r#"{ "SomethingElse": [] }"#;
+        let result = parse_ec2_instances(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_aws_parse_ec2_malformed_json_errors() {
+        let result = parse_ec2_instances("not valid json");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_aws_parse_ec2_empty_reservations() {
+        let json = r#"{ "Reservations": [] }"#;
+        let instances = parse_ec2_instances(json).unwrap();
+        assert!(instances.is_empty());
+    }
+
+    #[test]
+    fn test_aws_parse_ec2_no_tags_falls_back_to_empty_name() {
+        let json = r#"{
+            "Reservations": [
+                {
+                    "Instances": [
+                        {
+                            "InstanceId": "i-notags",
+                            "InstanceType": "t2.nano",
+                            "State": { "Name": "running" },
+                            "LaunchTime": "2024-01-01T00:00:00Z"
+                        }
+                    ]
+                }
+            ]
+        }"#;
+        let instances = parse_ec2_instances(json).unwrap();
+        assert_eq!(instances.len(), 1);
+        assert_eq!(instances[0].name, "");
+        assert_eq!(instances[0].state, "running");
+        assert_eq!(instances[0].key_name, None);
+        assert_eq!(instances[0].vpc_id, None);
+    }
+
+    #[test]
+    fn test_aws_parse_s3_buckets_missing_key_errors() {
+        let json = r#"{ "Owner": { "ID": "abc" } }"#;
+        let result = parse_s3_buckets(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_aws_parse_s3_buckets_empty_list() {
+        let json = r#"{ "Buckets": [] }"#;
+        let buckets = parse_s3_buckets(json).unwrap();
+        assert!(buckets.is_empty());
+    }
+
+    #[test]
+    fn test_aws_parse_s3_objects_missing_contents_defaults_empty() {
+        // Contents key entirely absent (e.g. an empty bucket/prefix) should
+        // yield an empty Vec rather than an error.
+        let json = r#"{ "Name": "my-bucket", "Prefix": "" }"#;
+        let objects = parse_s3_objects(json).unwrap();
+        assert!(objects.is_empty());
+    }
+
+    #[test]
+    fn test_aws_parse_s3_objects_defaults_storage_class_and_etag() {
+        let json = r#"{
+            "Contents": [
+                { "Key": "file.txt", "Size": 100, "LastModified": "2024-01-01T00:00:00Z" }
+            ]
+        }"#;
+        let objects = parse_s3_objects(json).unwrap();
+        assert_eq!(objects.len(), 1);
+        assert_eq!(objects[0].storage_class, "STANDARD");
+        assert_eq!(objects[0].etag, None);
+    }
+
+    #[test]
+    fn test_aws_parse_profiles_empty_input() {
+        let profiles = parse_profiles_from_config("", "");
+        assert!(profiles.is_empty());
+    }
+
+    #[test]
+    fn test_aws_parse_profiles_dedup_across_config_and_credentials() {
+        // Same profile appears in both files; region from config should win
+        // and it should not be duplicated.
+        let config = "[profile shared]\nregion = ap-south-1\n";
+        let credentials = "[shared]\naws_access_key_id = X\n";
+        let profiles = parse_profiles_from_config(config, credentials);
+        let shared: Vec<_> = profiles.iter().filter(|p| p.name == "shared").collect();
+        assert_eq!(shared.len(), 1, "profile should not be duplicated");
+        assert_eq!(shared[0].region, Some("ap-south-1".to_string()));
+    }
+
+    #[test]
+    fn test_aws_cost_summary_aggregates_multiple_services() {
+        let json: serde_json::Value = serde_json::from_str(
+            r#"{
+                "ResultsByTime": [
+                    {
+                        "Groups": [
+                            {
+                                "Keys": ["Amazon EC2"],
+                                "Metrics": { "BlendedCost": { "Amount": "12.50", "Unit": "USD" } }
+                            },
+                            {
+                                "Keys": ["Amazon S3"],
+                                "Metrics": { "BlendedCost": { "Amount": "3.25", "Unit": "USD" } }
+                            }
+                        ]
+                    },
+                    {
+                        "Groups": [
+                            {
+                                "Keys": ["Amazon EC2"],
+                                "Metrics": { "BlendedCost": { "Amount": "1.00", "Unit": "USD" } }
+                            }
+                        ]
+                    }
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        let summary = parse_cost_response(&json, "2024-01-01".to_string(), "2024-01-31".to_string());
+
+        assert_eq!(summary.by_service.len(), 3);
+        assert_eq!(summary.currency, "USD");
+        assert_eq!(summary.start_date, "2024-01-01");
+        assert_eq!(summary.end_date, "2024-01-31");
+        // 12.50 + 3.25 + 1.00
+        assert!((summary.total_cost - 16.75).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_aws_cost_summary_missing_results_yields_zero() {
+        let json: serde_json::Value = serde_json::from_str(r#"{}"#).unwrap();
+        let summary = parse_cost_response(&json, "s".to_string(), "e".to_string());
+        assert_eq!(summary.total_cost, 0.0);
+        assert!(summary.by_service.is_empty());
+        assert_eq!(summary.currency, "USD");
+    }
+
+    #[test]
+    fn test_aws_cost_summary_unparseable_amount_defaults_zero() {
+        let json: serde_json::Value = serde_json::from_str(
+            r#"{
+                "ResultsByTime": [
+                    {
+                        "Groups": [
+                            {
+                                "Keys": ["Amazon EC2"],
+                                "Metrics": { "BlendedCost": { "Amount": "not-a-number", "Unit": "USD" } }
+                            }
+                        ]
+                    }
+                ]
+            }"#,
+        )
+        .unwrap();
+        let summary = parse_cost_response(&json, "s".to_string(), "e".to_string());
+        assert_eq!(summary.total_cost, 0.0);
+        assert_eq!(summary.by_service[0].cost, 0.0);
+        assert_eq!(summary.by_service[0].service_name, "Amazon EC2");
     }
 }

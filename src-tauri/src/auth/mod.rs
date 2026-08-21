@@ -729,4 +729,138 @@ mod tests {
         );
         assert!(extract_query_param(path, "missing").is_none());
     }
+
+    // ── profile_from_claims ─────────────────────────────────────────
+
+    #[test]
+    fn test_profile_from_claims_full() {
+        let claims = serde_json::json!({
+            "sub": "user-456",
+            "email": "bob@example.com",
+            "name": "Bob",
+            "picture": "https://example.com/bob.png",
+            "extra_claim": "ignored"
+        });
+        let profile = profile_from_claims(claims).unwrap();
+        assert_eq!(profile.sub, "user-456");
+        assert_eq!(profile.email.as_deref(), Some("bob@example.com"));
+        assert_eq!(profile.name.as_deref(), Some("Bob"));
+        assert_eq!(profile.picture.as_deref(), Some("https://example.com/bob.png"));
+        // Raw claims should preserve fields not otherwise extracted.
+        assert_eq!(profile.raw_claims["extra_claim"], "ignored");
+    }
+
+    #[test]
+    fn test_profile_from_claims_only_sub() {
+        let claims = serde_json::json!({ "sub": "user-789" });
+        let profile = profile_from_claims(claims).unwrap();
+        assert_eq!(profile.sub, "user-789");
+        assert_eq!(profile.email, None);
+        assert_eq!(profile.name, None);
+        assert_eq!(profile.picture, None);
+    }
+
+    #[test]
+    fn test_profile_from_claims_missing_sub_errors() {
+        let claims = serde_json::json!({ "email": "no-sub@example.com" });
+        let err = profile_from_claims(claims).unwrap_err();
+        assert!(err.contains("sub"));
+    }
+
+    // ── generate_state ───────────────────────────────────────────────
+
+    #[test]
+    fn test_generate_state_length_and_charset() {
+        let state = generate_state();
+        // 16 raw bytes -> 22 base64url chars (no padding).
+        assert_eq!(state.len(), 22);
+        assert!(state.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_'));
+    }
+
+    #[test]
+    fn test_generate_state_is_random() {
+        let a = generate_state();
+        let b = generate_state();
+        assert_ne!(a, b, "two consecutive calls should not collide");
+    }
+
+    // ── parse_https_url ───────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_https_url_with_explicit_port() {
+        let (host, port, path) = parse_https_url("https://idp.example.com:8443/oauth/token").unwrap();
+        assert_eq!(host, "idp.example.com");
+        assert_eq!(port, 8443);
+        assert_eq!(path, "/oauth/token");
+    }
+
+    #[test]
+    fn test_parse_https_url_defaults_to_443() {
+        let (host, port, path) = parse_https_url("https://idp.example.com/token").unwrap();
+        assert_eq!(host, "idp.example.com");
+        assert_eq!(port, 443);
+        assert_eq!(path, "/token");
+    }
+
+    #[test]
+    fn test_parse_http_url_defaults_to_80() {
+        let (host, port, path) = parse_https_url("http://localhost/callback").unwrap();
+        assert_eq!(host, "localhost");
+        assert_eq!(port, 80);
+        assert_eq!(path, "/callback");
+    }
+
+    #[test]
+    fn test_parse_https_url_no_path_defaults_to_slash() {
+        let (host, port, path) = parse_https_url("https://idp.example.com").unwrap();
+        assert_eq!(host, "idp.example.com");
+        assert_eq!(port, 443);
+        assert_eq!(path, "/");
+    }
+
+    #[test]
+    fn test_parse_https_url_invalid_port_errors() {
+        let result = parse_https_url("https://idp.example.com:notaport/token");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_https_url_unsupported_scheme_errors() {
+        let result = parse_https_url("ftp://idp.example.com/token");
+        assert!(result.is_err());
+    }
+
+    // ── find_free_port ───────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_find_free_port_returns_port_in_range() {
+        let port = find_free_port().await.expect("a free port should be found");
+        assert!((12300..=12399).contains(&port));
+    }
+
+    // ── AuthState ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_auth_state_new_starts_empty() {
+        let state = AuthState::new();
+        let configs = state.configs.read().await;
+        assert!(configs.is_empty());
+    }
+
+    // ── OidcConfig scopes default handling via build_auth_url ────────
+
+    #[test]
+    fn test_build_auth_url_defaults_scopes_when_empty() {
+        let config = OidcConfig {
+            provider_name: "NoScopes".to_owned(),
+            client_id: "client".to_owned(),
+            authorization_endpoint: "https://idp.example.com/auth".to_owned(),
+            token_endpoint: "https://idp.example.com/token".to_owned(),
+            userinfo_endpoint: None,
+            scopes: vec![],
+        };
+        let url = build_auth_url(&config, "http://127.0.0.1:12300/callback", "chal", "st");
+        // "openid email profile" URL-encoded uses %20 for spaces.
+        assert!(url.contains("scope=openid%20email%20profile"));
+    }
 }
