@@ -285,7 +285,7 @@ Tasks:
 
 **Phase 1 exit gate checklist:**
 - [ ] **[DEFERRED — telemetry]** 0 P0 crashes in 2-week soak. _Cannot verify without crash reporting. Unblocked by provisioning Sentry (see hardening backlog). Code is stable; no crashes observed in manual testing._
-- [ ] Backend coverage ≥ 60%, frontend coverage ≥ 75% — **NOT DONE**: real measured Rust line coverage was 29.24% as of 2026-08-21 morning, raised to 37.06% (round 1), then to 41.58% (5612/13498 lines, round 2) the same day. The "1278 Rust tests" figure is a *test count*, not line coverage — see `docs/ROADMAP.md`'s corrected metrics table for detail. Frontend coverage not independently re-verified.
+- [ ] Backend coverage ≥ 60%, frontend coverage ≥ 75% — **NOT DONE**: real measured Rust line coverage was 29.24% as of 2026-08-21 morning, raised to 37.06% (round 1), then to 41.58% (5612/13498 lines, round 2), then to 42.63% (5754/13499 lines, round 3) the same day. Round 3's smaller gain confirms most of the remaining gap sits inside `#[tauri::command]` bodies that shell out to real CLIs/OS resources, not testable without dedicated mock infrastructure. The "1345 Rust tests" figure is a *test count*, not line coverage — see `docs/ROADMAP.md`'s corrected metrics table for detail. Frontend coverage not independently re-verified.
 - [ ] **[DEFERRED — human QA]** Onboarding test (< 5 min to first connected session). _Import wizard and first-run wizard are fully implemented. Requires a timed walkthrough with a new user on a clean machine. Schedule as part of v1.0 beta program._
 - [x] All AppError codes have friendly messages in EN + one other locale — 40+ codes in EN/DE/FR (DONE)
 
