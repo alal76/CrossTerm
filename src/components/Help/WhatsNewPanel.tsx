@@ -2,11 +2,16 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { X, Sparkles } from "lucide-react";
 
-const APP_VERSION = "2.0.11";
+const APP_VERSION = "2.0.12";
 const DISMISSED_VERSION_KEY = "crossterm:whats-new-dismissed";
 
 const RELEASE_NOTES = `
 ## What's New in CrossTerm ${APP_VERSION}
+
+### Under the Hood
+- No user-facing changes in this release. Added real in-process mock SSH/SFTP server tests (no Docker required) and real loopback network probe tests, as part of an ongoing effort to raise real measured test coverage.
+
+## CrossTerm 2.0.11
 
 ### Under the Hood
 - No user-facing changes in this release. Further expanded automated test coverage across AI assist, TN3270/TN5250 terminal emulation, macros, cloud provider integrations, and configuration/editor/FTP/gRPC/IPMI/recording modules, as part of an ongoing effort to raise real measured test coverage. Also fixed a bug where a malformed connection URL with an unparseable port (e.g. \`http://host:notaport\`) could be misread as a hostname of \`host:notaport\` instead of just \`host\`.
