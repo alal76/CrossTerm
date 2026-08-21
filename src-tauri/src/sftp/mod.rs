@@ -1375,6 +1375,499 @@ mod tests {
         String::from_utf8_lossy(&output).trim().to_string()
     }
 
+    // ── In-process mock SSH+SFTP server (no Docker required) ─────────────
+    //
+    // A minimal russh::server::Handler that accepts password auth for
+    // TEST_USER/TEST_PASS and, on an "sftp" subsystem request, hands the
+    // channel's byte stream off to a `russh_sftp::server::Handler` backed by
+    // a real temp directory (via `tempfile`). This exercises the real SFTP
+    // open/read/write/close/opendir/readdir/remove/mkdir/rmdir/rename/stat
+    // wire protocol against an actual (if temporary) filesystem, without any
+    // external process — so the `test_mock_sftp_*` tests below run in
+    // normal `cargo test` and contribute real measured coverage.
+
+    use russh::server::{self, Auth, Msg as ServerMsg, Server as _, Session as ServerSession};
+    use russh_sftp::protocol::{
+        Attrs, Data, File as SftpFile, FileAttributes, Handle as SftpHandle, Name, OpenFlags,
+        Status, StatusCode, Version,
+    };
+    use tokio::net::TcpListener;
+
+    /// Converts real filesystem metadata into the wire `FileAttributes`
+    /// shape (size, permissions incl. the dir/regular mode bits so
+    /// `attrs.is_dir()` works, and mtime).
+    fn attrs_from_metadata(meta: &std::fs::Metadata) -> FileAttributes {
+        let mut attrs = FileAttributes {
+            size: Some(meta.len()),
+            uid: Some(0),
+            gid: Some(0),
+            ..Default::default()
+        };
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            attrs.permissions = Some(meta.mode());
+        }
+        #[cfg(not(unix))]
+        {
+            attrs.permissions = Some(if meta.is_dir() { 0o040_755 } else { 0o100_644 });
+        }
+        if let Ok(modified) = meta.modified() {
+            if let Ok(dur) = modified.duration_since(std::time::UNIX_EPOCH) {
+                attrs.mtime = Some(dur.as_secs() as u32);
+            }
+        }
+        attrs
+    }
+
+    fn ok_status(id: u32) -> Status {
+        Status {
+            id,
+            status_code: StatusCode::Ok,
+            error_message: "Ok".to_string(),
+            language_tag: "en-US".to_string(),
+        }
+    }
+
+    /// SFTP handler backed by a real temp directory. Remote paths are
+    /// resolved relative to `root` (a leading "/" is treated as the root of
+    /// that temp dir, matching how the tests address files, e.g. "/a.txt").
+    struct MockSftpHandler {
+        root: std::path::PathBuf,
+        files: HashMap<String, tokio::fs::File>,
+        dirs: HashMap<String, Vec<(String, std::fs::Metadata)>>,
+    }
+
+    impl MockSftpHandler {
+        fn new(root: std::path::PathBuf) -> Self {
+            Self {
+                root,
+                files: HashMap::new(),
+                dirs: HashMap::new(),
+            }
+        }
+
+        fn resolve(&self, path: &str) -> std::path::PathBuf {
+            let trimmed = path.trim_start_matches('/');
+            if trimmed.is_empty() {
+                self.root.clone()
+            } else {
+                self.root.join(trimmed)
+            }
+        }
+    }
+
+    impl russh_sftp::server::Handler for MockSftpHandler {
+        type Error = StatusCode;
+
+        fn unimplemented(&self) -> Self::Error {
+            StatusCode::OpUnsupported
+        }
+
+        async fn init(
+            &mut self,
+            _version: u32,
+            _extensions: HashMap<String, String>,
+        ) -> Result<Version, Self::Error> {
+            Ok(Version::new())
+        }
+
+        async fn open(
+            &mut self,
+            id: u32,
+            filename: String,
+            pflags: OpenFlags,
+            _attrs: FileAttributes,
+        ) -> Result<SftpHandle, Self::Error> {
+            let path = self.resolve(&filename);
+            let std_opts: std::fs::OpenOptions = pflags.into();
+            let file = tokio::fs::OpenOptions::from(std_opts)
+                .open(&path)
+                .await
+                .map_err(|_| StatusCode::NoSuchFile)?;
+            self.files.insert(filename.clone(), file);
+            Ok(SftpHandle { id, handle: filename })
+        }
+
+        async fn close(&mut self, id: u32, handle: String) -> Result<Status, Self::Error> {
+            self.files.remove(&handle);
+            self.dirs.remove(&handle);
+            Ok(ok_status(id))
+        }
+
+        async fn read(
+            &mut self,
+            id: u32,
+            handle: String,
+            offset: u64,
+            len: u32,
+        ) -> Result<Data, Self::Error> {
+            use tokio::io::{AsyncReadExt, AsyncSeekExt};
+            let file = self.files.get_mut(&handle).ok_or(StatusCode::Failure)?;
+            file.seek(std::io::SeekFrom::Start(offset))
+                .await
+                .map_err(|_| StatusCode::Failure)?;
+            let mut buf = vec![0u8; len as usize];
+            let n = file
+                .read(&mut buf)
+                .await
+                .map_err(|_| StatusCode::Failure)?;
+            if n == 0 {
+                return Err(StatusCode::Eof);
+            }
+            buf.truncate(n);
+            Ok(Data { id, data: buf })
+        }
+
+        async fn write(
+            &mut self,
+            id: u32,
+            handle: String,
+            offset: u64,
+            data: Vec<u8>,
+        ) -> Result<Status, Self::Error> {
+            use tokio::io::{AsyncSeekExt, AsyncWriteExt};
+            let file = self.files.get_mut(&handle).ok_or(StatusCode::Failure)?;
+            file.seek(std::io::SeekFrom::Start(offset))
+                .await
+                .map_err(|_| StatusCode::Failure)?;
+            file.write_all(&data).await.map_err(|_| StatusCode::Failure)?;
+            Ok(ok_status(id))
+        }
+
+        async fn opendir(&mut self, id: u32, path: String) -> Result<SftpHandle, Self::Error> {
+            let dir_path = self.resolve(&path);
+            let mut entries = Vec::new();
+            let mut rd = tokio::fs::read_dir(&dir_path)
+                .await
+                .map_err(|_| StatusCode::NoSuchFile)?;
+            while let Ok(Some(entry)) = rd.next_entry().await {
+                if let Ok(meta) = entry.metadata().await {
+                    entries.push((entry.file_name().to_string_lossy().to_string(), meta));
+                }
+            }
+            self.dirs.insert(path.clone(), entries);
+            Ok(SftpHandle { id, handle: path })
+        }
+
+        async fn readdir(&mut self, id: u32, handle: String) -> Result<Name, Self::Error> {
+            let entries = self.dirs.get_mut(&handle).ok_or(StatusCode::Eof)?;
+            if entries.is_empty() {
+                return Err(StatusCode::Eof);
+            }
+            let batch = std::mem::take(entries);
+            let files = batch
+                .into_iter()
+                .map(|(name, meta)| SftpFile::new(name, attrs_from_metadata(&meta)))
+                .collect();
+            Ok(Name { id, files })
+        }
+
+        async fn remove(&mut self, id: u32, filename: String) -> Result<Status, Self::Error> {
+            let path = self.resolve(&filename);
+            tokio::fs::remove_file(&path)
+                .await
+                .map_err(|_| StatusCode::NoSuchFile)?;
+            Ok(ok_status(id))
+        }
+
+        async fn mkdir(
+            &mut self,
+            id: u32,
+            path: String,
+            _attrs: FileAttributes,
+        ) -> Result<Status, Self::Error> {
+            let full = self.resolve(&path);
+            tokio::fs::create_dir(&full)
+                .await
+                .map_err(|_| StatusCode::Failure)?;
+            Ok(ok_status(id))
+        }
+
+        async fn rmdir(&mut self, id: u32, path: String) -> Result<Status, Self::Error> {
+            let full = self.resolve(&path);
+            tokio::fs::remove_dir(&full)
+                .await
+                .map_err(|_| StatusCode::Failure)?;
+            Ok(ok_status(id))
+        }
+
+        async fn rename(
+            &mut self,
+            id: u32,
+            oldpath: String,
+            newpath: String,
+        ) -> Result<Status, Self::Error> {
+            let old = self.resolve(&oldpath);
+            let new = self.resolve(&newpath);
+            tokio::fs::rename(&old, &new)
+                .await
+                .map_err(|_| StatusCode::Failure)?;
+            Ok(ok_status(id))
+        }
+
+        async fn stat(&mut self, id: u32, path: String) -> Result<Attrs, Self::Error> {
+            let full = self.resolve(&path);
+            let meta = tokio::fs::metadata(&full)
+                .await
+                .map_err(|_| StatusCode::NoSuchFile)?;
+            Ok(Attrs {
+                id,
+                attrs: attrs_from_metadata(&meta),
+            })
+        }
+
+        async fn realpath(&mut self, id: u32, path: String) -> Result<Name, Self::Error> {
+            Ok(Name {
+                id,
+                files: vec![SftpFile::dummy(path)],
+            })
+        }
+    }
+
+    /// Server-side SSH handler: accepts password auth, grants session
+    /// channels, and on an "sftp" subsystem request runs the SFTP protocol
+    /// against a `MockSftpHandler` rooted at `root`.
+    #[derive(Clone)]
+    struct MockSftpSshServer {
+        root: std::path::PathBuf,
+    }
+
+    impl server::Server for MockSftpSshServer {
+        type Handler = MockSftpSshHandler;
+        fn new_client(&mut self, _addr: Option<std::net::SocketAddr>) -> MockSftpSshHandler {
+            MockSftpSshHandler {
+                root: self.root.clone(),
+                channels: HashMap::new(),
+            }
+        }
+    }
+
+    struct MockSftpSshHandler {
+        root: std::path::PathBuf,
+        channels: HashMap<russh::ChannelId, russh::Channel<ServerMsg>>,
+    }
+
+    #[async_trait]
+    impl server::Handler for MockSftpSshHandler {
+        type Error = russh::Error;
+
+        async fn auth_password(&mut self, user: &str, password: &str) -> Result<Auth, Self::Error> {
+            if user == TEST_USER && password == TEST_PASS {
+                Ok(Auth::Accept)
+            } else {
+                Ok(Auth::Reject { proceed_with_methods: None })
+            }
+        }
+
+        async fn channel_open_session(
+            &mut self,
+            channel: russh::Channel<ServerMsg>,
+            _session: &mut ServerSession,
+        ) -> Result<bool, Self::Error> {
+            self.channels.insert(channel.id(), channel);
+            Ok(true)
+        }
+
+        async fn subsystem_request(
+            &mut self,
+            channel_id: russh::ChannelId,
+            name: &str,
+            session: &mut ServerSession,
+        ) -> Result<(), Self::Error> {
+            if name == "sftp" {
+                if let Some(channel) = self.channels.remove(&channel_id) {
+                    session.channel_success(channel_id);
+                    let handler = MockSftpHandler::new(self.root.clone());
+                    russh_sftp::server::run(channel.into_stream(), handler).await;
+                } else {
+                    session.channel_failure(channel_id);
+                }
+            } else {
+                session.channel_failure(channel_id);
+            }
+            Ok(())
+        }
+    }
+
+    /// Starts an in-process mock SSH+SFTP server on an ephemeral localhost
+    /// port, rooted at `root` for all SFTP filesystem operations. Returns
+    /// the port it's listening on; the server task is spawned (not joined).
+    async fn start_mock_sftp_server(root: std::path::PathBuf) -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let config = Arc::new(server::Config {
+            auth_rejection_time: std::time::Duration::from_millis(0),
+            auth_rejection_time_initial: Some(std::time::Duration::from_millis(0)),
+            keys: vec![russh_keys::key::KeyPair::generate_ed25519().unwrap()],
+            ..Default::default()
+        });
+        let mut mock = MockSftpSshServer { root };
+        tokio::spawn(async move {
+            let _ = mock.run_on_socket(config, &listener).await;
+        });
+        port
+    }
+
+    #[tokio::test]
+    async fn test_mock_sftp_open_session_and_list_empty_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let port = start_mock_sftp_server(tmp.path().to_path_buf()).await;
+
+        let config = Arc::new(client::Config::default());
+        let addr = format!("{}:{}", TEST_SSH_HOST, port);
+        let mut handle = client::connect(config, &addr, TestHandler).await.unwrap();
+        assert!(handle
+            .authenticate_password(TEST_USER, TEST_PASS)
+            .await
+            .unwrap());
+
+        let channel = handle.channel_open_session().await.unwrap();
+        channel.request_subsystem(false, "sftp").await.unwrap();
+        let sftp = SftpSession::new(channel.into_stream()).await.unwrap();
+
+        let entries: Vec<_> = sftp.read_dir("/").await.expect("should list root").collect();
+        assert!(entries.is_empty(), "fresh temp dir should list as empty");
+
+        let _ = handle.disconnect(Disconnect::ByApplication, "", "en").await;
+    }
+
+    #[tokio::test]
+    async fn test_mock_sftp_write_and_read_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let port = start_mock_sftp_server(tmp.path().to_path_buf()).await;
+        let handle = sftp_test_connect_to(port).await;
+        let sftp = sftp_test_open(&handle).await;
+
+        let content = b"Hello from the in-process mock SFTP server!";
+        sftp_write_file(&sftp, "/hello.txt", content).await;
+
+        let data = sftp.read("/hello.txt").await.expect("should read file back");
+        assert_eq!(data, content);
+
+        // Also verify the bytes really landed on the real temp-dir filesystem.
+        let real_content = std::fs::read(tmp.path().join("hello.txt")).unwrap();
+        assert_eq!(real_content, content);
+
+        let _ = handle.disconnect(Disconnect::ByApplication, "", "en").await;
+    }
+
+    #[tokio::test]
+    async fn test_mock_sftp_list_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let port = start_mock_sftp_server(tmp.path().to_path_buf()).await;
+        let handle = sftp_test_connect_to(port).await;
+        let sftp = sftp_test_open(&handle).await;
+
+        sftp_write_file(&sftp, "/a.txt", b"aaa").await;
+        sftp_write_file(&sftp, "/b.txt", b"bbbb").await;
+
+        let entries: Vec<_> = sftp.read_dir("/").await.expect("should list root").collect();
+        let names: Vec<String> = entries.iter().map(|e| e.file_name()).collect();
+        assert!(names.contains(&"a.txt".to_string()));
+        assert!(names.contains(&"b.txt".to_string()));
+
+        let _ = handle.disconnect(Disconnect::ByApplication, "", "en").await;
+    }
+
+    #[tokio::test]
+    async fn test_mock_sftp_delete_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let port = start_mock_sftp_server(tmp.path().to_path_buf()).await;
+        let handle = sftp_test_connect_to(port).await;
+        let sftp = sftp_test_open(&handle).await;
+
+        sftp_write_file(&sftp, "/gone.txt", b"to be deleted").await;
+        sftp.metadata("/gone.txt")
+            .await
+            .expect("file should exist before delete");
+
+        sftp.remove_file("/gone.txt")
+            .await
+            .expect("delete should succeed");
+
+        assert!(
+            sftp.metadata("/gone.txt").await.is_err(),
+            "stat after delete should fail"
+        );
+
+        let _ = handle.disconnect(Disconnect::ByApplication, "", "en").await;
+    }
+
+    #[tokio::test]
+    async fn test_mock_sftp_mkdir_rmdir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let port = start_mock_sftp_server(tmp.path().to_path_buf()).await;
+        let handle = sftp_test_connect_to(port).await;
+        let sftp = sftp_test_open(&handle).await;
+
+        sftp.create_dir("/subdir").await.expect("mkdir should succeed");
+
+        let attrs = sftp
+            .metadata("/subdir")
+            .await
+            .expect("dir should exist after mkdir");
+        assert!(attrs.is_dir(), "created path should be a directory");
+        assert!(tmp.path().join("subdir").is_dir());
+
+        sftp.remove_dir("/subdir").await.expect("rmdir should succeed");
+        assert!(sftp.metadata("/subdir").await.is_err(), "stat after rmdir should fail");
+
+        let _ = handle.disconnect(Disconnect::ByApplication, "", "en").await;
+    }
+
+    #[tokio::test]
+    async fn test_mock_sftp_rename() {
+        let tmp = tempfile::tempdir().unwrap();
+        let port = start_mock_sftp_server(tmp.path().to_path_buf()).await;
+        let handle = sftp_test_connect_to(port).await;
+        let sftp = sftp_test_open(&handle).await;
+
+        let content = b"rename test data";
+        sftp_write_file(&sftp, "/old.txt", content).await;
+        sftp.rename("/old.txt", "/new.txt")
+            .await
+            .expect("rename should succeed");
+
+        assert!(sftp.metadata("/old.txt").await.is_err(), "old path should not exist");
+        let data = sftp.read("/new.txt").await.expect("new path should be readable");
+        assert_eq!(data, content);
+
+        let _ = handle.disconnect(Disconnect::ByApplication, "", "en").await;
+    }
+
+    #[tokio::test]
+    async fn test_mock_sftp_stat_reports_real_size_and_mtime() {
+        let tmp = tempfile::tempdir().unwrap();
+        let port = start_mock_sftp_server(tmp.path().to_path_buf()).await;
+        let handle = sftp_test_connect_to(port).await;
+        let sftp = sftp_test_open(&handle).await;
+
+        let content = b"stat test content with known size";
+        sftp_write_file(&sftp, "/stat.txt", content).await;
+
+        let attrs = sftp.metadata("/stat.txt").await.expect("stat should succeed");
+        assert_eq!(attrs.size.unwrap_or(0), content.len() as u64);
+        assert!(!attrs.is_dir());
+        assert!(attrs.mtime.is_some());
+
+        let _ = handle.disconnect(Disconnect::ByApplication, "", "en").await;
+    }
+
+    /// Like `sftp_test_connect`, but against an arbitrary ephemeral port
+    /// (the Docker-gated helper hardcodes TEST_SSH_PORT).
+    async fn sftp_test_connect_to(port: u16) -> client::Handle<TestHandler> {
+        let config = Arc::new(client::Config::default());
+        let addr = format!("{}:{}", TEST_SSH_HOST, port);
+        let mut handle = client::connect(config, &addr, TestHandler).await.unwrap();
+        let auth = handle
+            .authenticate_password(TEST_USER, TEST_PASS)
+            .await
+            .unwrap();
+        assert!(auth, "password auth should succeed");
+        handle
+    }
+
     #[tokio::test]
     #[ignore = "Requires Docker: docker compose -f tests/docker-compose.yml up -d"]
     async fn test_sftp_open_session() {
