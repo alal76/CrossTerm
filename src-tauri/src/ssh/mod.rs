@@ -2251,6 +2251,323 @@ mod tests {
         String::from_utf8_lossy(&output).trim().to_string()
     }
 
+    // ── In-process mock SSH server (no Docker required) ──────────────────
+    //
+    // A minimal russh::server::Handler that accepts password auth for
+    // TEST_USER/TEST_PASS, grants session channels, answers `exec` requests
+    // with canned output, and proxies `direct-tcpip` channels to a real TCP
+    // address (so jump-host tunneling can be exercised too). This drives the
+    // exact same russh client wire protocol (handshake, auth, channel exec,
+    // PTY/shell/agent-forward requests, tunneling) as the Docker-gated tests
+    // above, without any external process — so the `test_mock_*` tests below
+    // run in normal `cargo test` and contribute real measured coverage.
+
+    use russh::server::{self, Auth, Msg as ServerMsg, Server as _, Session as ServerSession};
+
+    #[derive(Clone, Default)]
+    struct MockSshServer;
+
+    impl server::Server for MockSshServer {
+        type Handler = MockSshHandler;
+        fn new_client(&mut self, _addr: Option<std::net::SocketAddr>) -> MockSshHandler {
+            MockSshHandler
+        }
+    }
+
+    #[derive(Default)]
+    struct MockSshHandler;
+
+    #[async_trait]
+    impl server::Handler for MockSshHandler {
+        type Error = russh::Error;
+
+        async fn auth_password(&mut self, user: &str, password: &str) -> Result<Auth, Self::Error> {
+            if user == TEST_USER && password == TEST_PASS {
+                Ok(Auth::Accept)
+            } else {
+                Ok(Auth::Reject { proceed_with_methods: None })
+            }
+        }
+
+        async fn channel_open_session(
+            &mut self,
+            _channel: russh::Channel<ServerMsg>,
+            _session: &mut ServerSession,
+        ) -> Result<bool, Self::Error> {
+            Ok(true)
+        }
+
+        async fn pty_request(
+            &mut self,
+            _channel: ChannelId,
+            _term: &str,
+            _col_width: u32,
+            _row_height: u32,
+            _pix_width: u32,
+            _pix_height: u32,
+            _modes: &[(russh::Pty, u32)],
+            _session: &mut ServerSession,
+        ) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        async fn shell_request(
+            &mut self,
+            _channel: ChannelId,
+            _session: &mut ServerSession,
+        ) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        async fn agent_request(
+            &mut self,
+            _channel: ChannelId,
+            _session: &mut ServerSession,
+        ) -> Result<bool, Self::Error> {
+            Ok(true)
+        }
+
+        async fn exec_request(
+            &mut self,
+            channel: ChannelId,
+            data: &[u8],
+            session: &mut ServerSession,
+        ) -> Result<(), Self::Error> {
+            use russh::CryptoVec;
+            let cmd = String::from_utf8_lossy(data).trim().to_string();
+            let output = if let Some(rest) = cmd.strip_prefix("echo ") {
+                format!("{}\n", rest)
+            } else if cmd == "whoami" {
+                format!("{}\n", TEST_USER)
+            } else {
+                String::new()
+            };
+            session.data(channel, CryptoVec::from(output));
+            session.exit_status_request(channel, 0);
+            session.eof(channel);
+            session.close(channel);
+            Ok(())
+        }
+
+        async fn channel_open_direct_tcpip(
+            &mut self,
+            channel: russh::Channel<ServerMsg>,
+            host_to_connect: &str,
+            port_to_connect: u32,
+            _originator_address: &str,
+            _originator_port: u32,
+            _session: &mut ServerSession,
+        ) -> Result<bool, Self::Error> {
+            // Proxies the tunneled channel to a real TCP address, mirroring
+            // the client-side forwarded-tcpip handler above — this is what
+            // lets a jump-host test chain a second mock server as "target".
+            let addr = format!("{}:{}", host_to_connect, port_to_connect);
+            tokio::spawn(async move {
+                let Ok(mut tcp) = TcpStream::connect(&addr).await else {
+                    let _ = channel.close().await;
+                    return;
+                };
+                let (mut tcp_read, mut tcp_write) = tcp.split();
+                let mut ch = channel;
+                loop {
+                    tokio::select! {
+                        msg = ch.wait() => {
+                            match msg {
+                                Some(ChannelMsg::Data { data }) => {
+                                    if tcp_write.write_all(&data).await.is_err() { break; }
+                                }
+                                Some(ChannelMsg::Eof | ChannelMsg::Close) | None => break,
+                                _ => {}
+                            }
+                        }
+                        result = async {
+                            let mut buf = [0u8; 8192];
+                            tcp_read.read(&mut buf).await.map(|n| (n, buf))
+                        } => {
+                            match result {
+                                Ok((0, _)) => break,
+                                Ok((n, buf)) => {
+                                    if ch.data(&buf[..n]).await.is_err() { break; }
+                                }
+                                Err(_) => break,
+                            }
+                        }
+                    }
+                }
+            });
+            Ok(true)
+        }
+    }
+
+    /// Starts an in-process mock SSH server on an ephemeral localhost port
+    /// and returns the port it's listening on. The server task is spawned
+    /// (not joined) and lives for the remainder of the test's tokio runtime.
+    async fn start_mock_ssh_server() -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let config = Arc::new(server::Config {
+            auth_rejection_time: std::time::Duration::from_millis(0),
+            auth_rejection_time_initial: Some(std::time::Duration::from_millis(0)),
+            keys: vec![russh_keys::key::KeyPair::generate_ed25519().unwrap()],
+            ..Default::default()
+        });
+        let mut mock = MockSshServer;
+        tokio::spawn(async move {
+            let _ = mock.run_on_socket(config, &listener).await;
+        });
+        port
+    }
+
+    #[tokio::test]
+    async fn test_mock_ssh_connect_password_auth() {
+        // Connect to the in-process mock server with password auth, verify
+        // the handle works (mirrors test_ssh_connect_password_auth below).
+        let port = start_mock_ssh_server().await;
+        let handle = test_connect(TEST_SSH_HOST, port, TEST_USER, TEST_PASS).await;
+        let channel = handle
+            .channel_open_session()
+            .await
+            .expect("should open session channel on authenticated connection");
+        channel.close().await.unwrap();
+        let _ = handle
+            .disconnect(Disconnect::ByApplication, "", "en")
+            .await;
+    }
+
+    #[tokio::test]
+    async fn test_mock_ssh_wrong_password_auth_fails() {
+        let port = start_mock_ssh_server().await;
+        let config = Arc::new(client::Config::default());
+        let addr = format!("{}:{}", TEST_SSH_HOST, port);
+        let mut handle = client::connect(config, &addr, TestHandler).await.unwrap();
+        let authenticated = handle
+            .authenticate_password(TEST_USER, "wrong-password")
+            .await
+            .unwrap();
+        assert!(!authenticated, "auth with wrong password should fail");
+    }
+
+    #[tokio::test]
+    async fn test_mock_ssh_connect_and_exec() {
+        let port = start_mock_ssh_server().await;
+        let handle = test_connect(TEST_SSH_HOST, port, TEST_USER, TEST_PASS).await;
+        let output = test_exec(&handle, "echo hello").await;
+        assert_eq!(output, "hello", "output should be the echoed text, got: {output}");
+        let _ = handle
+            .disconnect(Disconnect::ByApplication, "", "en")
+            .await;
+    }
+
+    #[tokio::test]
+    async fn test_mock_ssh_disconnect() {
+        let port = start_mock_ssh_server().await;
+        let handle = test_connect(TEST_SSH_HOST, port, TEST_USER, TEST_PASS).await;
+        let output = test_exec(&handle, "echo connected").await;
+        assert_eq!(output, "connected");
+        handle
+            .disconnect(Disconnect::ByApplication, "test disconnect", "en")
+            .await
+            .expect("disconnect should succeed");
+    }
+
+    #[tokio::test]
+    async fn test_mock_ssh_pty_shell_and_agent_forward() {
+        // Mirrors test_ssh_agent_forward_connect: request agent forwarding,
+        // then verify the channel is still usable for PTY + shell requests.
+        let port = start_mock_ssh_server().await;
+        let handle = test_connect(TEST_SSH_HOST, port, TEST_USER, TEST_PASS).await;
+
+        let channel = handle
+            .channel_open_session()
+            .await
+            .expect("should open session");
+
+        let _ = channel.agent_forward(false).await;
+
+        channel
+            .request_pty(false, "xterm-256color", 80, 24, 0, 0, &[])
+            .await
+            .expect("PTY request should succeed after agent forward");
+        channel
+            .request_shell(false)
+            .await
+            .expect("shell should open");
+
+        channel.close().await.unwrap();
+        let _ = handle
+            .disconnect(Disconnect::ByApplication, "", "en")
+            .await;
+    }
+
+    #[tokio::test]
+    async fn test_mock_ssh_connect_via_jump_host() {
+        // Mirrors test_ssh_connect_via_jump_host: two in-process mock
+        // servers stand in for the jump host and the target. The jump
+        // server's channel_open_direct_tcpip proxies a raw TCP tunnel to
+        // the target's real (ephemeral) port, and a full second SSH
+        // handshake + auth + exec happens over that tunnel.
+        let jump_port = start_mock_ssh_server().await;
+        let target_port = start_mock_ssh_server().await;
+
+        let jump_handle = test_connect(TEST_SSH_HOST, jump_port, TEST_USER, TEST_PASS).await;
+
+        let channel = jump_handle
+            .channel_open_direct_tcpip(TEST_SSH_HOST, target_port as u32, "127.0.0.1", 0)
+            .await
+            .expect("should open direct-tcpip channel to target via jump host");
+
+        let stream = channel.into_stream();
+        let config = Arc::new(client::Config::default());
+        let mut target_handle = client::connect_stream(config, stream, TestHandler)
+            .await
+            .expect("SSH handshake through jump tunnel should succeed");
+
+        let authenticated = target_handle
+            .authenticate_password(TEST_USER, TEST_PASS)
+            .await
+            .expect("target auth should not error");
+        assert!(authenticated, "target password auth should succeed");
+
+        let output = test_exec(&target_handle, "whoami").await;
+        assert_eq!(output, TEST_USER);
+
+        let _ = target_handle
+            .disconnect(Disconnect::ByApplication, "", "en")
+            .await;
+        let _ = jump_handle
+            .disconnect(Disconnect::ByApplication, "", "en")
+            .await;
+    }
+
+    #[tokio::test]
+    async fn test_mock_ssh_jump_host_target_auth_failure() {
+        let jump_port = start_mock_ssh_server().await;
+        let target_port = start_mock_ssh_server().await;
+
+        let jump_handle = test_connect(TEST_SSH_HOST, jump_port, TEST_USER, TEST_PASS).await;
+
+        let channel = jump_handle
+            .channel_open_direct_tcpip(TEST_SSH_HOST, target_port as u32, "127.0.0.1", 0)
+            .await
+            .expect("tunnel should open");
+
+        let config = Arc::new(client::Config::default());
+        let mut target_handle =
+            client::connect_stream(config, channel.into_stream(), TestHandler)
+                .await
+                .unwrap();
+
+        let authenticated = target_handle
+            .authenticate_password(TEST_USER, "wrong_password_123")
+            .await
+            .unwrap();
+        assert!(!authenticated, "auth with wrong password should fail");
+
+        let _ = jump_handle
+            .disconnect(Disconnect::ByApplication, "", "en")
+            .await;
+    }
+
     // ── Integration tests requiring a real SSH server ───────────────────
 
     #[tokio::test]
