@@ -543,4 +543,92 @@ mod tests {
             "\"kubernetes\""
         );
     }
+
+    #[test]
+    fn test_cloud_provider_status_serialization_roundtrip() {
+        let status = CloudProviderStatus {
+            provider: CloudProvider::Aws,
+            cli_status: CliStatus::Installed {
+                version: "aws-cli/2.15.0".to_string(),
+                path: "/usr/local/bin/aws".to_string(),
+            },
+            profiles: vec!["default".to_string(), "dev".to_string()],
+            active_profile: Some("default".to_string()),
+        };
+
+        let json = serde_json::to_string(&status).unwrap();
+        let deserialized: CloudProviderStatus = serde_json::from_str(&json).unwrap();
+
+        assert!(matches!(deserialized.provider, CloudProvider::Aws));
+        assert_eq!(deserialized.profiles, vec!["default", "dev"]);
+        assert_eq!(deserialized.active_profile, Some("default".to_string()));
+        match deserialized.cli_status {
+            CliStatus::Installed { version, path } => {
+                assert_eq!(version, "aws-cli/2.15.0");
+                assert_eq!(path, "/usr/local/bin/aws");
+            }
+            CliStatus::NotInstalled => panic!("expected Installed"),
+        }
+    }
+
+    #[test]
+    fn test_cloud_provider_status_not_installed_no_profiles() {
+        let status = CloudProviderStatus {
+            provider: CloudProvider::Gcp,
+            cli_status: CliStatus::NotInstalled,
+            profiles: vec![],
+            active_profile: None,
+        };
+        let json = serde_json::to_string(&status).unwrap();
+        assert!(json.contains("not_installed"));
+        assert!(status.profiles.is_empty());
+        assert!(status.active_profile.is_none());
+    }
+
+    // ── detect_cli / detect_cli_path ─────────────────────────────────
+    //
+    // These exercise the real helper (not the `#[tauri::command]` bodies,
+    // which need a live Tauri `AppHandle`/`State` to invoke — out of scope
+    // here, same as the other cloud modules). A definitely-nonexistent
+    // binary name deterministically hits the "not installed" branch on
+    // every platform: on Unix, `which` runs and fails to find it; on
+    // Windows (no `which` binary at all), spawning `which` itself fails,
+    // which falls into the same `_ => return CliStatus::NotInstalled` arm.
+
+    #[tokio::test]
+    async fn test_detect_cli_not_installed_for_unknown_binary() {
+        let status = detect_cli("definitely-not-a-real-binary-xyzabc123", "--version").await;
+        assert!(matches!(status, CliStatus::NotInstalled));
+    }
+
+    #[tokio::test]
+    async fn test_detect_cli_path_empty_for_unknown_binary() {
+        let path = detect_cli_path("definitely-not-a-real-binary-xyzabc123").await;
+        assert!(path.is_empty());
+    }
+
+    // `which` + `echo` are both present on the Unix CI runners this project
+    // tests on (ubuntu-latest, macos-latest); Windows has neither by
+    // default, so this branch is Unix-only, mirroring existing `cfg(unix)`
+    // tests elsewhere in the codebase (e.g. src/x11_forward/mod.rs).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_detect_cli_installed_reports_path_and_stdout_version() {
+        let status = detect_cli("echo", "hello-version").await;
+        match status {
+            CliStatus::Installed { version, path } => {
+                assert!(path.ends_with("echo"), "path was {path}");
+                assert_eq!(version, "hello-version");
+            }
+            CliStatus::NotInstalled => panic!("expected `echo` to be detected as installed"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_detect_cli_path_nonempty_for_known_binary() {
+        let path = detect_cli_path("echo").await;
+        assert!(!path.is_empty());
+        assert!(path.ends_with("echo"), "path was {path}");
+    }
 }
