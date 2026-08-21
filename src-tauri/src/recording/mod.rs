@@ -914,6 +914,32 @@ mod tests {
     // ── serialize_header / serialize_event ───────────────────────────────
 
     #[test]
+    fn test_parse_asciicast_non_numeric_timestamp_defaults_to_zero() {
+        // timestamp field present but not a number -> as_f64() is None -> defaults to 0.0.
+        let content = "{\"version\":2,\"width\":80,\"height\":24,\"timestamp\":\"not-a-number\"}\n";
+        let (header, _events) = parse_asciicast(content).unwrap();
+        assert_eq!(header.timestamp, 0.0);
+    }
+
+    #[test]
+    fn test_parse_asciicast_non_string_env_values_default_to_empty_string() {
+        // env values that aren't JSON strings -> as_str() is None -> defaults to "".
+        let content = "{\"version\":2,\"width\":80,\"height\":24,\"timestamp\":0,\"env\":{\"COUNT\":42}}\n";
+        let (header, _events) = parse_asciicast(content).unwrap();
+        assert_eq!(header.env.get("COUNT").map(String::as_str), Some(""));
+    }
+
+    #[test]
+    fn test_parse_asciicast_non_numeric_version_width_height_use_defaults() {
+        // version/width/height present but wrong JSON type -> as_u64() is None -> defaults.
+        let content = "{\"version\":\"two\",\"width\":\"wide\",\"height\":\"tall\"}\n";
+        let (header, _events) = parse_asciicast(content).unwrap();
+        assert_eq!(header.version, 2);
+        assert_eq!(header.width, 80);
+        assert_eq!(header.height, 24);
+    }
+
+    #[test]
     fn test_serialize_header_omits_title_when_none() {
         let header = RecordingHeader {
             version: 2,

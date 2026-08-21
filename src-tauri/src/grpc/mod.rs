@@ -1196,6 +1196,52 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_message_descriptor_recurses_into_nested_message_types() {
+        // message Outer { message Inner { string v = 1; } }
+        // Field 3 on DescriptorProto is nested_type; parse_message_descriptor
+        // must recurse into it and register it under the parent's fq name,
+        // a path no existing test exercised (build_demo_file_descriptor has
+        // no nested types).
+        let inner_field = { let mut b = Vec::new(); write_string_field(1, "v", &mut b); write_varint_field(5, TYPE_STRING as u64, &mut b); b };
+        let inner = { let mut b = Vec::new(); write_string_field(1, "Inner", &mut b); write_length_delimited(2, &inner_field, &mut b); b };
+        let outer = {
+            let mut b = Vec::new();
+            write_string_field(1, "Outer", &mut b);
+            write_length_delimited(3, &inner, &mut b); // nested_type
+            b
+        };
+
+        let mut registry = ProtoRegistry::default();
+        parse_message_descriptor(&outer, "", &mut registry);
+
+        assert!(registry.messages.contains_key(".Outer"));
+        assert!(registry.messages.contains_key(".Outer.Inner"), "nested type must be registered under the parent's fq name");
+        assert_eq!(registry.messages.get(".Outer.Inner").unwrap().fields[0].name, "v");
+    }
+
+    #[test]
+    fn test_json_to_protobuf_falls_back_to_json_name_when_field_name_key_absent() {
+        // Some clients send camelCase JSON keys matching the descriptor's
+        // json_name rather than the proto field name — json_to_protobuf must
+        // still find the value via that fallback.
+        let field = FieldDesc {
+            name: "user_name".into(),
+            number: 1,
+            label: 1,
+            field_type: TYPE_STRING,
+            type_name: None,
+            json_name: Some("userName".into()),
+        };
+        let msg = MessageDesc { fields: vec![field] };
+        let registry = ProtoRegistry::default();
+
+        let json = serde_json::json!({ "userName": "ada" });
+        let encoded = json_to_protobuf(&json, &msg, &registry);
+        let decoded = protobuf_to_json(&encoded, &msg, &registry);
+        assert_eq!(decoded["user_name"], "ada");
+    }
+
+    #[test]
     fn test_grpc_error_display_and_serialize() {
         let err = GrpcError::NotFound("id1".into());
         assert_eq!(err.to_string(), "Session not found: id1");
