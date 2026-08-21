@@ -905,6 +905,28 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_builtin_library_ids_are_unique_and_have_steps() {
+        let macros = builtin_macro_library();
+        let ids: std::collections::HashSet<&str> =
+            macros.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids.len(), macros.len(), "builtin macro ids must be unique");
+        for m in &macros {
+            assert!(!m.steps.is_empty(), "builtin macro '{}' should have at least one step", m.id);
+            assert!(!m.description.is_empty(), "builtin macro '{}' should have a description", m.id);
+        }
+    }
+
+    #[test]
+    fn test_builtin_library_contains_expected_categories() {
+        let macros = builtin_macro_library();
+        let categories: std::collections::HashSet<&str> =
+            macros.iter().map(|m| m.category.as_str()).collect();
+        assert!(categories.contains("monitoring"));
+        assert!(categories.contains("docker"));
+        assert!(categories.contains("kubernetes"));
+    }
+
     // ── Feature 3 tests ──────────────────────────────────────────────────
 
     #[test]
@@ -1058,6 +1080,23 @@ mod tests {
     fn test_advance_date_invalid_format() {
         assert_eq!(advance_date_by_one("not-a-date"), None);
         assert_eq!(advance_date_by_one("2026-13"), None);
+    }
+
+    #[test]
+    fn test_advance_date_invalid_month_out_of_range() {
+        assert_eq!(advance_date_by_one("2026-13-01"), None);
+        assert_eq!(advance_date_by_one("2026-00-01"), None);
+    }
+
+    #[test]
+    fn test_macro_error_serializes_to_display_string() {
+        let err = MacroError::NotFound("abc-123".to_string());
+        let json = serde_json::to_string(&err).unwrap();
+        assert_eq!(json, "\"Macro not found: abc-123\"");
+
+        let parse_err = MacroError::ParseError("bad json".to_string());
+        let json = serde_json::to_string(&parse_err).unwrap();
+        assert_eq!(json, "\"Parse error: bad json\"");
     }
 
     // ── parse_cron_next: additional edge cases ──────────────────────────

@@ -63,6 +63,9 @@ fn parse_url_host_port(url: &str) -> Option<(String, u16)> {
     // Strip any path component
     let host_port = without_scheme.split('/').next().unwrap_or(without_scheme);
 
+    // Default port based on scheme
+    let default_port = if url.starts_with("https://") { 443 } else { 80 };
+
     // Split host and port
     if let Some(colon_pos) = host_port.rfind(':') {
         let host = &host_port[..colon_pos];
@@ -70,10 +73,12 @@ fn parse_url_host_port(url: &str) -> Option<(String, u16)> {
         if let Ok(port) = port_str.parse::<u16>() {
             return Some((host.to_string(), port));
         }
+        // Invalid port after the colon — fall back to the stripped host
+        // (not the raw "host:garbage" string, which would otherwise leak
+        // the unparsable port text into the returned host).
+        return Some((host.to_string(), default_port));
     }
 
-    // Default port based on scheme
-    let default_port = if url.starts_with("https://") { 443 } else { 80 };
     Some((host_port.to_string(), default_port))
 }
 
@@ -968,6 +973,198 @@ mod tests {
             .find(|o| o.setting == "ConnectTimeout")
             .expect("ConnectTimeout should be recommended on frequent failures");
         assert_eq!(timeout.recommended_value, "30");
+    }
+
+    #[test]
+    fn test_optimise_compression_from_high_latency_and_large_transfer() {
+        let metrics = ConnectionMetrics {
+            avg_latency_ms: 150.0,
+            bytes_transferred_mb: 50.0,
+            ..base_metrics()
+        };
+        let opts = suggest_optimisations(&metrics);
+        let compression = opts
+            .iter()
+            .find(|o| o.setting == "Compression")
+            .expect("Compression should be recommended for high latency + large transfer");
+        assert_eq!(compression.recommended_value, "yes");
+        // Only one Compression recommendation should be present.
+        assert_eq!(opts.iter().filter(|o| o.setting == "Compression").count(), 1);
+    }
+
+    #[test]
+    fn test_optimise_tcp_keepalive_large_transfer() {
+        let metrics = ConnectionMetrics {
+            bytes_transferred_mb: 200.0,
+            ..base_metrics()
+        };
+        let opts = suggest_optimisations(&metrics);
+        assert!(opts.iter().any(|o| o.setting == "TCPKeepAlive" && o.recommended_value == "yes"));
+    }
+
+    #[test]
+    fn test_optimise_no_extra_recommendations_for_calm_link() {
+        let opts = suggest_optimisations(&base_metrics());
+        // Only the baseline ServerAliveInterval rule should fire.
+        assert_eq!(opts.len(), 1);
+        assert_eq!(opts[0].setting, "ServerAliveInterval");
+    }
+
+    // ── decode_chunked tests ──────────────────────────────────────────────
+
+    #[test]
+    fn test_decode_chunked_basic() {
+        let input = "5\r\nhello\r\n0\r\n\r\n";
+        let decoded = decode_chunked(input);
+        assert!(decoded.contains("hello"));
+    }
+
+    #[test]
+    fn test_decode_chunked_multiple_chunks() {
+        let input = "4\r\nWiki\r\n5\r\npedia\r\n0\r\n\r\n";
+        let decoded = decode_chunked(input);
+        assert!(decoded.contains("Wiki"));
+        assert!(decoded.contains("pedia"));
+    }
+
+    #[test]
+    fn test_decode_chunked_falls_back_to_input_when_no_valid_chunks() {
+        // No valid hex chunk-size lines at all -> result stays empty -> falls
+        // back to returning the original input unchanged.
+        let input = "not a chunked body";
+        let decoded = decode_chunked(input);
+        assert_eq!(decoded, input);
+    }
+
+    // ── parse_url_host_port edge cases ───────────────────────────────────
+
+    #[test]
+    fn test_parse_url_host_port_https_default_port() {
+        assert_eq!(
+            parse_url_host_port("https://example.com"),
+            Some(("example.com".to_string(), 443))
+        );
+    }
+
+    #[test]
+    fn test_parse_url_host_port_no_scheme_no_port() {
+        assert_eq!(
+            parse_url_host_port("example.com"),
+            Some(("example.com".to_string(), 80))
+        );
+    }
+
+    #[test]
+    fn test_parse_url_host_port_invalid_port_falls_back_to_stripped_host() {
+        // Before the fix, an unparsable port suffix would leak into the
+        // returned host string ("example.com:notaport" instead of just
+        // "example.com"). Verify the host is now correctly stripped.
+        let result = parse_url_host_port("http://example.com:notaport");
+        assert_eq!(result, Some(("example.com".to_string(), 80)));
+    }
+
+    // ── parse_suggestions edge cases ─────────────────────────────────────
+
+    #[test]
+    fn test_parse_suggestions_empty_text_returns_empty() {
+        assert!(parse_suggestions("").is_empty());
+        assert!(parse_suggestions("   \n  ").is_empty());
+    }
+
+    #[test]
+    fn test_parse_suggestions_array_present_but_no_valid_entries_falls_back() {
+        // The bracketed content parses as a JSON array, but none of its
+        // objects have a usable "command" field, so the filtered suggestion
+        // list is empty and we fall back to treating the whole text as one
+        // plain-text suggestion.
+        let text = "Try this:\n[{\"explanation\": \"no command field\"}]";
+        let suggestions = parse_suggestions(text);
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].risk_level, RiskLevel::Caution);
+        assert_eq!(suggestions[0].command, "Try this:");
+    }
+
+    #[test]
+    fn test_parse_suggestions_malformed_json_falls_back() {
+        let text = "ls -la\n[not valid json}";
+        let suggestions = parse_suggestions(text);
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].command, "ls -la");
+    }
+
+    #[test]
+    fn test_parse_suggestions_missing_risk_level_defaults_to_safe() {
+        let text = r#"[{"command": "pwd", "explanation": "print working directory"}]"#;
+        let suggestions = parse_suggestions(text);
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].risk_level, RiskLevel::Safe);
+        assert_eq!(suggestions[0].explanation, "print working directory");
+    }
+
+    // ── local_autocomplete edge cases ────────────────────────────────────
+
+    #[test]
+    fn test_autocomplete_docker_compose_builtin() {
+        let req = AutocompleteRequest {
+            partial_command: "docker-compose".to_string(),
+            session_history: vec![],
+            session_type: "docker".to_string(),
+            current_directory: None,
+        };
+        let results = local_autocomplete(&req);
+        let completions: Vec<&str> = results.iter().map(|s| s.completion.as_str()).collect();
+        assert!(completions.contains(&"docker-compose up -d"));
+        assert!(completions.contains(&"docker-compose down"));
+    }
+
+    #[test]
+    fn test_autocomplete_unknown_session_type_yields_no_builtins() {
+        let req = AutocompleteRequest {
+            partial_command: "".to_string(),
+            session_history: vec!["ls".to_string()],
+            session_type: "generic".to_string(),
+            current_directory: None,
+        };
+        let results = local_autocomplete(&req);
+        // Only the history entry should be present; no builtins for "generic".
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].source, "history");
+    }
+
+    #[test]
+    fn test_autocomplete_truncates_to_ten() {
+        let history: Vec<String> = (0..15).map(|i| format!("cmd{i}")).collect();
+        let req = AutocompleteRequest {
+            partial_command: "cmd".to_string(),
+            session_history: history,
+            session_type: "generic".to_string(),
+            current_directory: None,
+        };
+        let results = local_autocomplete(&req);
+        assert_eq!(results.len(), 10, "results should be truncated to at most 10");
+    }
+
+    // ── extract_script_warnings edge cases ───────────────────────────────
+
+    #[test]
+    fn test_extract_warnings_curl_pipe_bash() {
+        let script = "#!/bin/bash\ncurl -sSL https://example.com/install.sh | bash";
+        let warnings = extract_script_warnings(script);
+        assert!(warnings.iter().any(|w| w.contains("pipes remote content")));
+    }
+
+    #[test]
+    fn test_extract_warnings_chmod_777() {
+        let script = "#!/bin/bash\nchmod 777 /var/www/html";
+        let warnings = extract_script_warnings(script);
+        assert!(warnings.iter().any(|w| w.contains("chmod 777")));
+    }
+
+    #[test]
+    fn test_extract_warnings_multiple_issues_combined() {
+        let script = "#!/bin/bash\nsudo rm -rf /tmp/*\nchmod 777 /data";
+        let warnings = extract_script_warnings(script);
+        assert_eq!(warnings.len(), 3, "should flag sudo, rm -rf, and chmod 777");
     }
 }
 

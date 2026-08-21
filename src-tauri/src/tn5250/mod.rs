@@ -879,4 +879,121 @@ mod tests {
         assert_eq!(&h[2..4], &[0x12, 0xA0]);
         assert_eq!(h[6], 0x04);
     }
+
+    #[test]
+    fn test_strip_record_header_short_record_returns_empty() {
+        // Records at or below the 10-byte header length carry no command
+        // bytes at all.
+        assert_eq!(strip_record_header(&[0u8; 10]), &[] as &[u8]);
+        assert_eq!(strip_record_header(&[0u8; 5]), &[] as &[u8]);
+    }
+
+    #[test]
+    fn test_record_reader_skips_interleaved_negotiation() {
+        let mut reader = RecordReader::new();
+        let raw = [0x01u8, IAC, DO, OPT_BINARY, 0x02, IAC, EOR];
+        let records = reader.feed(&raw);
+        assert_eq!(records, vec![vec![0x01, 0x02]]);
+    }
+
+    #[test]
+    fn test_process_command_empty_data_does_not_panic() {
+        let mut screen = ScreenBuffer::new(24, 80);
+        process_command(&mut screen, &[]);
+        assert_eq!(screen.cursor_row, 0);
+        assert_eq!(screen.cursor_col, 0);
+    }
+
+    #[test]
+    fn test_process_command_read_commands_are_noop() {
+        let mut screen = ScreenBuffer::new(24, 80);
+        screen.cells[0].ebcdic = b'X';
+        process_command(&mut screen, &[CMD_READ_INPUT_FIELDS, 0xAA]);
+        process_command(&mut screen, &[CMD_READ_MDT_FIELDS, 0xAA]);
+        assert_eq!(screen.cells[0].ebcdic, b'X');
+    }
+
+    #[test]
+    fn test_process_command_clear_unit_alternate_resets_buffer() {
+        let mut screen = ScreenBuffer::new(24, 80);
+        screen.cells[0].ebcdic = b'X';
+        process_command(&mut screen, &[CMD_CLEAR_UNIT_ALTERNATE]);
+        assert_eq!(screen.cells[0].ebcdic, 0);
+    }
+
+    #[test]
+    fn test_process_command_soh_skips_length_prefixed_bytes() {
+        let mut screen = ScreenBuffer::new(24, 80);
+        // WTD, CC1=0, CC2=0, SOH with length 2 (skip 2 bytes), then "HI"
+        // written starting at the cursor's default position (0,0).
+        let mut data = vec![CMD_WRITE_TO_DISPLAY, 0x00, 0x00];
+        data.extend_from_slice(&[ORDER_SOH, 2, 0xAA, 0xBB]);
+        data.push(b'H');
+        data.push(b'I');
+        process_command(&mut screen, &data);
+        assert_eq!(screen.cells[0].ebcdic, b'H');
+        assert_eq!(screen.cells[1].ebcdic, b'I');
+    }
+
+    #[test]
+    fn test_process_command_ea_order_erases_unprotected_range() {
+        let mut screen = ScreenBuffer::new(24, 80);
+        let mut data = vec![CMD_WRITE_TO_DISPLAY, 0x00, 0x00];
+        data.extend_from_slice(&[ORDER_SBA, 1, 1]);
+        data.extend_from_slice(&[ORDER_RA, 1, 5, b'.']);
+        process_command(&mut screen, &data);
+        for cell in &screen.cells[0..5] {
+            assert_eq!(cell.ebcdic, b'.');
+        }
+
+        let mut erase_data = vec![CMD_WRITE_TO_DISPLAY, 0x00, 0x00];
+        erase_data.extend_from_slice(&[ORDER_SBA, 1, 1]);
+        // EA: target row/col (1,6), extra_len byte = 1 (no extra bytes consumed)
+        erase_data.extend_from_slice(&[ORDER_EA, 1, 6, 1]);
+        process_command(&mut screen, &erase_data);
+        for cell in &screen.cells[0..5] {
+            assert_eq!(cell.ebcdic, 0x40);
+        }
+    }
+
+    #[test]
+    fn test_field_start_for_no_fields_is_not_bypassed() {
+        let screen = ScreenBuffer::new(24, 80);
+        assert_eq!(screen.field_start_for(0), None);
+        assert!(!screen.is_bypassed(0));
+    }
+
+    #[test]
+    fn test_advance_cursor_wraps_rows() {
+        let mut screen = ScreenBuffer::new(2, 3);
+        screen.cursor_row = 0;
+        screen.cursor_col = 2;
+        screen.advance_cursor();
+        assert_eq!(screen.cursor_row, 1);
+        assert_eq!(screen.cursor_col, 0);
+    }
+
+    #[test]
+    fn test_screen_addr_wraps_out_of_range_row_col() {
+        let screen = ScreenBuffer::new(24, 80);
+        // row/col beyond bounds must wrap via modulo, never panic/OOB.
+        assert_eq!(screen.addr(24, 0), screen.addr(0, 0));
+        assert_eq!(screen.addr(0, 80), screen.addr(0, 0));
+    }
+
+    #[test]
+    fn test_screen_snapshot_reflects_buffer_state() {
+        let mut screen = ScreenBuffer::new(24, 80);
+        let mut data = vec![CMD_WRITE_TO_DISPLAY, 0x00, 0x00];
+        data.extend_from_slice(&[ORDER_IC, 3, 10]);
+        process_command(&mut screen, &data);
+
+        let snapshot = screen_snapshot("sess-1", &screen);
+        assert_eq!(snapshot.session_id, "sess-1");
+        assert_eq!(snapshot.rows, 24);
+        assert_eq!(snapshot.cols, 80);
+        assert_eq!(snapshot.cursor_row, 2);
+        assert_eq!(snapshot.cursor_col, 9);
+        assert_eq!(snapshot.cells.len(), 24 * 80);
+    }
 }
