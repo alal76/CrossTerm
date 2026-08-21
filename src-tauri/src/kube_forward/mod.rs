@@ -212,6 +212,10 @@ pub async fn k8s_port_forward_connect(
 
 #[tauri::command]
 pub async fn k8s_port_forward_disconnect(id: String, state: tauri::State<'_, K8sPortForwardState>) -> Result<(), K8sPortForwardError> {
+    do_k8s_port_forward_disconnect(id, state.inner()).await
+}
+
+async fn do_k8s_port_forward_disconnect(id: String, state: &K8sPortForwardState) -> Result<(), K8sPortForwardError> {
     let session = state.sessions.lock().unwrap().remove(&id).ok_or(K8sPortForwardError::NotFound(id))?;
     session.accept_handle.abort();
     for handle in session.conn_handles.lock().await.drain(..) {
@@ -228,6 +232,10 @@ pub struct K8sPortForwardInfo {
 
 #[tauri::command]
 pub fn k8s_port_forward_list(state: tauri::State<'_, K8sPortForwardState>) -> Vec<K8sPortForwardInfo> {
+    do_k8s_port_forward_list(state.inner())
+}
+
+fn do_k8s_port_forward_list(state: &K8sPortForwardState) -> Vec<K8sPortForwardInfo> {
     state
         .sessions
         .lock()
@@ -346,5 +354,85 @@ users:
         // directly rather than the #[tauri::command] wrapper.
         let state = K8sPortForwardState::new();
         assert!(state.sessions.lock().unwrap().get("missing-id").is_none());
+    }
+
+    #[test]
+    fn test_k8s_port_forward_error_display_and_serialize() {
+        assert_eq!(
+            K8sPortForwardError::NotFound("x".into()).to_string(),
+            "Session not found: x"
+        );
+        assert_eq!(
+            K8sPortForwardError::Kubeconfig("bad".into()).to_string(),
+            "Kubeconfig error: bad"
+        );
+        assert_eq!(K8sPortForwardError::Kube("nope".into()).to_string(), "Kubernetes API error: nope");
+        let io_err: K8sPortForwardError = std::io::Error::new(std::io::ErrorKind::Other, "boom").into();
+        assert!(matches!(io_err, K8sPortForwardError::Io(_)));
+
+        let json = serde_json::to_string(&K8sPortForwardError::NotFound("abc".into())).unwrap();
+        assert_eq!(json, "\"Session not found: abc\"");
+    }
+
+    #[test]
+    fn test_k8s_port_forward_config_serde_roundtrip() {
+        let config = K8sPortForwardConfig {
+            kubeconfig_path: Some("/path/to/config".into()),
+            context: Some("dev".into()),
+            namespace: "default".into(),
+            pod_name: "my-pod".into(),
+            remote_port: 8080,
+            local_port: 0,
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let parsed: K8sPortForwardConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.namespace, "default");
+        assert_eq!(parsed.pod_name, "my-pod");
+        assert_eq!(parsed.remote_port, 8080);
+    }
+
+    /// Builds a `K8sPortForwardSession` with dummy background tasks (no
+    /// real listener/portforward) so `do_k8s_port_forward_list` and
+    /// `do_k8s_port_forward_disconnect`'s session-management logic can be
+    /// exercised without a live cluster.
+    fn make_test_session(port: u16) -> K8sPortForwardSession {
+        let accept_handle = tokio::spawn(async {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+            }
+        });
+        let conn_handle = tokio::spawn(async {
+            tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+        });
+        K8sPortForwardSession {
+            local_addr: SocketAddr::from(([127, 0, 0, 1], port)),
+            accept_handle,
+            conn_handles: std::sync::Arc::new(TokioMutex::new(vec![conn_handle])),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_do_k8s_port_forward_list_and_disconnect() {
+        let state = K8sPortForwardState::new();
+        state
+            .sessions
+            .lock()
+            .unwrap()
+            .insert("s1".into(), make_test_session(12345));
+
+        let list = do_k8s_port_forward_list(&state);
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, "s1");
+        assert_eq!(list[0].local_port, 12345);
+
+        do_k8s_port_forward_disconnect("s1".into(), &state)
+            .await
+            .expect("disconnect ok");
+        assert!(do_k8s_port_forward_list(&state).is_empty());
+
+        let err = do_k8s_port_forward_disconnect("s1".into(), &state)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, K8sPortForwardError::NotFound(_)));
     }
 }

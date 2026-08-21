@@ -725,6 +725,15 @@ fn do_plugin_load_wasm(path: String, state: &PluginState) -> Result<PluginInfo, 
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────
+//
+// NOTE: an earlier pass at these tests exercised the mutexes inside
+// `PluginState` directly (locking `state.plugins` and mutating it inline)
+// instead of calling the `do_plugin_*` functions that the `#[tauri::command]`
+// wrappers delegate to. That looked like it was testing plugin lifecycle
+// behavior, but tarpaulin correctly reported 0% coverage for this file
+// because none of the actual production functions were ever invoked. The
+// tests below call `do_plugin_*` directly (the tauri command wrappers
+// themselves can't be unit tested without a full mock `tauri::State`).
 
 #[cfg(test)]
 mod tests {
@@ -1013,5 +1022,494 @@ mod tests {
         let parsed: PluginSandboxConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.max_memory_mb, 128);
         assert_eq!(parsed.allowed_hosts[0], "api.example.com");
+    }
+
+    // ── Tests that exercise the real `do_plugin_*` functions ─────────────
+
+    fn make_state_at(dir: PathBuf) -> PluginState {
+        PluginState {
+            plugins: Mutex::new(HashMap::new()),
+            plugins_dir: dir,
+            hooks: Mutex::new(HashMap::new()),
+            kv_store: Mutex::new(HashMap::new()),
+            sandbox_configs: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn insert_plugin(state: &PluginState, id: &str, enabled: bool, loaded: bool) {
+        let mut manifest = make_manifest();
+        manifest.id = id.to_string();
+        let mut plugins = state.plugins.lock().unwrap();
+        plugins.insert(
+            id.to_string(),
+            PluginInfo {
+                manifest,
+                enabled,
+                loaded,
+                load_time_ms: if loaded { Some(0) } else { None },
+                error: None,
+            },
+        );
+    }
+
+    #[test]
+    fn test_validate_manifest_rejects_empty_fields() {
+        let mut m = make_manifest();
+        m.id = String::new();
+        assert!(matches!(
+            validate_manifest(&m),
+            Err(PluginError::InvalidManifest(_))
+        ));
+
+        let mut m = make_manifest();
+        m.name = String::new();
+        assert!(validate_manifest(&m).is_err());
+
+        let mut m = make_manifest();
+        m.version = String::new();
+        assert!(validate_manifest(&m).is_err());
+
+        let mut m = make_manifest();
+        m.entry_point = String::new();
+        assert!(validate_manifest(&m).is_err());
+
+        assert!(validate_manifest(&make_manifest()).is_ok());
+    }
+
+    #[test]
+    fn test_do_plugin_scan_missing_dir_returns_empty() {
+        let dir = std::env::temp_dir().join(format!("ct-scan-missing-{}", Uuid::new_v4()));
+        let state = make_state_at(dir);
+        let found = do_plugin_scan(&state).expect("scan ok");
+        assert!(found.is_empty());
+    }
+
+    #[test]
+    fn test_do_plugin_scan_finds_valid_manifest() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let plugin_dir = tmp.path().join("my-plugin");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        let manifest = make_manifest();
+        std::fs::write(
+            plugin_dir.join("manifest.json"),
+            serde_json::to_string(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        let state = make_state_at(tmp.path().to_path_buf());
+        let found = do_plugin_scan(&state).expect("scan ok");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].manifest.id, "test-plugin");
+        assert!(!found[0].loaded);
+
+        // State should now contain the scanned plugin.
+        let plugins = state.plugins.lock().unwrap();
+        assert!(plugins.contains_key("test-plugin"));
+    }
+
+    #[test]
+    fn test_do_plugin_scan_rescan_does_not_overwrite_existing_state() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let plugin_dir = tmp.path().join("my-plugin");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        let manifest = make_manifest();
+        std::fs::write(
+            plugin_dir.join("manifest.json"),
+            serde_json::to_string(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        let state = make_state_at(tmp.path().to_path_buf());
+        do_plugin_scan(&state).expect("first scan");
+
+        // Mark it loaded, then rescan: `or_insert_with` must not clobber it.
+        {
+            let mut plugins = state.plugins.lock().unwrap();
+            plugins.get_mut("test-plugin").unwrap().loaded = true;
+        }
+        do_plugin_scan(&state).expect("second scan");
+        let plugins = state.plugins.lock().unwrap();
+        assert!(plugins.get("test-plugin").unwrap().loaded);
+    }
+
+    #[test]
+    fn test_do_plugin_scan_invalid_manifest_json_errors() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let plugin_dir = tmp.path().join("bad-plugin");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(plugin_dir.join("manifest.json"), "{ not valid json").unwrap();
+
+        let state = make_state_at(tmp.path().to_path_buf());
+        let result = do_plugin_scan(&state);
+        assert!(matches!(result, Err(PluginError::Serde(_))));
+    }
+
+    #[test]
+    fn test_do_plugin_scan_invalid_manifest_fields_errors() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let plugin_dir = tmp.path().join("bad-plugin");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        let mut manifest = make_manifest();
+        manifest.id = String::new();
+        std::fs::write(
+            plugin_dir.join("manifest.json"),
+            serde_json::to_string(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        let state = make_state_at(tmp.path().to_path_buf());
+        let result = do_plugin_scan(&state);
+        assert!(matches!(result, Err(PluginError::InvalidManifest(_))));
+    }
+
+    #[test]
+    fn test_do_plugin_load_success_and_already_loaded() {
+        let state = make_state_at(std::env::temp_dir());
+        insert_plugin(&state, "p1", false, false);
+
+        let info = do_plugin_load("p1".into(), &state).expect("load ok");
+        assert!(info.loaded);
+        assert_eq!(info.load_time_ms, Some(0));
+
+        let err = do_plugin_load("p1".into(), &state).unwrap_err();
+        assert!(matches!(err, PluginError::AlreadyLoaded(_)));
+    }
+
+    #[test]
+    fn test_do_plugin_load_not_found() {
+        let state = make_state_at(std::env::temp_dir());
+        let err = do_plugin_load("nope".into(), &state).unwrap_err();
+        assert!(matches!(err, PluginError::NotFound(_)));
+    }
+
+    #[test]
+    fn test_do_plugin_unload_success_and_errors() {
+        let state = make_state_at(std::env::temp_dir());
+        insert_plugin(&state, "p1", false, true);
+
+        do_plugin_unload("p1".into(), &state).expect("unload ok");
+        let plugins = state.plugins.lock().unwrap();
+        assert!(!plugins.get("p1").unwrap().loaded);
+        drop(plugins);
+
+        // Already unloaded -> error.
+        let err = do_plugin_unload("p1".into(), &state).unwrap_err();
+        assert!(matches!(err, PluginError::NotFound(_)));
+
+        // Unknown plugin -> error.
+        let err = do_plugin_unload("nope".into(), &state).unwrap_err();
+        assert!(matches!(err, PluginError::NotFound(_)));
+    }
+
+    #[test]
+    fn test_do_plugin_enable_disable() {
+        let state = make_state_at(std::env::temp_dir());
+        insert_plugin(&state, "p1", false, true);
+
+        do_plugin_enable("p1".into(), &state).expect("enable ok");
+        assert!(state.plugins.lock().unwrap().get("p1").unwrap().enabled);
+
+        do_plugin_disable("p1".into(), &state).expect("disable ok");
+        let plugins = state.plugins.lock().unwrap();
+        let info = plugins.get("p1").unwrap();
+        assert!(!info.enabled);
+        assert!(!info.loaded); // disable also unloads
+
+        drop(plugins);
+        let err = do_plugin_enable("nope".into(), &state).unwrap_err();
+        assert!(matches!(err, PluginError::NotFound(_)));
+        let err = do_plugin_disable("nope".into(), &state).unwrap_err();
+        assert!(matches!(err, PluginError::NotFound(_)));
+    }
+
+    #[test]
+    fn test_do_plugin_get_info_and_list() {
+        let state = make_state_at(std::env::temp_dir());
+        insert_plugin(&state, "p1", true, true);
+        insert_plugin(&state, "p2", false, false);
+
+        let info = do_plugin_get_info("p1".into(), &state).expect("found");
+        assert_eq!(info.manifest.id, "p1");
+
+        let err = do_plugin_get_info("nope".into(), &state).unwrap_err();
+        assert!(matches!(err, PluginError::NotFound(_)));
+
+        let list = do_plugin_list(&state).expect("list ok");
+        assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn test_do_plugin_install_file_not_found() {
+        let state = make_state_at(std::env::temp_dir());
+        let err = do_plugin_install("/no/such/file.wasm".into(), &state).unwrap_err();
+        assert!(matches!(err, PluginError::LoadFailed(_)));
+    }
+
+    #[test]
+    fn test_do_plugin_install_generates_stub_manifest_when_absent() {
+        let src_dir = tempfile::tempdir().expect("tempdir");
+        let plugins_dir = tempfile::tempdir().expect("tempdir");
+        let wasm_path = src_dir.path().join("cool_plugin.wasm");
+        std::fs::write(&wasm_path, b"fake wasm bytes").unwrap();
+
+        let state = make_state_at(plugins_dir.path().to_path_buf());
+        let info = do_plugin_install(wasm_path.to_string_lossy().to_string(), &state)
+            .expect("install ok");
+
+        assert_eq!(info.manifest.name, "cool_plugin");
+        assert_eq!(info.manifest.version, "0.1.0");
+        assert!(!info.loaded);
+
+        // Files should have been copied into the plugins dir.
+        let dest_dir = plugins_dir.path().join(&info.manifest.id);
+        assert!(dest_dir.join("cool_plugin.wasm").exists());
+        assert!(dest_dir.join("manifest.json").exists());
+
+        // Duplicate install (same manifest.id already registered) errors.
+        let plugins = state.plugins.lock().unwrap();
+        assert!(plugins.contains_key(&info.manifest.id));
+    }
+
+    #[test]
+    fn test_do_plugin_install_uses_adjacent_manifest_and_rejects_duplicate() {
+        let src_dir = tempfile::tempdir().expect("tempdir");
+        let plugins_dir = tempfile::tempdir().expect("tempdir");
+        let wasm_path = src_dir.path().join("plugin.wasm");
+        std::fs::write(&wasm_path, b"fake wasm bytes").unwrap();
+        let manifest = make_manifest();
+        std::fs::write(
+            src_dir.path().join("manifest.json"),
+            serde_json::to_string(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        let state = make_state_at(plugins_dir.path().to_path_buf());
+        let info = do_plugin_install(wasm_path.to_string_lossy().to_string(), &state)
+            .expect("install ok");
+        assert_eq!(info.manifest.id, "test-plugin");
+
+        // Installing again with the same manifest id should fail.
+        let err = do_plugin_install(wasm_path.to_string_lossy().to_string(), &state)
+            .unwrap_err();
+        assert!(matches!(err, PluginError::AlreadyLoaded(_)));
+    }
+
+    #[test]
+    fn test_do_plugin_uninstall_success_and_not_found() {
+        let plugins_dir = tempfile::tempdir().expect("tempdir");
+        let state = make_state_at(plugins_dir.path().to_path_buf());
+        insert_plugin(&state, "p1", false, false);
+        let dir = plugins_dir.path().join("p1");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("marker"), b"x").unwrap();
+
+        do_plugin_uninstall("p1".into(), &state).expect("uninstall ok");
+        assert!(!dir.exists());
+        assert!(!state.plugins.lock().unwrap().contains_key("p1"));
+
+        let err = do_plugin_uninstall("p1".into(), &state).unwrap_err();
+        assert!(matches!(err, PluginError::NotFound(_)));
+    }
+
+    #[test]
+    fn test_do_plugin_send_event_requires_loaded_and_enabled() {
+        let state = make_state_at(std::env::temp_dir());
+        insert_plugin(&state, "p1", false, false);
+
+        let err = do_plugin_send_event("p1".into(), &state).unwrap_err();
+        assert!(matches!(err, PluginError::ExecutionFailed(_)));
+
+        insert_plugin(&state, "p1", false, true); // loaded, not enabled
+        let err = do_plugin_send_event("p1".into(), &state).unwrap_err();
+        assert!(matches!(err, PluginError::ExecutionFailed(_)));
+
+        insert_plugin(&state, "p1", true, true); // loaded and enabled
+        do_plugin_send_event("p1".into(), &state).expect("event ok");
+
+        let err = do_plugin_send_event("nope".into(), &state).unwrap_err();
+        assert!(matches!(err, PluginError::NotFound(_)));
+    }
+
+    #[test]
+    fn test_do_plugin_register_and_unregister_hook() {
+        let state = make_state_at(std::env::temp_dir());
+        insert_plugin(&state, "p1", false, false);
+
+        // Unknown plugin -> error, no hook registered.
+        let err = do_plugin_register_hook("nope".into(), PluginHook::OnConnect, &state)
+            .unwrap_err();
+        assert!(matches!(err, PluginError::NotFound(_)));
+
+        do_plugin_register_hook("p1".into(), PluginHook::OnConnect, &state).unwrap();
+        do_plugin_register_hook("p1".into(), PluginHook::OnDisconnect, &state).unwrap();
+        do_plugin_register_hook("p1".into(), PluginHook::OnConnect, &state).unwrap();
+
+        {
+            let hooks = state.hooks.lock().unwrap();
+            assert_eq!(hooks.get("p1").unwrap().len(), 3);
+        }
+
+        do_plugin_unregister_hook("p1".into(), PluginHook::OnConnect, &state).unwrap();
+        let hooks = state.hooks.lock().unwrap();
+        let remaining = hooks.get("p1").unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert!(matches!(remaining[0], PluginHook::OnDisconnect));
+    }
+
+    #[test]
+    fn test_do_plugin_kv_roundtrip_via_functions() {
+        let state = make_state_at(std::env::temp_dir());
+
+        assert_eq!(
+            do_plugin_kv_get("p1".into(), "k".into(), &state).unwrap(),
+            None
+        );
+
+        do_plugin_kv_set("p1".into(), "k".into(), serde_json::json!(42), &state).unwrap();
+        assert_eq!(
+            do_plugin_kv_get("p1".into(), "k".into(), &state).unwrap(),
+            Some(serde_json::json!(42))
+        );
+
+        do_plugin_kv_delete("p1".into(), "k".into(), &state).unwrap();
+        assert_eq!(
+            do_plugin_kv_get("p1".into(), "k".into(), &state).unwrap(),
+            None
+        );
+
+        // Deleting a key that was never set should be a no-op, not an error.
+        do_plugin_kv_delete("p1".into(), "missing".into(), &state).unwrap();
+    }
+
+    #[test]
+    fn test_do_plugin_sandbox_config_get_set() {
+        let state = make_state_at(std::env::temp_dir());
+
+        let err = do_plugin_get_sandbox_config("p1".into(), &state).unwrap_err();
+        assert!(matches!(err, PluginError::NotFound(_)));
+
+        let config = PluginSandboxConfig {
+            allowed_paths: vec!["/tmp".into()],
+            allowed_hosts: vec!["example.com".into()],
+            max_memory_mb: 64,
+            max_cpu_time_ms: 1000,
+        };
+        do_plugin_set_sandbox_config("p1".into(), config.clone(), &state).unwrap();
+
+        let retrieved = do_plugin_get_sandbox_config("p1".into(), &state).unwrap();
+        assert_eq!(retrieved.max_memory_mb, 64);
+        assert_eq!(retrieved.allowed_hosts, vec!["example.com".to_string()]);
+    }
+
+    #[test]
+    fn test_do_plugin_load_wasm() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let state = make_state_at(std::env::temp_dir());
+
+        let err = do_plugin_load_wasm("/no/such/plugin.wasm".into(), &state).unwrap_err();
+        assert!(matches!(err, PluginError::LoadFailed(_)));
+
+        let wasm_path = tmp.path().join("neat.wasm");
+        std::fs::write(&wasm_path, b"bytes").unwrap();
+        let info =
+            do_plugin_load_wasm(wasm_path.to_string_lossy().to_string(), &state).expect("ok");
+        assert_eq!(info.manifest.name, "neat");
+        assert!(info.loaded);
+        assert!(state
+            .plugins
+            .lock()
+            .unwrap()
+            .contains_key(&info.manifest.id));
+    }
+
+    #[tokio::test]
+    async fn test_do_plugin_http_request_requires_network_permission() {
+        let state = make_state_at(std::env::temp_dir());
+        let mut manifest = make_manifest();
+        manifest.id = "p1".into();
+        manifest.permissions = vec![PluginPermission::FileSystem]; // no Network
+        state.plugins.lock().unwrap().insert(
+            "p1".into(),
+            PluginInfo {
+                manifest,
+                enabled: true,
+                loaded: true,
+                load_time_ms: Some(0),
+                error: None,
+            },
+        );
+
+        let req = PluginHttpRequest {
+            url: "https://example.com/foo".into(),
+            method: "GET".into(),
+            headers: HashMap::new(),
+            body: None,
+        };
+        let err = do_plugin_http_request("p1".into(), req, &state)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, PluginError::PermissionDenied(_)));
+    }
+
+    #[tokio::test]
+    async fn test_do_plugin_http_request_not_found() {
+        let state = make_state_at(std::env::temp_dir());
+        let req = PluginHttpRequest {
+            url: "https://example.com/foo".into(),
+            method: "GET".into(),
+            headers: HashMap::new(),
+            body: None,
+        };
+        let err = do_plugin_http_request("nope".into(), req, &state)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, PluginError::NotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn test_do_plugin_http_request_sandbox_host_allowlist() {
+        let state = make_state_at(std::env::temp_dir());
+        insert_plugin(&state, "p1", true, true); // has Network permission via make_manifest
+
+        state.sandbox_configs.lock().unwrap().insert(
+            "p1".into(),
+            PluginSandboxConfig {
+                allowed_paths: vec![],
+                allowed_hosts: vec!["good.example.com".into()],
+                max_memory_mb: 32,
+                max_cpu_time_ms: 1000,
+            },
+        );
+
+        // Disallowed host.
+        let req = PluginHttpRequest {
+            url: "https://evil.example.com/foo".into(),
+            method: "GET".into(),
+            headers: HashMap::new(),
+            body: None,
+        };
+        let err = do_plugin_http_request("p1".into(), req, &state)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, PluginError::SandboxViolation(_)));
+
+        // Allowed host succeeds (stubbed 200 response).
+        let req = PluginHttpRequest {
+            url: "https://good.example.com/foo".into(),
+            method: "GET".into(),
+            headers: HashMap::new(),
+            body: None,
+        };
+        let resp = do_plugin_http_request("p1".into(), req, &state)
+            .await
+            .expect("ok");
+        assert_eq!(resp.status, 200);
+    }
+
+    #[test]
+    fn test_plugin_state_new_sets_plugins_dir() {
+        let state = PluginState::new();
+        assert!(state.plugins_dir.ends_with("plugins"));
+        assert!(state.plugins.lock().unwrap().is_empty());
     }
 }
