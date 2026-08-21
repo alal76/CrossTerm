@@ -747,4 +747,115 @@ mod tests {
             assert_eq!(matches[1].text, "Hello again");
         }
     }
+
+    // editor_detect_language, editor_diff, and editor_diff_content take no
+    // tauri::State, so we can call the actual #[tauri::command] functions
+    // directly rather than re-deriving their logic inline.
+
+    #[test]
+    fn test_editor_detect_language_command() {
+        assert_eq!(editor_detect_language("main.rs".into()).unwrap(), "rust");
+        assert_eq!(editor_detect_language("script.SH".into()).unwrap(), "shell");
+        assert_eq!(editor_detect_language("archive.tar.gz".into()).unwrap(), "plaintext");
+        // No extension: the whole (lowercased) filename is treated as the
+        // "extension", so "Dockerfile" matches the dockerfile arm.
+        assert_eq!(editor_detect_language("Dockerfile".into()).unwrap(), "dockerfile");
+    }
+
+    #[test]
+    fn test_editor_diff_content_identical_has_no_hunks() {
+        let result = editor_diff_content("a\nb\nc".into(), "a\nb\nc".into()).unwrap();
+        assert!(result.hunks.is_empty());
+        assert_eq!(result.stats.additions, 0);
+        assert_eq!(result.stats.deletions, 0);
+        assert_eq!(result.left_path, "<left>");
+        assert_eq!(result.right_path, "<right>");
+    }
+
+    #[test]
+    fn test_editor_diff_content_with_changes() {
+        let result = editor_diff_content(
+            "line1\nline2\nline3".into(),
+            "line1\nCHANGED\nline3".into(),
+        )
+        .unwrap();
+        assert!(!result.hunks.is_empty());
+        assert_eq!(result.stats.additions, 1);
+        assert_eq!(result.stats.deletions, 1);
+    }
+
+    #[test]
+    fn test_editor_diff_reads_files_and_computes_stats() {
+        let dir = tempfile::tempdir().unwrap();
+        let left_path = dir.path().join("left.txt");
+        let right_path = dir.path().join("right.txt");
+        std::fs::write(&left_path, "alpha\nbeta\ngamma\n").unwrap();
+        std::fs::write(&right_path, "alpha\nBETA\ngamma\ndelta\n").unwrap();
+
+        let result = editor_diff(
+            left_path.to_string_lossy().to_string(),
+            right_path.to_string_lossy().to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(result.left_path, left_path.to_string_lossy().to_string());
+        assert_eq!(result.right_path, right_path.to_string_lossy().to_string());
+        assert!(result.stats.additions >= 1);
+        assert!(result.stats.deletions >= 1);
+    }
+
+    #[test]
+    fn test_editor_diff_missing_left_file_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let right_path = dir.path().join("right.txt");
+        std::fs::write(&right_path, "content").unwrap();
+
+        let result = editor_diff(
+            "/nonexistent/path/left.txt".into(),
+            right_path.to_string_lossy().to_string(),
+        );
+        assert!(matches!(result, Err(EditorError::ReadError(_))));
+    }
+
+    #[test]
+    fn test_compute_diff_no_changes_yields_no_hunks() {
+        let left = ["a", "b", "c"];
+        let right = ["a", "b", "c"];
+        let hunks = compute_diff(&left, &right);
+        assert!(hunks.is_empty());
+    }
+
+    #[test]
+    fn test_compute_diff_pure_addition() {
+        let left = ["a", "b"];
+        let right = ["a", "b", "c", "d"];
+        let hunks = compute_diff(&left, &right);
+        let stats = compute_stats(&hunks);
+        assert_eq!(stats.additions, 2);
+        assert_eq!(stats.deletions, 0);
+    }
+
+    #[test]
+    fn test_compute_diff_pure_deletion() {
+        let left = ["a", "b", "c", "d"];
+        let right = ["a", "b"];
+        let hunks = compute_diff(&left, &right);
+        let stats = compute_stats(&hunks);
+        assert_eq!(stats.deletions, 2);
+        assert_eq!(stats.additions, 0);
+    }
+
+    #[test]
+    fn test_compute_diff_empty_inputs_yield_no_hunks() {
+        let hunks = compute_diff(&[], &[]);
+        assert!(hunks.is_empty());
+    }
+
+    #[test]
+    fn test_editor_error_io_variant() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
+        let err: EditorError = io_err.into();
+        assert!(err.to_string().contains("IO error"));
+        assert!(err.to_string().contains("denied"));
+    }
 }

@@ -594,4 +594,40 @@ mod tests {
         assert_eq!(deserialized2.port, 2222);
         assert!(matches!(deserialized2.auth, KeyDeployAuth::ExistingKey(_)));
     }
+
+    #[test]
+    fn test_keymgr_error_display_and_serialize() {
+        let e = KeyMgrError::NotFound("k1".into());
+        assert_eq!(e.to_string(), "Key not found: k1");
+        assert_eq!(serde_json::to_string(&e).unwrap(), "\"Key not found: k1\"");
+
+        assert_eq!(KeyMgrError::AlreadyExists("dup".into()).to_string(), "Key already exists: dup");
+        assert_eq!(KeyMgrError::InvalidKey("bad".into()).to_string(), "Invalid key: bad");
+        assert_eq!(KeyMgrError::AgentError("agent".into()).to_string(), "Agent error: agent");
+        assert_eq!(KeyMgrError::ExportError("exp".into()).to_string(), "Export error: exp");
+        assert_eq!(KeyMgrError::ImportError("imp".into()).to_string(), "Import error: imp");
+        assert_eq!(KeyMgrError::AuthorityError("auth".into()).to_string(), "Authority error: auth");
+    }
+
+    #[test]
+    fn test_mock_fingerprint_deterministic_and_formatted() {
+        let fp1 = mock_fingerprint("my-key");
+        let fp2 = mock_fingerprint("my-key");
+        assert_eq!(fp1, fp2, "fingerprint should be deterministic for the same input");
+        assert!(fp1.starts_with("SHA256:"));
+
+        let fp3 = mock_fingerprint("other-key");
+        assert_ne!(fp1, fp3, "different names should produce different fingerprints");
+    }
+
+    #[test]
+    fn test_mock_public_key_format() {
+        let pk = mock_public_key("deploy-key", "ed25519");
+        assert!(pk.starts_with("ed25519 "));
+        // name is embedded in the (fake) key blob and repeated as the comment
+        assert_eq!(pk.matches("deploy-key").count(), 2);
+
+        let pk_rsa = mock_public_key("other", "rsa");
+        assert!(pk_rsa.starts_with("rsa "));
+    }
 }

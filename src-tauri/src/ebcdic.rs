@@ -63,7 +63,15 @@ const fn build_ebcdic_to_ascii() -> [u8; 256] {
         i += 1;
     }
 
-    table[0x8F] = b'!'; // rarely used position, harmless overlap with 0x5A elsewhere
+    // NOTE: 0x8F was previously also mapped to '!' here as a "harmless"
+    // duplicate of 0x5A. It wasn't harmless: ascii_to_ebcdic_table() builds
+    // the reverse map by iterating ebcdic bytes in ascending order and
+    // overwriting on collision, so the later entry (0x8F) silently won,
+    // making ascii_to_ebcdic(b'!') return 0x8F instead of the real CP037
+    // encoding 0x5A — any '!' sent to a TN3270/TN5250 host would arrive as
+    // an undefined code point instead of the character it was supposed to
+    // be. Removed; 0x8F now correctly falls back to '?' like other unmapped
+    // EBCDIC bytes.
 
     // Uppercase A-I, J-R, S-Z (same three-run pattern)
     let upper = b"ABCDEFGHI";
@@ -161,5 +169,100 @@ mod tests {
     #[test]
     fn test_unmapped_byte_falls_back_to_question_mark() {
         assert_eq!(ebcdic_to_ascii(0x01), b'?');
+    }
+
+    #[test]
+    fn test_punctuation_roundtrip() {
+        let pairs: &[(u8, u8)] = &[
+            (0x4B, b'.'),
+            (0x4C, b'<'),
+            (0x4D, b'('),
+            (0x4E, b'+'),
+            (0x4F, b'|'),
+            (0x50, b'&'),
+            (0x5B, b'$'),
+            (0x5C, b'*'),
+            (0x5D, b')'),
+            (0x5E, b';'),
+            (0x5F, b'^'),
+            (0x60, b'-'),
+            (0x61, b'/'),
+            (0x6B, b','),
+            (0x6C, b'%'),
+            (0x6D, b'_'),
+            (0x6E, b'>'),
+            (0x6F, b'?'),
+            (0x79, b'`'),
+            (0x7A, b':'),
+            (0x7B, b'#'),
+            (0x7C, b'@'),
+            (0x7D, b'\''),
+            (0x7E, b'='),
+            (0x7F, b'"'),
+        ];
+        for &(ebcdic, ascii) in pairs {
+            assert_eq!(ebcdic_to_ascii(ebcdic), ascii, "decode 0x{ebcdic:02X}");
+            assert_eq!(ascii_to_ebcdic(ascii), ebcdic, "encode {:?}", ascii as char);
+        }
+    }
+
+    #[test]
+    fn test_control_chars() {
+        assert_eq!(ebcdic_to_ascii(0x00), 0x00);
+        assert_eq!(ebcdic_to_ascii(0x25), b'\n');
+        assert_eq!(ebcdic_to_ascii(0x0D), b'\r');
+        assert_eq!(ascii_to_ebcdic(b'\n'), 0x25);
+        assert_eq!(ascii_to_ebcdic(b'\r'), 0x0D);
+    }
+
+    /// The '?' glyph is genuinely encoded at EBCDIC 0x6F in CP037, but the
+    /// forward table also uses ASCII 0x3F ('?') as the fallback value for
+    /// every *unmapped* EBCDIC byte. ascii_to_ebcdic_table() has to special-
+    /// case 0x6F so the real mapping isn't mistaken for one of those
+    /// fallbacks (or vice versa).
+    #[test]
+    fn test_question_mark_is_not_confused_with_fallback_sentinel() {
+        assert_eq!(ascii_to_ebcdic(b'?'), 0x6F);
+    }
+
+    #[test]
+    fn test_ascii_byte_with_no_ebcdic_mapping_falls_back_to_space() {
+        // 0x01 (SOH) never appears as a value in EBCDIC_TO_ASCII, so it
+        // should hit ascii_to_ebcdic_table()'s default fill value.
+        assert_eq!(ascii_to_ebcdic(0x01), 0x40);
+    }
+
+    /// Regression test for a real bug: 0x8F used to be mapped to '!' as a
+    /// "harmless" duplicate of the real CP037 '!' at 0x5A. Because
+    /// ascii_to_ebcdic_table() resolves collisions by last-write-wins in
+    /// ascending EBCDIC order, that duplicate silently hijacked the '!'
+    /// reverse mapping (0x8F > 0x5A), so encoding '!' produced an undefined
+    /// code point instead of the correct EBCDIC byte. Fixed by removing the
+    /// duplicate mapping.
+    #[test]
+    fn test_bang_encodes_to_the_real_cp037_position() {
+        assert_eq!(ascii_to_ebcdic(b'!'), 0x5A);
+        assert_eq!(ebcdic_to_ascii(0x5A), b'!');
+        // 0x8F no longer claims '!' at all — it's an unmapped position now.
+        assert_eq!(ebcdic_to_ascii(0x8F), b'?');
+    }
+
+    #[test]
+    fn test_full_roundtrip_no_ambiguous_collisions() {
+        // Every EBCDIC byte with a real (non-fallback) mapping must survive
+        // an ebcdic -> ascii -> ebcdic roundtrip, i.e. no two "real" bytes
+        // silently collide onto the same ASCII character.
+        for ebcdic in 0u8..=255 {
+            let ascii = ebcdic_to_ascii(ebcdic);
+            if ascii == 0x3F && ebcdic != 0x6F {
+                continue; // fallback position, not a real mapping
+            }
+            assert_eq!(
+                ascii_to_ebcdic(ascii),
+                ebcdic,
+                "0x{ebcdic:02X} -> {:?} did not round-trip",
+                ascii as char
+            );
+        }
     }
 }

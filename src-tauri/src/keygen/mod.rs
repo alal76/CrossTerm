@@ -536,4 +536,64 @@ mod tests {
         let keys = state.keys.read().unwrap();
         assert!(keys.is_empty());
     }
+
+    #[test]
+    fn test_keygen_error_io_variant_from_conversion() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "missing");
+        let err: KeygenError = io_err.into();
+        assert!(err.to_string().contains("IO error"));
+        assert!(err.to_string().contains("missing"));
+        let json = serde_json::to_string(&err).unwrap();
+        assert!(json.contains("IO error"));
+    }
+
+    #[test]
+    fn test_keygen_error_parse_and_generation_display() {
+        let e = KeygenError::Parse("bad format".into());
+        assert_eq!(e.to_string(), "Key parse error: bad format");
+        let e = KeygenError::Generation("boom".into());
+        assert_eq!(e.to_string(), "Key generation failed: boom");
+        let e = KeygenError::UnsupportedKeyType("dsa2".into());
+        assert_eq!(e.to_string(), "Unsupported key type: dsa2");
+    }
+
+    #[test]
+    fn test_read_public_key_file_existing() {
+        let dir = tempfile::tempdir().unwrap();
+        let key_path = dir.path().join("id_test");
+        let pub_path = dir.path().join("id_test.pub");
+        std::fs::write(&key_path, "fake-private-key-data").unwrap();
+        std::fs::write(&pub_path, "ssh-ed25519 AAAAtest test@host\n").unwrap();
+
+        let result = read_public_key_file(&key_path);
+        assert_eq!(result, Some("ssh-ed25519 AAAAtest test@host\n".to_string()));
+    }
+
+    #[test]
+    fn test_detect_key_type_is_case_sensitive() {
+        // Real filenames produced by ssh-keygen are always lowercase, so an
+        // uppercase substring falls through to the "unknown" bucket rather
+        // than being detected — documenting the current (case-sensitive)
+        // behavior of detect_key_type.
+        assert_eq!(detect_key_type("ID_RSA"), "unknown");
+        assert_eq!(detect_key_type("id_rsa"), "rsa");
+    }
+
+    #[test]
+    fn test_keygen_generate_encrypted_differs_from_unencrypted() {
+        use ssh_key::{Algorithm, LineEnding, private::PrivateKey};
+
+        let key = PrivateKey::random(&mut rand::rngs::OsRng, Algorithm::Ed25519).unwrap();
+        assert!(!key.is_encrypted());
+        let plain = key.to_openssh(LineEnding::LF).unwrap();
+
+        let encrypted_key = key.encrypt(&mut rand::rngs::OsRng, "hunter2").unwrap();
+        assert!(encrypted_key.is_encrypted());
+        let encrypted = encrypted_key.to_openssh(LineEnding::LF).unwrap();
+
+        assert_ne!(plain.as_str(), encrypted.as_str());
+
+        let fingerprint = key.public_key().fingerprint(ssh_key::HashAlg::Sha256).to_string();
+        assert!(fingerprint.starts_with("SHA256:"));
+    }
 }

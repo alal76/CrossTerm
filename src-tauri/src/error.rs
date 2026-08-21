@@ -143,4 +143,147 @@ mod tests {
         let json = serde_json::to_value(&e).unwrap();
         assert_eq!(json["code"], "internal");
     }
+
+    #[test]
+    fn test_invalid_input_helper() {
+        let e = AppError::invalid_input("bad field");
+        let json = serde_json::to_value(&e).unwrap();
+        assert_eq!(json["code"], "invalid_input");
+        assert_eq!(json["message"], "bad field");
+    }
+
+    #[test]
+    fn test_host_key_changed_includes_fingerprint() {
+        let e = AppError::HostKeyChanged {
+            message: "changed".into(),
+            fingerprint: "SHA256:abc".into(),
+        };
+        let json = serde_json::to_value(&e).unwrap();
+        assert_eq!(json["code"], "host_key_changed");
+        assert_eq!(json["fingerprint"], "SHA256:abc");
+    }
+
+    #[test]
+    fn test_all_simple_variants_serialize_expected_codes() {
+        let cases: Vec<(AppError, &str)> = vec![
+            (AppError::HostUnreachable { message: "x".into() }, "host_unreachable"),
+            (AppError::ConnectionRefused { message: "x".into() }, "connection_refused"),
+            (AppError::ConnectionTimeout { message: "x".into() }, "connection_timeout"),
+            (AppError::VaultLocked { message: "x".into() }, "vault_locked"),
+            (AppError::VaultWrongPassword { message: "x".into() }, "vault_wrong_password"),
+            (AppError::VaultNotFound { message: "x".into() }, "vault_not_found"),
+            (AppError::PermissionDenied { message: "x".into() }, "permission_denied"),
+            (AppError::NotFound { message: "x".into() }, "not_found"),
+            (AppError::IoError { message: "x".into() }, "io_error"),
+            (AppError::InvalidInput { message: "x".into() }, "invalid_input"),
+            (AppError::Internal { message: "x".into() }, "internal"),
+        ];
+        for (err, expected_code) in cases {
+            let json = serde_json::to_value(&err).unwrap();
+            assert_eq!(json["code"], expected_code);
+        }
+    }
+
+    #[test]
+    fn test_credential_not_found_includes_id() {
+        let e = AppError::CredentialNotFound { message: "x".into(), id: "cred-1".into() };
+        let json = serde_json::to_value(&e).unwrap();
+        assert_eq!(json["code"], "credential_not_found");
+        assert_eq!(json["id"], "cred-1");
+    }
+
+    #[test]
+    fn test_from_vault_error_all_mapped_variants() {
+        let ae: AppError = crate::vault::VaultError::Locked.into();
+        assert_eq!(serde_json::to_value(&ae).unwrap()["code"], "vault_locked");
+
+        let ae: AppError = crate::vault::VaultError::NotFound.into();
+        assert_eq!(serde_json::to_value(&ae).unwrap()["code"], "vault_not_found");
+
+        let ae: AppError = crate::vault::VaultError::RateLimited(42).into();
+        let json = serde_json::to_value(&ae).unwrap();
+        assert_eq!(json["code"], "rate_limited");
+        assert_eq!(json["retry_after_secs"], 42);
+
+        let ae: AppError = crate::vault::VaultError::CredentialNotFound("cred-1".into()).into();
+        let json = serde_json::to_value(&ae).unwrap();
+        assert_eq!(json["code"], "credential_not_found");
+        assert_eq!(json["id"], "cred-1");
+    }
+
+    #[test]
+    fn test_from_vault_error_fallback_to_internal() {
+        for ve in [
+            crate::vault::VaultError::AlreadyUnlocked,
+            crate::vault::VaultError::AlreadyExists,
+            crate::vault::VaultError::Encryption("x".into()),
+            crate::vault::VaultError::Decryption("x".into()),
+        ] {
+            let ae: AppError = ve.into();
+            assert_eq!(serde_json::to_value(&ae).unwrap()["code"], "internal");
+        }
+    }
+
+    #[test]
+    fn test_from_ssh_error_auth_and_not_found() {
+        let ae: AppError = crate::ssh::SshError::AuthFailed.into();
+        assert_eq!(serde_json::to_value(&ae).unwrap()["code"], "auth_failed");
+
+        let ae: AppError = crate::ssh::SshError::NotFound("conn-1".into()).into();
+        let json = serde_json::to_value(&ae).unwrap();
+        assert_eq!(json["code"], "not_found");
+        assert_eq!(json["message"], "Connection not found: conn-1");
+    }
+
+    #[test]
+    fn test_from_ssh_error_host_key_changed() {
+        let ae: AppError = crate::ssh::SshError::HostKeyChanged("example.com".into()).into();
+        let json = serde_json::to_value(&ae).unwrap();
+        assert_eq!(json["code"], "host_key_changed");
+        assert_eq!(json["fingerprint"], "example.com");
+    }
+
+    #[test]
+    fn test_from_ssh_error_connection_failed_classifies_message() {
+        let ae: AppError = crate::ssh::SshError::ConnectionFailed("Connection refused".into()).into();
+        assert_eq!(serde_json::to_value(&ae).unwrap()["code"], "connection_refused");
+
+        let ae: AppError = crate::ssh::SshError::ConnectionFailed("operation timed out".into()).into();
+        assert_eq!(serde_json::to_value(&ae).unwrap()["code"], "connection_timeout");
+
+        let ae: AppError = crate::ssh::SshError::ConnectionFailed("something else broke".into()).into();
+        assert_eq!(serde_json::to_value(&ae).unwrap()["code"], "internal");
+    }
+
+    #[test]
+    fn test_from_ssh_error_io_and_fallback() {
+        let ae: AppError = crate::ssh::SshError::Io("disk full".into()).into();
+        let json = serde_json::to_value(&ae).unwrap();
+        assert_eq!(json["code"], "io_error");
+        assert_eq!(json["message"], "disk full");
+
+        let ae: AppError = crate::ssh::SshError::Channel("chan broke".into()).into();
+        assert_eq!(serde_json::to_value(&ae).unwrap()["code"], "internal");
+    }
+
+    #[test]
+    fn test_from_network_error_variants() {
+        let ae: AppError = crate::network::NetworkError::InvalidCidr("10.0.0.0/99".into()).into();
+        let json = serde_json::to_value(&ae).unwrap();
+        assert_eq!(json["code"], "invalid_input");
+        assert!(json["message"].as_str().unwrap().contains("10.0.0.0/99"));
+
+        let ae: AppError = crate::network::NetworkError::PortInUse(8080).into();
+        let json = serde_json::to_value(&ae).unwrap();
+        assert_eq!(json["code"], "invalid_input");
+        assert!(json["message"].as_str().unwrap().contains("8080"));
+
+        let ae: AppError = crate::network::NetworkError::Io("read failed".into()).into();
+        let json = serde_json::to_value(&ae).unwrap();
+        assert_eq!(json["code"], "io_error");
+        assert_eq!(json["message"], "read failed");
+
+        let ae: AppError = crate::network::NetworkError::ScanNotFound("scan-1".into()).into();
+        assert_eq!(serde_json::to_value(&ae).unwrap()["code"], "internal");
+    }
 }
