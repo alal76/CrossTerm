@@ -312,4 +312,157 @@ mod tests {
         assert_eq!(snippet.name, "Persist test");
         assert_eq!(snippet.command, "echo hello");
     }
+
+    // ── default_snippets_path ──────────────────────────────────────────
+
+    #[test]
+    fn test_default_snippets_path_shape() {
+        let path = default_snippets_path();
+        assert!(path.ends_with("crossterm/snippets.json"), "got: {path:?}");
+    }
+
+    // ── load_snippets edge cases ───────────────────────────────────────
+
+    #[test]
+    fn test_load_snippets_nonexistent_path_returns_empty() {
+        let path = PathBuf::from("/nonexistent/path/snippets.json");
+        let map = load_snippets(&path);
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn test_load_snippets_malformed_json_returns_empty() {
+        let tmp = NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), "not valid json").unwrap();
+        let map = load_snippets(&tmp.path().to_path_buf());
+        assert!(map.is_empty(), "malformed JSON must fall back to an empty map, not panic");
+    }
+
+    #[test]
+    fn test_load_snippets_valid_array_keyed_by_id() {
+        let tmp = NamedTempFile::new().unwrap();
+        let json = r#"[{"id":"s1","name":"Test","command":"ls","tags":[],"createdAt":"2024-01-01T00:00:00Z","updatedAt":"2024-01-01T00:00:00Z"}]"#;
+        std::fs::write(tmp.path(), json).unwrap();
+        let map = load_snippets(&tmp.path().to_path_buf());
+        assert_eq!(map.len(), 1);
+        assert_eq!(map.get("s1").unwrap().name, "Test");
+    }
+
+    // ── save_snippets ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_save_snippets_creates_parent_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested_path = dir.path().join("nested").join("subdir").join("snippets.json");
+        let mut map = HashMap::new();
+        let snippet = Snippet {
+            id: "abc".into(),
+            name: "n".into(),
+            command: "echo hi".into(),
+            tags: vec![],
+            created_at: "now".into(),
+            updated_at: "now".into(),
+        };
+        map.insert(snippet.id.clone(), snippet);
+        save_snippets(&nested_path, &map).expect("should create parent dirs and save");
+        assert!(nested_path.exists());
+
+        let reloaded = load_snippets(&nested_path);
+        assert_eq!(reloaded.len(), 1);
+        assert_eq!(reloaded.get("abc").unwrap().command, "echo hi");
+    }
+
+    #[test]
+    fn test_save_snippets_empty_map_writes_empty_array() {
+        let tmp = NamedTempFile::new().unwrap();
+        let map: HashMap<String, Snippet> = HashMap::new();
+        save_snippets(&tmp.path().to_path_buf(), &map).unwrap();
+        let contents = std::fs::read_to_string(tmp.path()).unwrap();
+        let parsed: Vec<Snippet> = serde_json::from_str(&contents).unwrap();
+        assert!(parsed.is_empty());
+    }
+
+    // ── SnippetError Display ────────────────────────────────────────────
+
+    #[test]
+    fn test_snippet_error_display_messages() {
+        assert_eq!(
+            SnippetError::NotFound("id-1".into()).to_string(),
+            "Snippet not found: id-1"
+        );
+        assert_eq!(
+            SnippetError::AlreadyExists("id-2".into()).to_string(),
+            "Snippet already exists: id-2"
+        );
+    }
+
+    // ── Search: case-insensitivity and tag matching ─────────────────────
+
+    #[test]
+    fn test_snippet_search_matches_by_tag_case_insensitive() {
+        let state = test_state();
+        create_snippet(&state, "Restart nginx", "systemctl restart nginx", vec!["Linux".into(), "Ops".into()]);
+
+        let map = state.snippets.lock().unwrap();
+        let q = "linux".to_lowercase();
+        let results: Vec<&Snippet> = map
+            .values()
+            .filter(|s| {
+                s.name.to_lowercase().contains(&q)
+                    || s.command.to_lowercase().contains(&q)
+                    || s.tags.iter().any(|t| t.to_lowercase().contains(&q))
+            })
+            .collect();
+        assert_eq!(results.len(), 1, "tag match must be case-insensitive");
+    }
+
+    #[test]
+    fn test_snippet_search_no_match_returns_empty() {
+        let state = test_state();
+        create_snippet(&state, "List files", "ls -la", vec![]);
+
+        let map = state.snippets.lock().unwrap();
+        let q = "nonexistent-query".to_lowercase();
+        let results: Vec<&Snippet> = map
+            .values()
+            .filter(|s| {
+                s.name.to_lowercase().contains(&q)
+                    || s.command.to_lowercase().contains(&q)
+                    || s.tags.iter().any(|t| t.to_lowercase().contains(&q))
+            })
+            .collect();
+        assert!(results.is_empty());
+    }
+
+    // ── Update: partial fields only touch what's provided ────────────────
+
+    #[test]
+    fn test_snippet_partial_update_preserves_untouched_fields() {
+        let state = test_state();
+        let snippet = create_snippet(&state, "Original", "echo original", vec!["a".into()]);
+
+        {
+            let mut map = state.snippets.lock().unwrap();
+            let s = map.get_mut(&snippet.id).unwrap();
+            // Only update the command, leave name/tags untouched.
+            s.command = "echo updated".to_string();
+            save_snippets(&state.path, &map).unwrap();
+        }
+
+        let map = state.snippets.lock().unwrap();
+        let updated = map.get(&snippet.id).unwrap();
+        assert_eq!(updated.name, "Original", "name must be unchanged");
+        assert_eq!(updated.command, "echo updated");
+        assert_eq!(updated.tags, vec!["a".to_string()], "tags must be unchanged");
+    }
+
+    // ── Delete: nonexistent id is a no-op at the map level ────────────────
+
+    #[test]
+    fn test_snippet_delete_nonexistent_id_returns_none() {
+        let state = test_state();
+        let mut map = state.snippets.lock().unwrap();
+        let removed = map.remove("does-not-exist");
+        assert!(removed.is_none());
+    }
 }

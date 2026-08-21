@@ -956,4 +956,67 @@ mod tests {
         let _ = std::fs::remove_file(&log_path);
         manager.close(&info.id).expect("Failed to close terminal");
     }
+
+    #[test]
+    fn test_start_logging_not_found() {
+        let manager = TerminalManager::new();
+        let result = manager.start_logging("nonexistent-id", "/tmp/whatever.log");
+        assert!(matches!(result.unwrap_err(), TerminalError::NotFound(_)));
+    }
+
+    #[test]
+    fn test_stop_logging_not_found() {
+        let manager = TerminalManager::new();
+        let result = manager.stop_logging("nonexistent-id");
+        assert!(matches!(result.unwrap_err(), TerminalError::NotFound(_)));
+    }
+
+    #[test]
+    fn test_terminal_error_io_display() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
+        let err: TerminalError = io_err.into();
+        assert!(err.to_string().contains("IO error"));
+        assert!(err.to_string().contains("denied"));
+    }
+
+    #[test]
+    fn test_terminal_exit_event_serialization_with_and_without_code() {
+        let with_code = TerminalExitEvent { terminal_id: "t1".into(), code: Some(1) };
+        let json = serde_json::to_string(&with_code).unwrap();
+        assert!(json.contains("\"code\":1"));
+
+        let without_code = TerminalExitEvent { terminal_id: "t1".into(), code: None };
+        let json = serde_json::to_string(&without_code).unwrap();
+        assert!(json.contains("\"code\":null"));
+    }
+
+    #[test]
+    fn test_terminal_output_event_serialization() {
+        let event = TerminalOutputEvent { terminal_id: "t1".into(), data: "hello\n".into() };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("hello"));
+        assert!(json.contains("terminal_id"));
+    }
+
+    #[test]
+    fn test_write_after_close_returns_not_found() {
+        let manager = TerminalManager::new();
+        let (info, _output) = create_test_session(&manager, None, None, None, None, None)
+            .expect("Failed to create test terminal");
+        manager.close(&info.id).expect("close should succeed");
+
+        let result = manager.write(&info.id, b"echo hi\n");
+        assert!(matches!(result.unwrap_err(), TerminalError::NotFound(_)));
+    }
+
+    #[test]
+    fn test_resize_after_close_returns_not_found() {
+        let manager = TerminalManager::new();
+        let (info, _output) = create_test_session(&manager, None, None, None, None, None)
+            .expect("Failed to create test terminal");
+        manager.close(&info.id).expect("close should succeed");
+
+        let result = manager.resize(&info.id, 100, 30);
+        assert!(matches!(result.unwrap_err(), TerminalError::NotFound(_)));
+    }
 }

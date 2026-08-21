@@ -704,4 +704,126 @@ Host tagtest
         assert_eq!(sessions.len(), 1);
         assert!(sessions[0].tags.is_empty(), "tags should be empty by default");
     }
+
+    // ── Test 15: parse_ssh_config on a nonexistent path returns empty ─────
+
+    #[test]
+    fn test_parse_ssh_config_nonexistent_path_returns_empty() {
+        let sessions = parse_ssh_config(Path::new("/nonexistent/path/that/should/not/exist/config"));
+        assert!(sessions.is_empty());
+    }
+
+    // ── extract_proxycommand_host variants ────────────────────────────────
+
+    #[test]
+    fn test_extract_proxycommand_host_leading_hostname() {
+        // `ssh bastion.example.com -W %h:%p` — hostname comes before the flag.
+        assert_eq!(
+            extract_proxycommand_host("ssh bastion.example.com -W %h:%p"),
+            Some("bastion.example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_proxycommand_host_nc_pattern() {
+        // `nc bastion.example.com 22` — hostname followed by a bare port number.
+        assert_eq!(
+            extract_proxycommand_host("nc bastion.example.com 22"),
+            Some("bastion.example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_proxycommand_host_skips_multi_char_flag_arg() {
+        // `-o` takes an argument (StrictHostKeyChecking=no) that must be skipped,
+        // and the real hostname follows.
+        assert_eq!(
+            extract_proxycommand_host("ssh -o StrictHostKeyChecking=no jumpbox.internal"),
+            Some("jumpbox.internal".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_proxycommand_host_skips_path_tokens() {
+        assert_eq!(extract_proxycommand_host("ssh ~/bin/wrapper.sh"), None);
+        assert_eq!(extract_proxycommand_host("ssh /usr/bin/nc"), None);
+    }
+
+    #[test]
+    fn test_extract_proxycommand_host_no_hostname_found() {
+        assert_eq!(extract_proxycommand_host("ssh -W %h:%p"), None);
+        assert_eq!(extract_proxycommand_host(""), None);
+    }
+
+    // ── is_wildcard_only ────────────────────────────────────────────────
+
+    #[test]
+    fn test_is_wildcard_only() {
+        assert!(is_wildcard_only("*"));
+        assert!(is_wildcard_only("?"));
+        assert!(is_wildcard_only("*.example.com"));
+        assert!(is_wildcard_only("host?"));
+        assert!(!is_wildcard_only("plainhost"));
+        assert!(!is_wildcard_only(""));
+    }
+
+    // ── Test: mixed wildcard/non-wildcard aliases on one Host line ────────
+
+    #[test]
+    fn test_mixed_wildcard_and_real_alias_on_one_line() {
+        let config = r#"
+Host real1 *.wild.example.com
+    HostName 10.0.0.9
+"#;
+        let sessions = parse_file(config);
+        // Only the non-wildcard alias should produce a session.
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].name, "real1");
+    }
+
+    // ── Test: user directive keeps first value when duplicated ────────────
+
+    #[test]
+    fn test_first_user_directive_wins() {
+        let config = r#"
+Host dupuser
+    User first
+    User second
+"#;
+        let sessions = parse_file(config);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].username.as_deref(), Some("first"));
+    }
+
+    // ── Tauri command: import_detect_sources ───────────────────────────────
+
+    #[test]
+    fn test_import_detect_sources_lists_known_sources() {
+        let sources = import_detect_sources();
+        assert_eq!(sources.len(), 2, "expected ssh_config + putty_registry entries");
+        assert!(matches!(sources[0].source_type, ImportSourceType::SshConfig));
+        assert!(matches!(sources[1].source_type, ImportSourceType::PuttyRegistry));
+        // PuTTY registry is never available on non-Windows platforms.
+        #[cfg(not(target_os = "windows"))]
+        assert!(!sources[1].available);
+    }
+
+    // ── Tauri command: import_parse_source ──────────────────────────────────
+
+    #[test]
+    fn test_import_parse_source_unknown_type_errors() {
+        let result = import_parse_source("not_a_real_source".to_string());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unknown source type"));
+    }
+
+    #[test]
+    fn test_import_parse_source_putty_registry_empty_on_non_windows() {
+        #[cfg(not(target_os = "windows"))]
+        {
+            let result = import_parse_source("putty_registry".to_string());
+            assert!(result.is_ok());
+            assert!(result.unwrap().is_empty());
+        }
+    }
 }

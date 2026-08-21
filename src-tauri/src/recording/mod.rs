@@ -826,4 +826,146 @@ mod tests {
         let ps = states.get("speed-test").unwrap();
         assert_eq!(ps.speed, 4.0);
     }
+
+    // ── parse_asciicast edge cases ───────────────────────────────────────
+
+    #[test]
+    fn test_parse_asciicast_empty_file_errors() {
+        let result = parse_asciicast("");
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            RecordingError::InvalidFormat(msg) => assert!(msg.contains("Empty file")),
+            other => panic!("expected InvalidFormat, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_asciicast_malformed_header_errors() {
+        let result = parse_asciicast("not json\n");
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), RecordingError::InvalidFormat(_)));
+    }
+
+    #[test]
+    fn test_parse_asciicast_header_defaults_when_fields_missing() {
+        // Only version/width/height/timestamp default; title/env are optional.
+        let (header, events) = parse_asciicast("{}\n").unwrap();
+        assert_eq!(header.version, 2);
+        assert_eq!(header.width, 80);
+        assert_eq!(header.height, 24);
+        assert_eq!(header.timestamp, 0.0);
+        assert!(header.title.is_none());
+        assert!(header.env.is_empty());
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn test_parse_asciicast_malformed_event_line_errors() {
+        let content = "{\"version\":2,\"width\":80,\"height\":24,\"timestamp\":0}\nnot an event\n";
+        let result = parse_asciicast(content);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), RecordingError::InvalidFormat(_)));
+    }
+
+    #[test]
+    fn test_parse_asciicast_skips_blank_lines() {
+        let content = "{\"version\":2,\"width\":80,\"height\":24,\"timestamp\":0}\n\n[0.1,\"o\",\"hi\"]\n\n";
+        let (_header, events) = parse_asciicast(content).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].data, "hi");
+    }
+
+    #[test]
+    fn test_parse_asciicast_skips_short_event_arrays() {
+        // An event array with fewer than 3 elements must be silently skipped,
+        // not treated as an error.
+        let content = "{\"version\":2,\"width\":80,\"height\":24,\"timestamp\":0}\n[0.1,\"o\"]\n[0.2,\"i\",\"ok\"]\n";
+        let (_header, events) = parse_asciicast(content).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].data, "ok");
+    }
+
+    #[test]
+    fn test_parse_asciicast_unknown_event_type_defaults_to_output() {
+        let content = "{\"version\":2,\"width\":80,\"height\":24,\"timestamp\":0}\n[0.1,\"x\",\"data\"]\n";
+        let (_header, events) = parse_asciicast(content).unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0].event_type, RecordingEventType::Output));
+    }
+
+    #[test]
+    fn test_parse_asciicast_resize_event_type() {
+        let content = "{\"version\":2,\"width\":80,\"height\":24,\"timestamp\":0}\n[2.0,\"r\",\"120x40\"]\n";
+        let (_header, events) = parse_asciicast(content).unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0].event_type, RecordingEventType::Resize));
+        assert_eq!(events[0].data, "120x40");
+    }
+
+    #[test]
+    fn test_parse_asciicast_header_with_title_and_env() {
+        let content = "{\"version\":2,\"width\":100,\"height\":30,\"timestamp\":5.5,\"title\":\"My Session\",\"env\":{\"TERM\":\"xterm\"}}\n";
+        let (header, _events) = parse_asciicast(content).unwrap();
+        assert_eq!(header.title.as_deref(), Some("My Session"));
+        assert_eq!(header.env.get("TERM").map(String::as_str), Some("xterm"));
+        assert_eq!(header.timestamp, 5.5);
+    }
+
+    // ── serialize_header / serialize_event ───────────────────────────────
+
+    #[test]
+    fn test_serialize_header_omits_title_when_none() {
+        let header = RecordingHeader {
+            version: 2,
+            width: 80,
+            height: 24,
+            timestamp: 0.0,
+            title: None,
+            env: HashMap::new(),
+        };
+        let json = serialize_header(&header);
+        assert!(!json.contains("title"), "title key must be absent when None: {json}");
+        // Round-trips through the parser too.
+        let (parsed, _) = parse_asciicast(&format!("{json}\n")).unwrap();
+        assert!(parsed.title.is_none());
+    }
+
+    #[test]
+    fn test_serialize_event_uses_short_type_codes() {
+        let output = serialize_event(&RecordingEvent { time: 1.0, event_type: RecordingEventType::Output, data: "a".into() });
+        let input = serialize_event(&RecordingEvent { time: 2.0, event_type: RecordingEventType::Input, data: "b".into() });
+        let resize = serialize_event(&RecordingEvent { time: 3.0, event_type: RecordingEventType::Resize, data: "c".into() });
+        assert_eq!(output, "[1.0,\"o\",\"a\"]");
+        assert_eq!(input, "[2.0,\"i\",\"b\"]");
+        assert_eq!(resize, "[3.0,\"r\",\"c\"]");
+    }
+
+    #[test]
+    fn test_serialize_and_parse_round_trip_multiple_events() {
+        let header = RecordingHeader {
+            version: 2,
+            width: 80,
+            height: 24,
+            timestamp: 100.0,
+            title: Some("t".into()),
+            env: HashMap::new(),
+        };
+        let events = vec![
+            RecordingEvent { time: 0.0, event_type: RecordingEventType::Output, data: "a".into() },
+            RecordingEvent { time: 1.0, event_type: RecordingEventType::Input, data: "b".into() },
+            RecordingEvent { time: 2.0, event_type: RecordingEventType::Resize, data: "80x24".into() },
+        ];
+        let mut content = serialize_header(&header);
+        content.push('\n');
+        for e in &events {
+            content.push_str(&serialize_event(e));
+            content.push('\n');
+        }
+        let (parsed_header, parsed_events) = parse_asciicast(&content).unwrap();
+        assert_eq!(parsed_header.timestamp, 100.0);
+        assert_eq!(parsed_events.len(), 3);
+        assert!(matches!(parsed_events[0].event_type, RecordingEventType::Output));
+        assert!(matches!(parsed_events[1].event_type, RecordingEventType::Input));
+        assert!(matches!(parsed_events[2].event_type, RecordingEventType::Resize));
+    }
 }

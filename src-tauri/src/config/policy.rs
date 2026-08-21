@@ -150,21 +150,31 @@ fn policy_file_path() -> std::path::PathBuf {
 ///
 /// Returns [`PolicyConfig::default`] if the file does not yet exist.
 pub fn load_policy() -> Result<PolicyConfig, String> {
-    let path = policy_file_path();
+    load_policy_from(&policy_file_path())
+}
+
+/// Inner implementation that reads from an arbitrary path so tests can
+/// exercise the parsing/error logic without touching the real config file.
+fn load_policy_from(path: &std::path::Path) -> Result<PolicyConfig, String> {
     if !path.exists() {
         return Ok(PolicyConfig::default());
     }
     let data =
-        std::fs::read_to_string(&path).map_err(|e| format!("Failed to read policy file: {e}"))?;
+        std::fs::read_to_string(path).map_err(|e| format!("Failed to read policy file: {e}"))?;
     serde_json::from_str(&data).map_err(|e| format!("Failed to parse policy file: {e}"))
 }
 
 /// Persist `config` to the policy config file.
 pub fn save_policy(config: &PolicyConfig) -> Result<(), String> {
-    let path = policy_file_path();
+    save_policy_to(&policy_file_path(), config)
+}
+
+/// Inner implementation that writes to an arbitrary path so tests can
+/// exercise the serialization logic without touching the real config file.
+fn save_policy_to(path: &std::path::Path, config: &PolicyConfig) -> Result<(), String> {
     let json = serde_json::to_string_pretty(config)
         .map_err(|e| format!("Failed to serialize policy: {e}"))?;
-    std::fs::write(&path, json).map_err(|e| format!("Failed to write policy file: {e}"))
+    std::fs::write(path, json).map_err(|e| format!("Failed to write policy file: {e}"))
 }
 
 /// Return `true` when the session to `hostname` must be recorded according to
@@ -460,5 +470,121 @@ mod tests {
         assert_eq!(back.allowed_protocols, vec!["ssh", "sftp"]);
         assert_eq!(back.blocked_hosts.len(), 1);
         assert!(back.audit_all_commands);
+    }
+
+    // ── load_policy_from / save_policy_to round trip ──────────────────────
+
+    #[test]
+    fn test_load_policy_from_missing_file_returns_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("does-not-exist.json");
+        let loaded = load_policy_from(&path).expect("missing file must yield default");
+        assert!(!loaded.recording.enabled);
+        assert_eq!(loaded.recording.retention_days, 90);
+    }
+
+    #[test]
+    fn test_save_and_load_policy_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("policy.json");
+
+        let config = PolicyConfig {
+            recording: RecordingPolicy {
+                enabled: true,
+                require_recording_for: vec![HostPattern("*.prod.corp.com".into())],
+                ..Default::default()
+            },
+            require_mfa_for_privileged: true,
+            allowed_protocols: vec!["ssh".into()],
+            blocked_hosts: vec![HostPattern("bad.example.com".into())],
+            audit_all_commands: true,
+            ..Default::default()
+        };
+
+        save_policy_to(&path, &config).expect("save must succeed");
+        assert!(path.exists());
+
+        let loaded = load_policy_from(&path).expect("load must succeed");
+        assert!(loaded.recording.enabled);
+        assert!(loaded.require_mfa_for_privileged);
+        assert_eq!(loaded.allowed_protocols, vec!["ssh"]);
+        assert_eq!(loaded.blocked_hosts.len(), 1);
+        assert!(loaded.audit_all_commands);
+    }
+
+    #[test]
+    fn test_load_policy_from_malformed_json_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bad.json");
+        std::fs::write(&path, "{ this is not valid json").unwrap();
+        let result = load_policy_from(&path);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Failed to parse policy file"));
+    }
+
+    #[test]
+    fn test_save_policy_to_unwritable_dir_errors() {
+        // Parent directory that doesn't exist — std::fs::write must fail.
+        let path = std::path::PathBuf::from("/nonexistent-dir-xyz/policy.json");
+        let result = save_policy_to(&path, &PolicyConfig::default());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Failed to write policy file"));
+    }
+
+    // ── Additional HostPattern edge cases ──────────────────────────────────
+
+    #[test]
+    fn test_host_pattern_trims_whitespace() {
+        let p = HostPattern("  example.com  ".into());
+        assert!(p.matches("  example.com  "));
+        assert!(p.matches("example.com"));
+    }
+
+    #[test]
+    fn test_requires_recording_matches_second_pattern_in_list() {
+        let policy = PolicyConfig {
+            recording: RecordingPolicy {
+                enabled: true,
+                require_recording_for: vec![
+                    HostPattern("first.example.com".into()),
+                    HostPattern("*.second.example.com".into()),
+                ],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(requires_recording(&policy, "web.second.example.com"));
+        assert!(!requires_recording(&policy, "unrelated.example.com"));
+    }
+
+    #[test]
+    fn test_is_blocked_empty_list_never_blocks() {
+        let policy = PolicyConfig::default();
+        assert!(!is_blocked(&policy, "anything.example.com"));
+    }
+
+    #[test]
+    fn test_policy_config_default_field_values() {
+        let config = PolicyConfig::default();
+        assert!(!config.recording.enabled);
+        assert_eq!(config.recording.retention_days, 90);
+        assert!(config.recording.notify_user);
+        assert!(!config.recording.allow_user_disable);
+        assert!(config.max_session_duration_minutes.is_none());
+        assert!(!config.require_mfa_for_privileged);
+        assert!(config.allowed_protocols.is_empty());
+        assert!(config.blocked_hosts.is_empty());
+        assert!(!config.audit_all_commands);
+    }
+
+    #[test]
+    fn test_policy_state_new_does_not_panic() {
+        // Exercises PolicyState::new() -> load_policy() -> policy_file_path(),
+        // which touches the real filesystem but must never panic and must
+        // always produce *some* usable config.
+        let state = PolicyState::new();
+        let guard = state.config.read().unwrap();
+        // retention_days is always a valid u32 regardless of file contents.
+        let _ = guard.recording.retention_days;
     }
 }

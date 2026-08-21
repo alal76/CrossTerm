@@ -326,4 +326,90 @@ mod tests {
         assert_eq!(frames[0].0, "stderr");
         assert_eq!(consumed, 8 + 3); // only the complete first frame consumed
     }
+
+    #[test]
+    fn test_demux_frames_empty_buffer() {
+        let (frames, consumed) = demux_frames(&[]);
+        assert!(frames.is_empty());
+        assert_eq!(consumed, 0);
+    }
+
+    #[test]
+    fn test_demux_frames_multiple_frames_one_buffer() {
+        let mut buf = vec![1u8, 0, 0, 0];
+        buf.extend_from_slice(&2u32.to_be_bytes());
+        buf.extend_from_slice(b"hi");
+        buf.push(2u8);
+        buf.extend_from_slice(&[0, 0, 0]);
+        buf.extend_from_slice(&3u32.to_be_bytes());
+        buf.extend_from_slice(b"bye");
+        let (frames, consumed) = demux_frames(&buf);
+        assert_eq!(frames.len(), 2);
+        assert_eq!(frames[0], ("stdout", b"hi".to_vec()));
+        assert_eq!(frames[1], ("stderr", b"bye".to_vec()));
+        assert_eq!(consumed, buf.len());
+    }
+
+    #[test]
+    fn test_demux_frames_unknown_stream_type_treated_as_stdout() {
+        // Any stream_type byte other than 2 (stderr) — e.g. 0 or 1 — is stdout.
+        let mut buf = vec![0u8, 0, 0, 0];
+        buf.extend_from_slice(&4u32.to_be_bytes());
+        buf.extend_from_slice(b"data");
+        let (frames, _) = demux_frames(&buf);
+        assert_eq!(frames[0].0, "stdout");
+    }
+
+    #[test]
+    fn test_build_request_defaults_tail_to_200() {
+        let config = DockerLogsConfig { socket_path: None, host: None, port: None, container_id: "xyz".into(), tty: true, tail: None, timestamps: false };
+        let req = build_request(&config);
+        assert!(req.contains("tail=200"), "should default tail to 200: {req}");
+        assert!(req.contains("timestamps=false"));
+    }
+
+    #[tokio::test]
+    async fn test_read_http_headers_connection_closed_before_complete() {
+        // EOF mid-headers (no trailing \r\n\r\n) must surface an error, not hang.
+        let response = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain";
+        let mut cursor = std::io::Cursor::new(response.to_vec());
+        let result = read_http_headers(&mut cursor).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_read_http_headers_non_chunked() {
+        let response = b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n";
+        let mut cursor = std::io::Cursor::new(response.to_vec());
+        let chunked = read_http_headers(&mut cursor).await.unwrap();
+        assert!(!chunked);
+    }
+
+    #[tokio::test]
+    async fn test_read_one_chunk_bad_hex_size_errors() {
+        let mut body = Vec::new();
+        body.extend_from_slice(b"zz\r\nhello\r\n");
+        let mut cursor = std::io::Cursor::new(body);
+        let result = read_one_chunk(&mut cursor).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_read_one_chunk_eof_before_size_line_returns_none() {
+        let mut cursor = std::io::Cursor::new(Vec::<u8>::new());
+        let result = read_one_chunk(&mut cursor).await.unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[tokio::test]
+    async fn test_read_one_chunk_multiple_chunks() {
+        let mut body = Vec::new();
+        body.extend_from_slice(b"3\r\nfoo\r\n");
+        body.extend_from_slice(b"3\r\nbar\r\n");
+        body.extend_from_slice(b"0\r\n\r\n");
+        let mut cursor = std::io::Cursor::new(body);
+        assert_eq!(read_one_chunk(&mut cursor).await.unwrap(), Some(b"foo".to_vec()));
+        assert_eq!(read_one_chunk(&mut cursor).await.unwrap(), Some(b"bar".to_vec()));
+        assert_eq!(read_one_chunk(&mut cursor).await.unwrap(), None);
+    }
 }

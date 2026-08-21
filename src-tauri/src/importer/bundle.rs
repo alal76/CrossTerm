@@ -175,4 +175,59 @@ mod tests {
         assert_eq!(bundle.sessions.len(), 0);
         assert_eq!(bundle.groups.len(), 0);
     }
+
+    #[test]
+    fn test_deserialize_bundle_invalid_json_errors() {
+        let result = deserialize_bundle("{ not valid json");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("deserialize bundle"));
+    }
+
+    #[test]
+    fn test_deserialize_bundle_missing_fields_errors() {
+        // Well-formed JSON, but missing required fields (sessions/groups/checksum).
+        let result = deserialize_bundle(r#"{"version": 1}"#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_session_bundle_import_rejects_tampered_checksum() {
+        let bundle = create_bundle(sample_sessions(), sample_groups()).unwrap();
+        let json = serialize_bundle(&bundle).unwrap();
+        // Corrupt the JSON by editing a session's host value directly, leaving
+        // the (now stale) checksum field untouched — simulates on-disk tampering.
+        let corrupted = json.replace("prod.example.com", "evil.example.com");
+        let result = session_bundle_import(corrupted);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("checksum mismatch"));
+    }
+
+    #[test]
+    fn test_session_bundle_import_accepts_valid_bundle() {
+        let exported = session_bundle_export(sample_sessions(), sample_groups()).unwrap();
+        let imported = session_bundle_import(exported).expect("valid bundle should import");
+        assert_eq!(imported.sessions.len(), 2);
+        assert_eq!(imported.groups.len(), 1);
+    }
+
+    #[test]
+    fn test_session_bundle_import_invalid_json_errors() {
+        let result = session_bundle_import("not json at all".to_string());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_verify_bundle_checksum_detects_group_tamper() {
+        let mut bundle = create_bundle(sample_sessions(), sample_groups()).unwrap();
+        bundle.groups.push(serde_json::json!({"id": "grp-evil"}));
+        assert!(!verify_bundle_checksum(&bundle));
+    }
+
+    #[test]
+    fn test_compute_checksum_deterministic() {
+        // Same inputs must always hash to the same checksum.
+        let a = create_bundle(sample_sessions(), sample_groups()).unwrap();
+        let b = create_bundle(sample_sessions(), sample_groups()).unwrap();
+        assert_eq!(a.checksum, b.checksum, "checksum must be deterministic for identical content");
+    }
 }
