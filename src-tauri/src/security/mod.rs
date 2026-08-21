@@ -520,4 +520,56 @@ mod tests {
             assert!(pins.get("unknown.host").is_none());
         }
     }
+
+    #[test]
+    fn test_security_error_display_and_serialize() {
+        let e = SecurityError::InvalidInput("bad".into());
+        assert_eq!(e.to_string(), "Invalid input: bad");
+        assert_eq!(serde_json::to_string(&e).unwrap(), "\"Invalid input: bad\"");
+
+        let e = SecurityError::RateLimited("slow".into());
+        assert_eq!(e.to_string(), "Rate limited: slow");
+
+        let e = SecurityError::SessionExpired("gone".into());
+        assert_eq!(e.to_string(), "Session expired: gone");
+
+        let e = SecurityError::CertificateError("bad cert".into());
+        assert_eq!(e.to_string(), "Certificate error: bad cert");
+
+        let e = SecurityError::AuditError("audit fail".into());
+        assert_eq!(e.to_string(), "Audit error: audit fail");
+    }
+
+    #[test]
+    fn test_current_timestamp_secs_is_sane_and_monotonic_ish() {
+        let ts = current_timestamp_secs();
+        // Sanity bound: must be a real unix timestamp well after this
+        // feature existed, and not some obviously broken value.
+        assert!(ts > 1_700_000_000);
+        let ts2 = current_timestamp_secs();
+        assert!(ts2 >= ts);
+    }
+
+    // security_plugin_kv_verify_isolation takes no tauri::State, so we can
+    // call the actual #[tauri::command] function directly.
+    #[tokio::test]
+    async fn test_plugin_kv_isolation_different_ids_are_isolated() {
+        let result = security_plugin_kv_verify_isolation("plugin-a".into(), "plugin-b".into()).await;
+        assert_eq!(result.unwrap(), true);
+    }
+
+    #[tokio::test]
+    async fn test_plugin_kv_isolation_same_id_is_not_isolated() {
+        let result = security_plugin_kv_verify_isolation("plugin-a".into(), "plugin-a".into()).await;
+        assert_eq!(result.unwrap(), false);
+    }
+
+    #[tokio::test]
+    async fn test_plugin_kv_isolation_rejects_empty_ids() {
+        let result = security_plugin_kv_verify_isolation("".into(), "plugin-b".into()).await;
+        assert!(result.is_err());
+
+        let result = security_plugin_kv_verify_isolation("plugin-a".into(), "".into()).await;
+        assert!(result.is_err());
+    }
 }

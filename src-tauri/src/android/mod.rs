@@ -212,4 +212,41 @@ mod tests {
         let high_json = serde_json::to_string(&high).expect("serialize high");
         assert!(high_json.contains("\"importance\":\"high\""));
     }
+
+    #[test]
+    fn test_android_error_display_and_serialize() {
+        let e = AndroidError::ServiceError("boom".to_string());
+        assert_eq!(e.to_string(), "Service error: boom");
+        assert_eq!(serde_json::to_string(&e).unwrap(), "\"Service error: boom\"");
+
+        let e = AndroidError::ChannelError("chan".to_string());
+        assert_eq!(e.to_string(), "Channel error: chan");
+        assert_eq!(serde_json::to_string(&e).unwrap(), "\"Channel error: chan\"");
+
+        let e = AndroidError::BuildError("build".to_string());
+        assert_eq!(e.to_string(), "Build error: build");
+        assert_eq!(serde_json::to_string(&e).unwrap(), "\"Build error: build\"");
+    }
+
+    #[test]
+    fn test_android_importance_all_variants_serialize() {
+        assert_eq!(serde_json::to_string(&AndroidImportance::Default).unwrap(), "\"default\"");
+        assert_eq!(serde_json::to_string(&AndroidImportance::High).unwrap(), "\"high\"");
+        assert_eq!(serde_json::to_string(&AndroidImportance::Low).unwrap(), "\"low\"");
+        assert_eq!(serde_json::to_string(&AndroidImportance::Min).unwrap(), "\"min\"");
+    }
+
+    #[test]
+    fn test_foreground_service_config_serde_roundtrip() {
+        let config = ForegroundServiceConfig {
+            title: "Session Active".to_string(),
+            body: "Connected to host".to_string(),
+            channel_id: "default".to_string(),
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let back: ForegroundServiceConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.title, "Session Active");
+        assert_eq!(back.body, "Connected to host");
+        assert_eq!(back.channel_id, "default");
+    }
 }
