@@ -2,11 +2,16 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { X, Sparkles } from "lucide-react";
 
-const APP_VERSION = "2.0.12";
+const APP_VERSION = "2.0.13";
 const DISMISSED_VERSION_KEY = "crossterm:whats-new-dismissed";
 
 const RELEASE_NOTES = `
 ## What's New in CrossTerm ${APP_VERSION}
+
+### Under the Hood
+- No user-facing changes in this release. Added tests for Snippets (previously untested), VncViewer, WebDavBrowser, SpiceViewer, and the feature-flags store, as part of an ongoing effort to raise real measured test coverage.
+
+## CrossTerm 2.0.12
 
 ### Under the Hood
 - No user-facing changes in this release. Added real in-process mock SSH/SFTP server tests (no Docker required) and real loopback network probe tests, as part of an ongoing effort to raise real measured test coverage.
