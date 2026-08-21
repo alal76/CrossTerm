@@ -206,6 +206,77 @@ fn parse_instances(json: &str) -> Result<Vec<GcpInstance>, CloudError> {
     Ok(instances)
 }
 
+/// Parse GCS buckets from `gcloud storage buckets list --format json`.
+fn parse_buckets(json: &[u8]) -> Result<Vec<GcsBucket>, CloudError> {
+    let arr: Vec<serde_json::Value> = serde_json::from_slice(json)?;
+
+    let buckets = arr
+        .iter()
+        .map(|v| GcsBucket {
+            name: v
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            location: v
+                .get("location")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            storage_class: v
+                .get("storageClass")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            time_created: v
+                .get("timeCreated")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+        })
+        .collect();
+
+    Ok(buckets)
+}
+
+/// Parse GCS objects from `gcloud storage objects list --format json`.
+fn parse_objects(json: &[u8]) -> Result<Vec<GcsObject>, CloudError> {
+    let arr: Vec<serde_json::Value> = serde_json::from_slice(json)?;
+
+    let objects = arr
+        .iter()
+        .map(|v| GcsObject {
+            name: v
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            size: v
+                .get("size")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
+            content_type: v
+                .get("contentType")
+                .and_then(|v| v.as_str())
+                .unwrap_or("application/octet-stream")
+                .to_string(),
+            time_created: v
+                .get("timeCreated")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            updated: v
+                .get("updated")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+        })
+        .collect();
+
+    Ok(objects)
+}
+
 // ── Tauri Commands ──────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -397,35 +468,7 @@ pub async fn cloud_gcp_list_buckets(project: String) -> Result<Vec<GcsBucket>, C
         ));
     }
 
-    let arr: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout)?;
-
-    let buckets = arr
-        .iter()
-        .map(|v| GcsBucket {
-            name: v
-                .get("name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string(),
-            location: v
-                .get("location")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string(),
-            storage_class: v
-                .get("storageClass")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string(),
-            time_created: v
-                .get("timeCreated")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string(),
-        })
-        .collect();
-
-    Ok(buckets)
+    parse_buckets(&output.stdout)
 }
 
 #[tauri::command]
@@ -458,40 +501,7 @@ pub async fn cloud_gcp_list_objects(
         ));
     }
 
-    let arr: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout)?;
-
-    let objects = arr
-        .iter()
-        .map(|v| GcsObject {
-            name: v
-                .get("name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string(),
-            size: v
-                .get("size")
-                .and_then(|v| v.as_str())
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0),
-            content_type: v
-                .get("contentType")
-                .and_then(|v| v.as_str())
-                .unwrap_or("application/octet-stream")
-                .to_string(),
-            time_created: v
-                .get("timeCreated")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string(),
-            updated: v
-                .get("updated")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string(),
-        })
-        .collect();
-
-    Ok(objects)
+    parse_objects(&output.stdout)
 }
 
 #[tauri::command]
@@ -739,5 +749,124 @@ mod tests {
         assert_eq!(instances[1].machine_type, "n1-standard-4");
         assert_eq!(instances[1].status, "TERMINATED");
         assert_eq!(instances[1].external_ip, None); // no accessConfigs
+    }
+
+    #[test]
+    fn test_gcp_parse_configs_malformed_errors() {
+        assert!(parse_configs("not json").is_err());
+    }
+
+    #[test]
+    fn test_gcp_parse_configs_missing_properties_default() {
+        let json = r#"[{"name": "bare", "is_active": false}]"#;
+        let configs = parse_configs(json).unwrap();
+        assert_eq!(configs.len(), 1);
+        assert_eq!(configs[0].name, "bare");
+        assert_eq!(configs[0].project, "");
+        assert_eq!(configs[0].region, "");
+        assert_eq!(configs[0].zone, "");
+        assert!(!configs[0].is_active);
+    }
+
+    #[test]
+    fn test_gcp_parse_instances_empty() {
+        let instances = parse_instances("[]").unwrap();
+        assert!(instances.is_empty());
+    }
+
+    #[test]
+    fn test_gcp_parse_instances_no_network_interfaces() {
+        let json = r#"[
+            {
+                "id": "1",
+                "name": "isolated",
+                "zone": "projects/p/zones/z",
+                "machineType": "projects/p/zones/z/machineTypes/e2-micro",
+                "status": "RUNNING"
+            }
+        ]"#;
+        let instances = parse_instances(json).unwrap();
+        assert_eq!(instances.len(), 1);
+        assert_eq!(instances[0].internal_ip, None);
+        assert_eq!(instances[0].external_ip, None);
+        assert_eq!(instances[0].network, None);
+    }
+
+    #[test]
+    fn test_gcp_parse_buckets() {
+        let json = br#"[
+            {
+                "name": "my-gcs-bucket",
+                "location": "US-CENTRAL1",
+                "storageClass": "STANDARD",
+                "timeCreated": "2023-01-01T00:00:00Z"
+            },
+            {
+                "name": "archive-bucket",
+                "location": "US",
+                "storageClass": "ARCHIVE",
+                "timeCreated": "2022-06-15T12:00:00Z"
+            }
+        ]"#;
+
+        let buckets = parse_buckets(json).unwrap();
+        assert_eq!(buckets.len(), 2);
+        assert_eq!(buckets[0].name, "my-gcs-bucket");
+        assert_eq!(buckets[0].location, "US-CENTRAL1");
+        assert_eq!(buckets[0].storage_class, "STANDARD");
+        assert_eq!(buckets[1].name, "archive-bucket");
+        assert_eq!(buckets[1].storage_class, "ARCHIVE");
+    }
+
+    #[test]
+    fn test_gcp_parse_buckets_empty() {
+        let buckets = parse_buckets(b"[]").unwrap();
+        assert!(buckets.is_empty());
+    }
+
+    #[test]
+    fn test_gcp_parse_buckets_malformed_errors() {
+        assert!(parse_buckets(b"not json").is_err());
+    }
+
+    #[test]
+    fn test_gcp_parse_objects() {
+        let json = br#"[
+            {
+                "name": "images/logo.png",
+                "size": "45678",
+                "contentType": "image/png",
+                "timeCreated": "2024-01-10T08:00:00Z",
+                "updated": "2024-01-11T09:00:00Z"
+            },
+            {
+                "name": "docs/readme.md",
+                "size": "1234"
+            }
+        ]"#;
+
+        let objects = parse_objects(json).unwrap();
+        assert_eq!(objects.len(), 2);
+        assert_eq!(objects[0].name, "images/logo.png");
+        assert_eq!(objects[0].size, 45678);
+        assert_eq!(objects[0].content_type, "image/png");
+
+        // Second object has no contentType -> default; size parsed from string.
+        assert_eq!(objects[1].size, 1234);
+        assert_eq!(objects[1].content_type, "application/octet-stream");
+        assert_eq!(objects[1].updated, "");
+    }
+
+    #[test]
+    fn test_gcp_parse_objects_unparseable_size_defaults_zero() {
+        let json = br#"[{"name": "weird", "size": "not-a-number"}]"#;
+        let objects = parse_objects(json).unwrap();
+        assert_eq!(objects[0].size, 0);
+    }
+
+    #[test]
+    fn test_gcp_parse_objects_empty() {
+        let objects = parse_objects(b"[]").unwrap();
+        assert!(objects.is_empty());
     }
 }

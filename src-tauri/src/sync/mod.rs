@@ -614,4 +614,151 @@ mod tests {
         let merge = serde_json::to_string(&ConflictResolution::Merge).unwrap();
         assert_eq!(merge, "\"merge\"");
     }
+
+    // ── kek_to_aes_key error paths ────────────────────────────────────
+
+    #[test]
+    fn test_kek_to_aes_key_invalid_base64_errors() {
+        let result = kek_to_aes_key("not valid base64!!!");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_kek_to_aes_key_wrong_length_errors() {
+        use base64::Engine as _;
+        let short_key = base64::engine::general_purpose::STANDARD.encode([0x01u8; 16]);
+        let result = kek_to_aes_key(&short_key);
+        let err = result.unwrap_err();
+        assert!(err.contains("32 bytes"));
+        assert!(err.contains("16"));
+    }
+
+    #[test]
+    fn test_kek_to_aes_key_valid_roundtrips() {
+        use base64::Engine as _;
+        let raw = [0xABu8; 32];
+        let encoded = base64::engine::general_purpose::STANDARD.encode(raw);
+        let key = kek_to_aes_key(&encoded).unwrap();
+        assert_eq!(key, raw);
+    }
+
+    // ── sha256_hex ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_sha256_hex_known_vector() {
+        // SHA-256("") = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+        let digest = sha256_hex(b"");
+        assert_eq!(
+            digest,
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+
+    // ── sync_import_package error paths ───────────────────────────────
+
+    #[test]
+    fn test_sync_import_package_checksum_mismatch_errors() {
+        let kek = test_kek_b64();
+        let mut pkg = sync_create_package("p1".to_string(), kek.clone()).unwrap();
+        pkg.checksum = "0".repeat(64); // corrupt the checksum
+
+        let result = sync_import_package(pkg, kek, ConflictResolution::KeepRemote);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Checksum mismatch"));
+    }
+
+    #[test]
+    fn test_sync_import_package_bad_nonce_length_errors() {
+        use base64::Engine as _;
+        let kek = test_kek_b64();
+        let mut pkg = sync_create_package("p1".to_string(), kek.clone()).unwrap();
+
+        // Recompute checksum so it still matches (unchanged payload), but
+        // shrink the nonce to an invalid length.
+        pkg.nonce = base64::engine::general_purpose::STANDARD.encode([0u8; 5]);
+
+        let result = sync_import_package(pkg, kek, ConflictResolution::KeepRemote);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("12 bytes"));
+    }
+
+    #[test]
+    fn test_sync_import_package_wrong_kek_fails_to_decrypt() {
+        use base64::Engine as _;
+        let kek = test_kek_b64();
+        let pkg = sync_create_package("p1".to_string(), kek).unwrap();
+
+        let wrong_kek = base64::engine::general_purpose::STANDARD.encode([0x99u8; 32]);
+        let result = sync_import_package(pkg, wrong_kek, ConflictResolution::KeepRemote);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sync_import_package_invalid_base64_payload_errors() {
+        let kek = test_kek_b64();
+        let mut pkg = sync_create_package("p1".to_string(), kek.clone()).unwrap();
+        pkg.encrypted_payload = "not base64 !!!".to_string();
+
+        let result = sync_import_package(pkg, kek, ConflictResolution::KeepRemote);
+        assert!(result.is_err());
+    }
+
+    // ── Share code round-trip ────────────────────────────────────────
+
+    #[test]
+    fn test_sync_generate_and_parse_share_code_roundtrip() {
+        let kek = test_kek_b64();
+        let pkg = sync_create_package("share-profile".to_string(), kek).unwrap();
+
+        let code = sync_generate_share_code(pkg.clone()).unwrap();
+        assert!(!code.is_empty());
+        // URL-safe base64 must not contain '+' or '/'.
+        assert!(!code.contains('+') && !code.contains('/'));
+
+        let parsed = sync_parse_share_code(code).unwrap();
+        assert_eq!(parsed.profile_id, pkg.profile_id);
+        assert_eq!(parsed.checksum, pkg.checksum);
+        assert_eq!(parsed.encrypted_payload, pkg.encrypted_payload);
+        assert_eq!(parsed.nonce, pkg.nonce);
+    }
+
+    #[test]
+    fn test_sync_parse_share_code_invalid_base64_errors() {
+        let result = sync_parse_share_code("not valid base64url!!!".to_string());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sync_parse_share_code_invalid_json_errors() {
+        use base64::Engine as _;
+        // Valid base64url, but not a SyncPackage once decoded.
+        let bogus = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"not json");
+        let result = sync_parse_share_code(bogus);
+        assert!(result.is_err());
+    }
+
+    // ── SyncError Display / Serialize ───────────────────────────────
+
+    #[test]
+    fn test_sync_error_display() {
+        assert_eq!(
+            SyncError::ExportFailed("disk full".into()).to_string(),
+            "Export failed: disk full"
+        );
+        assert_eq!(
+            SyncError::ImportFailed("bad data".into()).to_string(),
+            "Import failed: bad data"
+        );
+        assert_eq!(
+            SyncError::InvalidFormat("truncated".into()).to_string(),
+            "Invalid bundle format: truncated"
+        );
+    }
+
+    #[test]
+    fn test_sync_error_serialize() {
+        let err = SyncError::ExportFailed("oops".into());
+        let json = serde_json::to_string(&err).unwrap();
+        assert_eq!(json, "\"Export failed: oops\"");
+    }
 }

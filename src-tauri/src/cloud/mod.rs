@@ -457,4 +457,90 @@ mod tests {
         assert_eq!(deserialized[1].name, "Microsoft Azure");
         assert_eq!(deserialized[2].name, "Google Cloud Platform");
     }
+
+    #[test]
+    fn test_cloud_error_display_and_serialize() {
+        let cases: Vec<(CloudError, &str)> = vec![
+            (CloudError::CliNotFound("aws".into()), "CLI not found: aws"),
+            (
+                CloudError::CliExecution("boom".into()),
+                "CLI execution failed: boom",
+            ),
+            (CloudError::Parse("bad json".into()), "Parse error: bad json"),
+            (
+                CloudError::AuthRequired("gcp".into()),
+                "Authentication required for gcp",
+            ),
+            (
+                CloudError::NotConfigured("azure".into()),
+                "Provider not configured: azure",
+            ),
+            (
+                CloudError::ResourceNotFound("i-123".into()),
+                "Resource not found: i-123",
+            ),
+            (
+                CloudError::PermissionDenied("s3:GetObject".into()),
+                "Permission denied: s3:GetObject",
+            ),
+        ];
+
+        for (err, expected) in cases {
+            assert_eq!(err.to_string(), expected);
+            // Serialize impl forwards to Display, wrapped as a JSON string.
+            let json = serde_json::to_string(&err).unwrap();
+            assert_eq!(json, format!("{:?}", expected));
+        }
+    }
+
+    #[test]
+    fn test_cloud_error_from_json_error() {
+        let json_err = serde_json::from_str::<serde_json::Value>("not json").unwrap_err();
+        let cloud_err: CloudError = json_err.into();
+        assert!(matches!(cloud_err, CloudError::Json(_)));
+        assert!(cloud_err.to_string().starts_with("JSON error:"));
+    }
+
+    #[test]
+    fn test_cloud_error_from_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "missing file");
+        let cloud_err: CloudError = io_err.into();
+        assert!(matches!(cloud_err, CloudError::Io(_)));
+        assert!(cloud_err.to_string().starts_with("IO error:"));
+    }
+
+    #[test]
+    fn test_cloud_state_new_is_empty() {
+        let state = CloudState::new();
+        let cache = state.provider_status.lock().unwrap();
+        assert!(cache.is_empty());
+    }
+
+    #[test]
+    fn test_cloud_provider_serde_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&CloudProvider::Aws).unwrap(),
+            "\"aws\""
+        );
+        assert_eq!(
+            serde_json::to_string(&CloudProvider::Azure).unwrap(),
+            "\"azure\""
+        );
+        assert_eq!(
+            serde_json::to_string(&CloudProvider::Gcp).unwrap(),
+            "\"gcp\""
+        );
+    }
+
+    #[test]
+    fn test_cloud_asset_type_serde_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&CloudAssetType::ResourceGroup).unwrap(),
+            "\"resource_group\""
+        );
+        assert_eq!(
+            serde_json::to_string(&CloudAssetType::Kubernetes).unwrap(),
+            "\"kubernetes\""
+        );
+    }
 }

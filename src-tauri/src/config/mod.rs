@@ -2493,4 +2493,219 @@ Host *
         assert_eq!(opts.get("known_hosts_policy"), Some(&serde_json::json!("strict")));
         assert_eq!(opts.len(), 5);
     }
+
+    // ── Error paths ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_profile_delete_not_found() {
+        let result = do_profile_delete("nonexistent-profile-id-xyz");
+        assert!(matches!(result.unwrap_err(), ConfigError::ProfileNotFound(_)));
+    }
+
+    #[test]
+    fn test_session_create_profile_not_found() {
+        let result = do_session_create("nonexistent-profile-id-xyz", make_session_request("X", "1.2.3.4"));
+        assert!(matches!(result.unwrap_err(), ConfigError::ProfileNotFound(_)));
+    }
+
+    #[test]
+    fn test_session_delete_not_found() {
+        let env = TestEnv::new();
+        let result = do_session_delete(env.id(), "nonexistent-session-id");
+        assert!(matches!(result.unwrap_err(), ConfigError::SessionNotFound(_)));
+    }
+
+    #[test]
+    fn test_session_get_not_found() {
+        let env = TestEnv::new();
+        let result = do_session_get(env.id(), "nonexistent-session-id");
+        assert!(matches!(result.unwrap_err(), ConfigError::SessionNotFound(_)));
+    }
+
+    #[test]
+    fn test_config_error_display() {
+        assert_eq!(
+            ConfigError::ProfileNotFound("abc".into()).to_string(),
+            "Profile not found: abc"
+        );
+        assert_eq!(
+            ConfigError::ProfileAlreadyExists("abc".into()).to_string(),
+            "Profile already exists: abc"
+        );
+        assert_eq!(
+            ConfigError::SessionNotFound("s1".into()).to_string(),
+            "Session not found: s1"
+        );
+        assert_eq!(
+            ConfigError::Encryption("bad key".into()).to_string(),
+            "Encryption error: bad key"
+        );
+    }
+
+    #[test]
+    fn test_config_error_serialize() {
+        let err = ConfigError::ProfileNotFound("abc".into());
+        let json = serde_json::to_string(&err).unwrap();
+        assert_eq!(json, "\"Profile not found: abc\"");
+    }
+
+    // ── json_merge ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_json_merge_overwrites_scalar() {
+        let mut base = serde_json::json!({"theme": "dark", "font_size": 14});
+        let overlay = serde_json::json!({"theme": "light"});
+        json_merge(&mut base, &overlay);
+        assert_eq!(base["theme"], "light");
+        assert_eq!(base["font_size"], 14);
+    }
+
+    #[test]
+    fn test_json_merge_nested_objects() {
+        let mut base = serde_json::json!({
+            "outer": {"a": 1, "b": 2},
+            "unrelated": true
+        });
+        let overlay = serde_json::json!({
+            "outer": {"b": 99, "c": 3}
+        });
+        json_merge(&mut base, &overlay);
+        assert_eq!(base["outer"]["a"], 1);
+        assert_eq!(base["outer"]["b"], 99);
+        assert_eq!(base["outer"]["c"], 3);
+        assert_eq!(base["unrelated"], true);
+    }
+
+    #[test]
+    fn test_json_merge_adds_new_key() {
+        let mut base = serde_json::json!({"a": 1});
+        let overlay = serde_json::json!({"b": 2});
+        json_merge(&mut base, &overlay);
+        assert_eq!(base["a"], 1);
+        assert_eq!(base["b"], 2);
+    }
+
+    // ── Settings hierarchy: folder-level overrides ──────────────────
+
+    #[test]
+    fn test_settings_effective_with_folder_overrides() {
+        let env = TestEnv::new();
+
+        let mut req = make_session_request("FolderSession", "10.0.0.1");
+        req.group = Some("myfolder".to_string());
+        let session = do_session_create(env.id(), req).unwrap();
+
+        // Write a folder-level settings override file.
+        let folder_settings_path = sessions_dir(env.id()).join("myfolder.settings.json");
+        std::fs::write(
+            &folder_settings_path,
+            serde_json::to_string(&serde_json::json!({"theme": "folder-theme"})).unwrap(),
+        )
+        .unwrap();
+
+        let effective = do_settings_get_effective(env.id(), Some(&session.id)).unwrap();
+        assert_eq!(effective.theme, "folder-theme");
+    }
+
+    #[test]
+    fn test_settings_effective_session_override_beats_folder() {
+        let env = TestEnv::new();
+
+        let mut req = make_session_request("FolderSession2", "10.0.0.1");
+        req.group = Some("myfolder2".to_string());
+        req.settings_override = Some(serde_json::json!({"theme": "session-theme"}));
+        let session = do_session_create(env.id(), req).unwrap();
+
+        let folder_settings_path = sessions_dir(env.id()).join("myfolder2.settings.json");
+        std::fs::write(
+            &folder_settings_path,
+            serde_json::to_string(&serde_json::json!({"theme": "folder-theme"})).unwrap(),
+        )
+        .unwrap();
+
+        let effective = do_settings_get_effective(env.id(), Some(&session.id)).unwrap();
+        // Session-level settings_override is applied after folder settings,
+        // so it should win.
+        assert_eq!(effective.theme, "session-theme");
+    }
+
+    // ── Session search: notes and group fields ──────────────────────
+
+    #[test]
+    fn test_session_search_by_notes_and_group() {
+        let env = TestEnv::new();
+
+        let mut req = make_session_request("Notable", "10.0.0.5");
+        req.notes = Some("Has a special maintenance window".to_string());
+        req.group = Some("special-group".to_string());
+        do_session_create(env.id(), req).unwrap();
+
+        let by_notes = do_session_search(env.id(), "maintenance window").unwrap();
+        assert_eq!(by_notes.len(), 1);
+        assert_eq!(by_notes[0].name, "Notable");
+
+        let by_group = do_session_search(env.id(), "special-group").unwrap();
+        assert_eq!(by_group.len(), 1);
+        assert_eq!(by_group[0].name, "Notable");
+    }
+
+    // ── Feature flags ────────────────────────────────────────────────
+
+    #[test]
+    fn test_feature_flags_set_and_get() {
+        let flags = config_get_feature_flags().unwrap();
+        // Flags may have been toggled by other tests sharing this process-
+        // wide static, so only assert on the struct shape, not defaults.
+        let _ = flags.wasm_plugins;
+
+        let updated = config_set_feature_flag("wasm_plugins".to_string(), true).unwrap();
+        assert!(updated.wasm_plugins);
+
+        let fetched = config_get_feature_flags().unwrap();
+        assert!(fetched.wasm_plugins);
+
+        // Reset for hygiene (other tests may run in the same process).
+        let reset = config_set_feature_flag("wasm_plugins".to_string(), false).unwrap();
+        assert!(!reset.wasm_plugins);
+    }
+
+    #[test]
+    fn test_feature_flags_unknown_flag_errors() {
+        let result = config_set_feature_flag("not_a_real_flag".to_string(), true);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unknown feature flag"));
+    }
+
+    // ── Shell integration install ────────────────────────────────────
+
+    #[test]
+    fn test_shell_integration_install_bash() {
+        let result = shell_integration_install("bash".to_string()).unwrap();
+        assert!(result.contains(".bashrc"));
+        assert!(result.contains("crossterm.bash"));
+    }
+
+    #[test]
+    fn test_shell_integration_install_zsh_and_fish() {
+        let zsh = shell_integration_install("zsh".to_string()).unwrap();
+        assert!(zsh.contains(".zshrc"));
+        assert!(zsh.contains("crossterm.zsh"));
+
+        let fish = shell_integration_install("fish".to_string()).unwrap();
+        assert!(fish.contains("config.fish"));
+        assert!(fish.contains("crossterm.fish"));
+    }
+
+    #[test]
+    fn test_shell_integration_install_unsupported_shell_errors() {
+        let result = shell_integration_install("powershell".to_string());
+        assert!(result.is_err());
+    }
+
+    // ── Portable mode command wrapper ────────────────────────────────
+
+    #[test]
+    fn test_config_is_portable_mode_command() {
+        assert!(!config_is_portable_mode());
+    }
 }

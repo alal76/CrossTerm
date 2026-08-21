@@ -112,13 +112,7 @@ fn parse_vms(json: &str) -> Result<Vec<AzureVm>, CloudError> {
                 .unwrap_or("")
                 .to_string();
 
-            let resource_group = id
-                .split('/')
-                .collect::<Vec<_>>()
-                .windows(2)
-                .find(|w| w[0].eq_ignore_ascii_case("resourceGroups"))
-                .map(|w| w[1].to_string())
-                .unwrap_or_default();
+            let resource_group = extract_resource_group(&id);
 
             AzureVm {
                 id,
@@ -159,6 +153,61 @@ fn parse_vms(json: &str) -> Result<Vec<AzureVm>, CloudError> {
         .collect();
 
     Ok(vms)
+}
+
+/// Extract the resource group segment from an Azure resource ID, e.g.
+/// `/subscriptions/.../resourceGroups/myRG/providers/...` -> `myRG`.
+fn extract_resource_group(id: &str) -> String {
+    id.split('/')
+        .collect::<Vec<_>>()
+        .windows(2)
+        .find(|w| w[0].eq_ignore_ascii_case("resourceGroups"))
+        .map(|w| w[1].to_string())
+        .unwrap_or_default()
+}
+
+/// Parse storage accounts from `az storage account list --output json`.
+fn parse_storage_accounts(json: &[u8]) -> Result<Vec<AzureStorageAccount>, CloudError> {
+    let arr: Vec<serde_json::Value> = serde_json::from_slice(json)?;
+
+    let accounts = arr
+        .iter()
+        .map(|v| {
+            let id = v
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let resource_group = extract_resource_group(&id);
+
+            AzureStorageAccount {
+                name: v
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                resource_group,
+                kind: v
+                    .get("kind")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                sku: v
+                    .get("sku")
+                    .and_then(|v| v.get("name"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                location: v
+                    .get("location")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+            }
+        })
+        .collect();
+
+    Ok(accounts)
 }
 
 // ── Tauri Commands ──────────────────────────────────────────────────────
@@ -374,52 +423,7 @@ pub async fn cloud_azure_list_storage(
         ));
     }
 
-    let arr: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout)?;
-
-    let accounts = arr
-        .iter()
-        .map(|v| {
-            let id = v
-                .get("id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let resource_group = id
-                .split('/')
-                .collect::<Vec<_>>()
-                .windows(2)
-                .find(|w| w[0].eq_ignore_ascii_case("resourceGroups"))
-                .map(|w| w[1].to_string())
-                .unwrap_or_default();
-
-            AzureStorageAccount {
-                name: v
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                resource_group,
-                kind: v
-                    .get("kind")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                sku: v
-                    .get("sku")
-                    .and_then(|v| v.get("name"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                location: v
-                    .get("location")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-            }
-        })
-        .collect();
-
-    Ok(accounts)
+    parse_storage_accounts(&output.stdout)
 }
 
 #[tauri::command]
@@ -464,36 +468,9 @@ pub struct AzureBlobEntry {
     pub blob_type: String,
 }
 
-#[tauri::command]
-pub async fn cloud_azure_storage_browse(
-    account: String,
-    container: Option<String>,
-) -> Result<Vec<AzureBlobEntry>, CloudError> {
-    let container_name = container.unwrap_or_else(|| "$root".to_string());
-
-    let output = tokio::process::Command::new("az")
-        .args([
-            "storage",
-            "blob",
-            "list",
-            "--account-name",
-            &account,
-            "--container-name",
-            &container_name,
-            "--output",
-            "json",
-        ])
-        .output()
-        .await
-        .map_err(|e| CloudError::CliExecution(format!("az storage blob list: {e}")))?;
-
-    if !output.status.success() {
-        return Err(CloudError::CliExecution(
-            String::from_utf8_lossy(&output.stderr).to_string(),
-        ));
-    }
-
-    let arr: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout)?;
+/// Parse blob entries from `az storage blob list --output json`.
+fn parse_blob_entries(json: &[u8]) -> Result<Vec<AzureBlobEntry>, CloudError> {
+    let arr: Vec<serde_json::Value> = serde_json::from_slice(json)?;
 
     let entries = arr
         .iter()
@@ -530,6 +507,38 @@ pub async fn cloud_azure_storage_browse(
         .collect();
 
     Ok(entries)
+}
+
+#[tauri::command]
+pub async fn cloud_azure_storage_browse(
+    account: String,
+    container: Option<String>,
+) -> Result<Vec<AzureBlobEntry>, CloudError> {
+    let container_name = container.unwrap_or_else(|| "$root".to_string());
+
+    let output = tokio::process::Command::new("az")
+        .args([
+            "storage",
+            "blob",
+            "list",
+            "--account-name",
+            &account,
+            "--container-name",
+            &container_name,
+            "--output",
+            "json",
+        ])
+        .output()
+        .await
+        .map_err(|e| CloudError::CliExecution(format!("az storage blob list: {e}")))?;
+
+    if !output.status.success() {
+        return Err(CloudError::CliExecution(
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        ));
+    }
+
+    parse_blob_entries(&output.stdout)
 }
 
 // ── P2-CLOUD-17: AKS kubectl integration ───────────────────────────────
@@ -690,5 +699,121 @@ mod tests {
         assert_eq!(vms[1].status, "VM deallocated");
         assert_eq!(vms[1].public_ip, None); // empty string filtered
         assert_eq!(vms[1].size, "Standard_D4s_v3");
+    }
+
+    #[test]
+    fn test_azure_parse_subscriptions_empty() {
+        let subs = parse_subscriptions("[]").unwrap();
+        assert!(subs.is_empty());
+    }
+
+    #[test]
+    fn test_azure_parse_subscriptions_malformed_errors() {
+        assert!(parse_subscriptions("not json").is_err());
+    }
+
+    #[test]
+    fn test_azure_parse_subscriptions_missing_fields_default() {
+        let json = r#"[{"name": "OnlyName"}]"#;
+        let subs = parse_subscriptions(json).unwrap();
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0].name, "OnlyName");
+        assert_eq!(subs[0].id, "");
+        assert_eq!(subs[0].state, "Unknown");
+        assert_eq!(subs[0].tenant_id, "");
+    }
+
+    #[test]
+    fn test_extract_resource_group() {
+        assert_eq!(
+            extract_resource_group(
+                "/subscriptions/abc/resourceGroups/myRG/providers/Microsoft.Compute/virtualMachines/vm1"
+            ),
+            "myRG"
+        );
+        // case-insensitive match on the segment name
+        assert_eq!(
+            extract_resource_group("/subscriptions/abc/RESOURCEGROUPS/otherRG/providers/x"),
+            "otherRG"
+        );
+        // no resourceGroups segment present
+        assert_eq!(extract_resource_group("/subscriptions/abc"), "");
+        assert_eq!(extract_resource_group(""), "");
+    }
+
+    #[test]
+    fn test_azure_parse_storage_accounts() {
+        let json = br#"[
+            {
+                "id": "/subscriptions/abc/resourceGroups/storageRG/providers/Microsoft.Storage/storageAccounts/mystorage",
+                "name": "mystorage",
+                "kind": "StorageV2",
+                "sku": { "name": "Standard_LRS" },
+                "location": "eastus"
+            }
+        ]"#;
+
+        let accounts = parse_storage_accounts(json).unwrap();
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(accounts[0].name, "mystorage");
+        assert_eq!(accounts[0].resource_group, "storageRG");
+        assert_eq!(accounts[0].kind, "StorageV2");
+        assert_eq!(accounts[0].sku, "Standard_LRS");
+        assert_eq!(accounts[0].location, "eastus");
+    }
+
+    #[test]
+    fn test_azure_parse_storage_accounts_missing_fields_default() {
+        let json = br#"[{"name": "bare"}]"#;
+        let accounts = parse_storage_accounts(json).unwrap();
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(accounts[0].resource_group, "");
+        assert_eq!(accounts[0].kind, "");
+        assert_eq!(accounts[0].sku, "");
+    }
+
+    #[test]
+    fn test_azure_parse_storage_accounts_malformed_errors() {
+        assert!(parse_storage_accounts(b"not json").is_err());
+    }
+
+    #[test]
+    fn test_azure_parse_blob_entries() {
+        let json = br#"[
+            {
+                "name": "folder/file.txt",
+                "properties": {
+                    "contentLength": 12345,
+                    "contentType": "text/plain",
+                    "lastModified": "2024-05-01T10:00:00Z",
+                    "blobType": "BlockBlob"
+                }
+            },
+            {
+                "name": "pageblob.vhd",
+                "properties": {
+                    "contentLength": 999,
+                    "blobType": "PageBlob"
+                }
+            }
+        ]"#;
+
+        let entries = parse_blob_entries(json).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].name, "folder/file.txt");
+        assert_eq!(entries[0].content_length, 12345);
+        assert_eq!(entries[0].content_type, "text/plain");
+        assert_eq!(entries[0].blob_type, "BlockBlob");
+
+        // Second entry has no contentType, so it should default.
+        assert_eq!(entries[1].content_type, "application/octet-stream");
+        assert_eq!(entries[1].blob_type, "PageBlob");
+        assert_eq!(entries[1].last_modified, "");
+    }
+
+    #[test]
+    fn test_azure_parse_blob_entries_empty() {
+        let entries = parse_blob_entries(b"[]").unwrap();
+        assert!(entries.is_empty());
     }
 }
