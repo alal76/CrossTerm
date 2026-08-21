@@ -1009,4 +1009,240 @@ mod tests {
 
         let _ = msg; // silence unused-field-combo warning; each type checked individually above
     }
+
+    #[test]
+    fn test_read_varint_reports_incomplete_and_overflow() {
+        // No terminating (high-bit-clear) byte anywhere in the buffer.
+        assert!(read_varint(&[0x80, 0x80]).is_none());
+        // 10 continuation bytes never terminate and blow past the 64-bit shift limit.
+        let overflow = [0x80u8; 10];
+        assert!(read_varint(&overflow).is_none());
+    }
+
+    #[test]
+    fn test_decode_fields_rejects_truncated_fixed64_length_delimited_and_fixed32() {
+        // wire type 1 (fixed64) needs 8 bytes; give it 3.
+        let mut buf = Vec::new();
+        write_tag(1, 1, &mut buf);
+        buf.extend_from_slice(&[1, 2, 3]);
+        assert!(decode_fields(&buf).is_none());
+
+        // wire type 2 (length-delimited) declares more bytes than are present.
+        let mut buf = Vec::new();
+        write_tag(1, 2, &mut buf);
+        write_varint(10, &mut buf);
+        buf.extend_from_slice(&[1, 2]);
+        assert!(decode_fields(&buf).is_none());
+
+        // wire type 5 (fixed32) needs 4 bytes; give it 1.
+        let mut buf = Vec::new();
+        write_tag(1, 5, &mut buf);
+        buf.push(0xAA);
+        assert!(decode_fields(&buf).is_none());
+    }
+
+    #[test]
+    fn test_decode_fields_rejects_group_wire_types() {
+        let mut buf = Vec::new();
+        write_tag(1, 3, &mut buf); // wire type 3 = start-group, unsupported
+        assert!(decode_fields(&buf).is_none());
+    }
+
+    #[test]
+    fn test_last_bool_defaults_false_when_absent_or_wrong_type() {
+        let fields: HashMap<u32, Vec<WireValue>> = HashMap::new();
+        assert!(!last_bool(&fields, 1));
+
+        let mut buf = Vec::new();
+        write_string_field(1, "not-a-bool", &mut buf);
+        let fields = decode_fields(&buf).unwrap();
+        assert!(!last_bool(&fields, 1));
+
+        let mut buf = Vec::new();
+        write_varint_field(2, 1, &mut buf);
+        let fields = decode_fields(&buf).unwrap();
+        assert!(last_bool(&fields, 2));
+    }
+
+    #[test]
+    fn test_all_bytes_filters_to_length_delimited_only_and_defaults_empty() {
+        let fields: HashMap<u32, Vec<WireValue>> = HashMap::new();
+        assert!(all_bytes(&fields, 9).is_empty());
+
+        let mut buf = Vec::new();
+        write_length_delimited(1, b"a", &mut buf);
+        write_length_delimited(1, b"bb", &mut buf);
+        let fields = decode_fields(&buf).unwrap();
+        let vals = all_bytes(&fields, 1);
+        assert_eq!(vals, vec![b"a".to_vec(), b"bb".to_vec()]);
+    }
+
+    #[test]
+    fn test_build_file_containing_symbol_request_encodes_field_4() {
+        let req = build_file_containing_symbol_request("demo.Greeter");
+        let fields = decode_fields(&req).unwrap();
+        assert_eq!(last_string(&fields, 4), Some("demo.Greeter".to_string()));
+    }
+
+    #[test]
+    fn test_parse_reflection_response_file_descriptors_variant() {
+        let fd1 = b"fake-descriptor-bytes-1".to_vec();
+        let fd2 = b"fake-descriptor-bytes-2".to_vec();
+        let fd_msg = {
+            let mut b = Vec::new();
+            write_length_delimited(1, &fd1, &mut b);
+            write_length_delimited(1, &fd2, &mut b);
+            b
+        };
+        let outer = { let mut b = Vec::new(); write_length_delimited(4, &fd_msg, &mut b); b };
+        match parse_reflection_response(&outer).unwrap() {
+            ReflectionResponse::FileDescriptors(files) => assert_eq!(files, vec![fd1, fd2]),
+            _ => panic!("expected FileDescriptors variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_reflection_response_errors_when_no_recognized_oneof_is_set() {
+        // A well-formed but empty message: no oneof field (4, 6, or 7) present.
+        let outer: Vec<u8> = Vec::new();
+        assert!(parse_reflection_response(&outer).is_err());
+    }
+
+    #[test]
+    fn test_parse_field_descriptor_requires_a_name() {
+        let mut b = Vec::new();
+        write_varint_field(3, 1, &mut b); // number, but no name (field 1)
+        assert!(parse_field_descriptor(&b).is_none());
+    }
+
+    #[test]
+    fn test_parse_service_descriptor_with_empty_package_omits_prefix() {
+        let method = {
+            let mut b = Vec::new();
+            write_string_field(1, "Ping", &mut b);
+            write_string_field(2, ".Req", &mut b);
+            write_string_field(3, ".Resp", &mut b);
+            b
+        };
+        let service = {
+            let mut b = Vec::new();
+            write_string_field(1, "Pinger", &mut b);
+            write_length_delimited(2, &method, &mut b);
+            b
+        };
+        let svc = parse_service_descriptor(&service, "").unwrap();
+        assert_eq!(svc.name, "Pinger");
+        assert_eq!(svc.methods[0].name, "Ping");
+    }
+
+    #[test]
+    fn test_decode_scalar_value_covers_remaining_numeric_types() {
+        fn f(number: i64, field_type: i64) -> FieldDesc {
+            FieldDesc { name: "v".into(), number, label: 1, field_type, type_name: None, json_name: None }
+        }
+        let registry = ProtoRegistry::default();
+
+        let uint64_msg = MessageDesc { fields: vec![f(1, TYPE_UINT64)] };
+        let encoded = json_to_protobuf(&serde_json::json!({"v": 9000000000i64}), &uint64_msg, &registry);
+        assert_eq!(protobuf_to_json(&encoded, &uint64_msg, &registry)["v"], 9000000000i64);
+
+        let uint32_msg = MessageDesc { fields: vec![f(1, TYPE_UINT32)] };
+        let encoded = json_to_protobuf(&serde_json::json!({"v": 42}), &uint32_msg, &registry);
+        assert_eq!(protobuf_to_json(&encoded, &uint32_msg, &registry)["v"], 42);
+
+        let fixed64_msg = MessageDesc { fields: vec![f(1, TYPE_FIXED64)] };
+        let encoded = json_to_protobuf(&serde_json::json!({"v": 12345}), &fixed64_msg, &registry);
+        assert_eq!(protobuf_to_json(&encoded, &fixed64_msg, &registry)["v"], 12345);
+
+        let sfixed64_msg = MessageDesc { fields: vec![f(1, TYPE_SFIXED64)] };
+        let encoded = json_to_protobuf(&serde_json::json!({"v": -12345}), &sfixed64_msg, &registry);
+        assert_eq!(protobuf_to_json(&encoded, &sfixed64_msg, &registry)["v"], -12345);
+
+        let sfixed32_msg = MessageDesc { fields: vec![f(1, TYPE_SFIXED32)] };
+        let encoded = json_to_protobuf(&serde_json::json!({"v": -7}), &sfixed32_msg, &registry);
+        assert_eq!(protobuf_to_json(&encoded, &sfixed32_msg, &registry)["v"], -7);
+
+        let float_msg = MessageDesc { fields: vec![f(1, TYPE_FLOAT)] };
+        let encoded = json_to_protobuf(&serde_json::json!({"v": 1.5}), &float_msg, &registry);
+        assert_eq!(protobuf_to_json(&encoded, &float_msg, &registry)["v"], 1.5);
+    }
+
+    #[test]
+    fn test_encode_scalar_field_ignores_message_type_defensive_default() {
+        // encode_scalar_field only handles scalar wire types; TYPE_MESSAGE
+        // falls into the `_ => {}` arm and must not panic or write anything.
+        let field = FieldDesc { name: "v".into(), number: 1, label: 1, field_type: TYPE_MESSAGE, type_name: Some(".x.Y".into()), json_name: None };
+        let mut out = Vec::new();
+        encode_scalar_field(&field, &serde_json::json!({"a": 1}), &mut out);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn test_apply_metadata_inserts_valid_header_entries() {
+        let mut request = tonic::Request::new(());
+        let mut metadata = HashMap::new();
+        metadata.insert("x-trace-id".to_string(), "abc123".to_string());
+        apply_metadata(&mut request, &metadata);
+        assert_eq!(request.metadata().get("x-trace-id").unwrap().to_str().unwrap(), "abc123");
+    }
+
+    #[test]
+    fn test_apply_metadata_skips_invalid_header_names() {
+        let mut request = tonic::Request::new(());
+        let mut metadata = HashMap::new();
+        metadata.insert("invalid header name!".to_string(), "value".to_string());
+        apply_metadata(&mut request, &metadata);
+        assert!(request.metadata().is_empty());
+    }
+
+    #[test]
+    fn test_grpc_error_display_and_serialize() {
+        let err = GrpcError::NotFound("id1".into());
+        assert_eq!(err.to_string(), "Session not found: id1");
+        assert_eq!(serde_json::to_string(&err).unwrap(), "\"Session not found: id1\"");
+
+        let err = GrpcError::StreamingUnsupported;
+        assert_eq!(err.to_string(), "Streaming methods are not yet supported — only unary RPCs can be invoked");
+    }
+
+    #[test]
+    fn test_grpc_config_and_session_serde_round_trip() {
+        let mut metadata = HashMap::new();
+        metadata.insert("auth".to_string(), "token".to_string());
+        let cfg = GrpcConfig { endpoint: "http://localhost:50051".into(), verify_tls: false, metadata };
+        let json = serde_json::to_string(&cfg).unwrap();
+        let restored: GrpcConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.endpoint, "http://localhost:50051");
+        assert_eq!(restored.metadata.get("auth").map(String::as_str), Some("token"));
+
+        let session = GrpcSession { id: "s1".into(), endpoint: "http://localhost:50051".into() };
+        let restored: GrpcSession = serde_json::from_str(&serde_json::to_string(&session).unwrap()).unwrap();
+        assert_eq!(restored.id, "s1");
+    }
+
+    #[test]
+    fn test_grpc_service_method_and_rpc_result_serde_round_trip() {
+        let svc = GrpcService {
+            name: "Greeter".into(),
+            methods: vec![GrpcMethod {
+                name: "SayHello".into(),
+                client_streaming: false,
+                server_streaming: false,
+                input_type: ".demo.HelloRequest".into(),
+                output_type: ".demo.HelloResponse".into(),
+            }],
+        };
+        let restored: GrpcService = serde_json::from_str(&serde_json::to_string(&svc).unwrap()).unwrap();
+        assert_eq!(restored.methods[0].name, "SayHello");
+
+        let result = GrpcRpcResult { status_code: 0, message: "OK".into(), body: "{}".into(), trailing_metadata: HashMap::new() };
+        let restored: GrpcRpcResult = serde_json::from_str(&serde_json::to_string(&result).unwrap()).unwrap();
+        assert_eq!(restored.status_code, 0);
+    }
+
+    #[test]
+    fn test_grpc_state_new_starts_empty() {
+        let state = GrpcState::new();
+        assert!(state.sessions.lock().unwrap().is_empty());
+    }
 }

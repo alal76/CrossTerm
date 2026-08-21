@@ -427,6 +427,98 @@ mod tests {
     }
 
     #[test]
+    fn test_process_buffer_will_option_replies_do_passively() {
+        let naws = AtomicBool::new(false);
+        // IAC WILL <opt> -> we passively accept by replying IAC DO <opt>
+        let input = &[IAC, WILL, 24u8]; // 24 = terminal type
+        let (data, reply) = process_buffer(input, &naws);
+        assert!(data.is_empty());
+        assert_eq!(reply, &[IAC, DO, 24u8]);
+    }
+
+    #[test]
+    fn test_process_buffer_wont_option_acknowledges_with_dont() {
+        let naws = AtomicBool::new(false);
+        let input = &[IAC, WONT, 1u8];
+        let (data, reply) = process_buffer(input, &naws);
+        assert!(data.is_empty());
+        assert_eq!(reply, &[IAC, DONT, 1u8]);
+    }
+
+    #[test]
+    fn test_process_buffer_dont_option_acknowledges_with_wont() {
+        let naws = AtomicBool::new(false);
+        let input = &[IAC, DONT, 1u8];
+        let (data, reply) = process_buffer(input, &naws);
+        assert!(data.is_empty());
+        assert_eq!(reply, &[IAC, WONT, 1u8]);
+    }
+
+    #[test]
+    fn test_process_buffer_incomplete_iac_at_end_is_dropped() {
+        let naws = AtomicBool::new(false);
+        // Trailing lone IAC with nothing after it — must not panic or read OOB.
+        let input = &[b'h', b'i', IAC];
+        let (data, reply) = process_buffer(input, &naws);
+        assert_eq!(data, b"hi");
+        assert!(reply.is_empty());
+    }
+
+    #[test]
+    fn test_process_buffer_incomplete_will_sequence_at_end_is_dropped() {
+        let naws = AtomicBool::new(false);
+        // IAC WILL with no option byte yet — incomplete, must be skipped safely.
+        let input = &[b'x', IAC, WILL];
+        let (data, reply) = process_buffer(input, &naws);
+        assert_eq!(data, b"x");
+        assert!(reply.is_empty());
+    }
+
+    #[test]
+    fn test_process_buffer_other_iac_command_is_skipped_without_reply() {
+        let naws = AtomicBool::new(false);
+        // IAC NOP (0xF1) carries no option byte; only IAC+cmd are consumed.
+        const NOP: u8 = 0xF1;
+        let input = &[IAC, NOP, b'O', b'K'];
+        let (data, reply) = process_buffer(input, &naws);
+        assert_eq!(data, b"OK");
+        assert!(reply.is_empty());
+    }
+
+    #[test]
+    fn test_process_buffer_subnegotiation_with_no_closing_se_scans_to_buffer_end() {
+        let naws = AtomicBool::new(false);
+        // IAC SB with no matching IAC SE before the buffer ends: the scan
+        // loop only checks byte *pairs* (buf[j], buf[j+1]), so it stops one
+        // byte short of the end — that final trailing byte is then read by
+        // the outer loop as ordinary (non-IAC) data.
+        let input = &[IAC, SB, 24, b'x', b'y', b'z'];
+        let (data, reply) = process_buffer(input, &naws);
+        assert_eq!(data, b"z");
+        assert!(reply.is_empty());
+    }
+
+    #[test]
+    fn test_telnet_error_display_and_serialize() {
+        let err = TelnetError::ConnectionFailed("refused".into());
+        assert_eq!(err.to_string(), "Connection failed: refused");
+        assert_eq!(serde_json::to_string(&err).unwrap(), "\"Connection failed: refused\"");
+
+        let err = TelnetError::NotConnected("id1".into());
+        assert_eq!(err.to_string(), "Not connected: id1");
+
+        let err = TelnetError::WriteFailed("pipe broken".into());
+        assert_eq!(err.to_string(), "Write failed: pipe broken");
+    }
+
+    #[test]
+    fn test_telnet_error_from_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "gone");
+        let err: TelnetError = io_err.into();
+        assert!(matches!(err, TelnetError::Io(_)));
+    }
+
+    #[test]
     fn test_naws_subnegotiation_bytes() {
         // Verify the NAWS message layout
         let cols: u16 = 80;

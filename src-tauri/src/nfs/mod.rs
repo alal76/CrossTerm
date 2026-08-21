@@ -921,4 +921,171 @@ mod tests {
         assert!(nfs_status_message(13).contains("permission denied"));
         assert!(mount_status_message(20).contains("not a directory"));
     }
+
+    #[test]
+    fn nfs_status_message_covers_every_known_code_and_falls_back_to_unknown() {
+        for code in [1u32, 2, 5, 13, 20, 21, 22, 28, 63, 70, 10004] {
+            let msg = nfs_status_message(code);
+            assert!(!msg.contains("unknown"), "code {code} should have a specific message, got {msg}");
+        }
+        assert!(nfs_status_message(999_999).contains("unknown"));
+    }
+
+    #[test]
+    fn mount_status_message_covers_every_known_code_and_falls_back_to_unknown() {
+        for code in [1u32, 2, 5, 13, 20, 22, 63, 10004, 10006] {
+            let msg = mount_status_message(code);
+            assert!(!msg.contains("unknown"), "code {code} should have a specific message, got {msg}");
+        }
+        assert!(mount_status_message(424_242).contains("unknown"));
+    }
+
+    #[test]
+    fn nfs_file_type_from_u32_covers_all_variants_and_default() {
+        assert_eq!(NfsFileType::from(1), NfsFileType::Regular);
+        assert_eq!(NfsFileType::from(2), NfsFileType::Directory);
+        assert_eq!(NfsFileType::from(3), NfsFileType::BlockDevice);
+        assert_eq!(NfsFileType::from(4), NfsFileType::CharDevice);
+        assert_eq!(NfsFileType::from(5), NfsFileType::Symlink);
+        assert_eq!(NfsFileType::from(6), NfsFileType::Socket);
+        assert_eq!(NfsFileType::from(7), NfsFileType::Fifo);
+        assert_eq!(NfsFileType::from(99), NfsFileType::Unknown);
+    }
+
+    #[test]
+    fn nfs_file_type_serializes_snake_case() {
+        assert_eq!(serde_json::to_string(&NfsFileType::BlockDevice).unwrap(), "\"block_device\"");
+        assert_eq!(serde_json::to_string(&NfsFileType::Symlink).unwrap(), "\"symlink\"");
+    }
+
+    #[test]
+    fn xdr_reader_reports_truncated_u32_and_u64() {
+        let mut r = XdrReader::new(&[0u8, 1, 2]);
+        assert!(r.u32().is_err());
+        let mut r = XdrReader::new(&[0u8; 4]);
+        assert!(r.u64().is_err());
+    }
+
+    #[test]
+    fn xdr_reader_reports_truncated_opaque_fixed_and_var() {
+        let mut r = XdrReader::new(&[1u8, 2]);
+        assert!(r.opaque_fixed(5).is_err());
+
+        // length prefix says 10 bytes follow, but only 2 are present.
+        let mut w = XdrWriter::new();
+        w.u32(10);
+        w.opaque_fixed(&[1, 2]);
+        let bytes = w.into_bytes();
+        let mut r = XdrReader::new(&bytes);
+        assert!(r.opaque_var().is_err());
+    }
+
+    #[test]
+    fn xdr_reader_reports_truncated_opaque_padding() {
+        // 1 byte of data (needs 3 bytes of padding) but the buffer ends
+        // right after the data with no room for the pad.
+        let mut w = XdrWriter::new();
+        w.u32(1);
+        w.opaque_fixed(&[0xAB]);
+        let bytes = w.into_bytes();
+        let mut r = XdrReader::new(&bytes);
+        assert!(r.opaque_var().is_err());
+    }
+
+    #[test]
+    fn xdr_reader_string_rejects_invalid_utf8() {
+        let mut w = XdrWriter::new();
+        w.opaque_var(&[0xFF, 0xFE]);
+        let bytes = w.into_bytes();
+        let mut r = XdrReader::new(&bytes);
+        assert!(r.string().is_err());
+    }
+
+    #[test]
+    fn decode_post_op_fh3_handles_both_cases() {
+        let mut absent = XdrWriter::new();
+        absent.u32(0);
+        let bytes = absent.into_bytes();
+        let mut r = XdrReader::new(&bytes);
+        assert!(decode_post_op_fh3(&mut r).unwrap().is_none());
+
+        let mut present = XdrWriter::new();
+        present.u32(1);
+        present.opaque_var(&[9, 9, 9]);
+        let bytes = present.into_bytes();
+        let mut r = XdrReader::new(&bytes);
+        assert_eq!(decode_post_op_fh3(&mut r).unwrap(), Some(vec![9, 9, 9]));
+    }
+
+    #[test]
+    fn decode_lookup3resok_handles_absent_obj_attributes_and_ignores_trailing_bytes() {
+        // decode_lookup3resok only reads fh + obj_attributes (post_op_attr);
+        // any further reply bytes (e.g. dir_attributes) are left unread.
+        let mut w = XdrWriter::new();
+        w.opaque_var(&[7, 7]); // fh
+        w.u32(0); // obj_attributes absent
+        w.u32(1); // trailing bytes that decode_lookup3resok never reads
+        w.opaque_fixed(&synthetic_fattr3(2, 0o755, 999));
+        let bytes = w.into_bytes();
+        let (fh, attr) = decode_lookup3resok(&bytes).unwrap();
+        assert_eq!(fh, vec![7, 7]);
+        assert!(attr.is_none());
+    }
+
+    #[test]
+    fn decode_read3resok_handles_eof_false() {
+        let mut w = XdrWriter::new();
+        w.u32(0); // file_attributes absent
+        w.u32(3); // count
+        w.u32(0); // eof = false
+        w.opaque_var(b"abc");
+        let bytes = w.into_bytes();
+        let data = decode_read3resok(&bytes).unwrap();
+        assert_eq!(data, b"abc");
+    }
+
+    #[test]
+    fn parse_rpc_reply_reports_unrecognized_accept_stat() {
+        let mut w = XdrWriter::new();
+        w.u32(1); // xid
+        w.u32(1); // REPLY
+        w.u32(0); // MSG_ACCEPTED
+        w.u32(0);
+        w.opaque_var(&[]); // verf
+        w.u32(5); // accept_stat: GARBAGE_ARGS (not 0, not 2)
+        let reply = w.into_bytes();
+        let err = parse_rpc_reply(&reply, 1).unwrap_err();
+        assert!(matches!(err, NfsError::Rpc(_)));
+    }
+
+    #[test]
+    fn nfs_config_serde_round_trip() {
+        let cfg = NfsConfig {
+            host: "nfs.local".into(),
+            export_path: "/export/data".into(),
+            uid: Some(1000),
+            gid: Some(1000),
+            mount_port: None,
+            nfs_port: Some(2049),
+        };
+        let json = serde_json::to_string(&cfg).unwrap();
+        let restored: NfsConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.host, "nfs.local");
+        assert_eq!(restored.nfs_port, Some(2049));
+    }
+
+    #[test]
+    fn nfs_entry_serializes_expected_fields() {
+        let entry = NfsEntry { name: "readme.txt".into(), file_type: NfsFileType::Regular, size: 42, mode: 0o644 };
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(json.contains("\"name\":\"readme.txt\""));
+        assert!(json.contains("\"file_type\":\"regular\""));
+        assert!(json.contains("\"size\":42"));
+    }
+
+    #[test]
+    fn nfs_state_new_starts_empty() {
+        let state = NfsState::new();
+        assert!(state.sessions.lock().unwrap().is_empty());
+    }
 }

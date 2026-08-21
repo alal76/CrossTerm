@@ -131,6 +131,14 @@ fn validate_manifest(manifest: &PluginManifest) -> Result<(), PluginError> {
 pub fn plugin_scan(
     state: tauri::State<'_, PluginState>,
 ) -> Result<Vec<PluginInfo>, PluginError> {
+    do_plugin_scan(state.inner())
+}
+
+/// Extracted from the `plugin_scan` Tauri command so it's directly
+/// unit-testable without constructing a `tauri::State` (which requires a
+/// full mock app). Scans `state.plugins_dir` for subdirectories containing a
+/// `manifest.json` and registers any newly-found plugins into `state.plugins`.
+fn do_plugin_scan(state: &PluginState) -> Result<Vec<PluginInfo>, PluginError> {
     let plugins_dir = &state.plugins_dir;
     let mut found = Vec::new();
 
@@ -176,6 +184,10 @@ pub fn plugin_load(
     plugin_id: String,
     state: tauri::State<'_, PluginState>,
 ) -> Result<PluginInfo, PluginError> {
+    do_plugin_load(plugin_id, state.inner())
+}
+
+fn do_plugin_load(plugin_id: String, state: &PluginState) -> Result<PluginInfo, PluginError> {
     let mut plugins = state.plugins.lock().unwrap();
     let info = plugins
         .get_mut(&plugin_id)
@@ -243,6 +255,10 @@ pub fn plugin_unload(
     plugin_id: String,
     state: tauri::State<'_, PluginState>,
 ) -> Result<(), PluginError> {
+    do_plugin_unload(plugin_id, state.inner())
+}
+
+fn do_plugin_unload(plugin_id: String, state: &PluginState) -> Result<(), PluginError> {
     let mut plugins = state.plugins.lock().unwrap();
     let info = plugins
         .get_mut(&plugin_id)
@@ -265,6 +281,10 @@ pub fn plugin_enable(
     plugin_id: String,
     state: tauri::State<'_, PluginState>,
 ) -> Result<(), PluginError> {
+    do_plugin_enable(plugin_id, state.inner())
+}
+
+fn do_plugin_enable(plugin_id: String, state: &PluginState) -> Result<(), PluginError> {
     let mut plugins = state.plugins.lock().unwrap();
     let info = plugins
         .get_mut(&plugin_id)
@@ -278,6 +298,10 @@ pub fn plugin_disable(
     plugin_id: String,
     state: tauri::State<'_, PluginState>,
 ) -> Result<(), PluginError> {
+    do_plugin_disable(plugin_id, state.inner())
+}
+
+fn do_plugin_disable(plugin_id: String, state: &PluginState) -> Result<(), PluginError> {
     let mut plugins = state.plugins.lock().unwrap();
     let info = plugins
         .get_mut(&plugin_id)
@@ -292,6 +316,10 @@ pub fn plugin_get_info(
     plugin_id: String,
     state: tauri::State<'_, PluginState>,
 ) -> Result<PluginInfo, PluginError> {
+    do_plugin_get_info(plugin_id, state.inner())
+}
+
+fn do_plugin_get_info(plugin_id: String, state: &PluginState) -> Result<PluginInfo, PluginError> {
     let plugins = state.plugins.lock().unwrap();
     plugins
         .get(&plugin_id)
@@ -303,6 +331,10 @@ pub fn plugin_get_info(
 pub fn plugin_list(
     state: tauri::State<'_, PluginState>,
 ) -> Result<Vec<PluginInfo>, PluginError> {
+    do_plugin_list(state.inner())
+}
+
+fn do_plugin_list(state: &PluginState) -> Result<Vec<PluginInfo>, PluginError> {
     let plugins = state.plugins.lock().unwrap();
     Ok(plugins.values().cloned().collect())
 }
@@ -312,6 +344,10 @@ pub fn plugin_install(
     path: String,
     state: tauri::State<'_, PluginState>,
 ) -> Result<PluginInfo, PluginError> {
+    do_plugin_install(path, state.inner())
+}
+
+fn do_plugin_install(path: String, state: &PluginState) -> Result<PluginInfo, PluginError> {
     let source = PathBuf::from(&path);
     if !source.exists() {
         return Err(PluginError::LoadFailed(format!(
@@ -388,6 +424,10 @@ pub fn plugin_uninstall(
     plugin_id: String,
     state: tauri::State<'_, PluginState>,
 ) -> Result<(), PluginError> {
+    do_plugin_uninstall(plugin_id, state.inner())
+}
+
+fn do_plugin_uninstall(plugin_id: String, state: &PluginState) -> Result<(), PluginError> {
     let mut plugins = state.plugins.lock().unwrap();
     if plugins.remove(&plugin_id).is_none() {
         return Err(PluginError::NotFound(plugin_id.clone()));
@@ -408,6 +448,10 @@ pub fn plugin_send_event(
     _event: PluginEvent,
     state: tauri::State<'_, PluginState>,
 ) -> Result<(), PluginError> {
+    do_plugin_send_event(plugin_id, state.inner())
+}
+
+fn do_plugin_send_event(plugin_id: String, state: &PluginState) -> Result<(), PluginError> {
     let plugins = state.plugins.lock().unwrap();
     let info = plugins
         .get(&plugin_id)
@@ -437,6 +481,14 @@ pub fn plugin_register_hook(
     hook: PluginHook,
     state: tauri::State<'_, PluginState>,
 ) -> Result<(), PluginError> {
+    do_plugin_register_hook(plugin_id, hook, state.inner())
+}
+
+fn do_plugin_register_hook(
+    plugin_id: String,
+    hook: PluginHook,
+    state: &PluginState,
+) -> Result<(), PluginError> {
     let plugins = state.plugins.lock().unwrap();
     if !plugins.contains_key(&plugin_id) {
         return Err(PluginError::NotFound(plugin_id));
@@ -457,6 +509,14 @@ pub fn plugin_unregister_hook(
     hook: PluginHook,
     state: tauri::State<'_, PluginState>,
 ) -> Result<(), PluginError> {
+    do_plugin_unregister_hook(plugin_id, hook, state.inner())
+}
+
+fn do_plugin_unregister_hook(
+    plugin_id: String,
+    hook: PluginHook,
+    state: &PluginState,
+) -> Result<(), PluginError> {
     let mut hooks = state.hooks.lock().unwrap();
     let hook_str = serde_json::to_string(&hook).unwrap_or_default();
     if let Some(plugin_hooks) = hooks.get_mut(&plugin_id) {
@@ -471,6 +531,14 @@ pub fn plugin_kv_get(
     key: String,
     state: tauri::State<'_, PluginState>,
 ) -> Result<Option<serde_json::Value>, PluginError> {
+    do_plugin_kv_get(plugin_id, key, state.inner())
+}
+
+fn do_plugin_kv_get(
+    plugin_id: String,
+    key: String,
+    state: &PluginState,
+) -> Result<Option<serde_json::Value>, PluginError> {
     let kv = state.kv_store.lock().unwrap();
     Ok(kv.get(&plugin_id).and_then(|store| store.get(&key).cloned()))
 }
@@ -481,6 +549,15 @@ pub fn plugin_kv_set(
     key: String,
     value: serde_json::Value,
     state: tauri::State<'_, PluginState>,
+) -> Result<(), PluginError> {
+    do_plugin_kv_set(plugin_id, key, value, state.inner())
+}
+
+fn do_plugin_kv_set(
+    plugin_id: String,
+    key: String,
+    value: serde_json::Value,
+    state: &PluginState,
 ) -> Result<(), PluginError> {
     let mut kv = state.kv_store.lock().unwrap();
     kv.entry(plugin_id)
@@ -495,6 +572,14 @@ pub fn plugin_kv_delete(
     key: String,
     state: tauri::State<'_, PluginState>,
 ) -> Result<(), PluginError> {
+    do_plugin_kv_delete(plugin_id, key, state.inner())
+}
+
+fn do_plugin_kv_delete(
+    plugin_id: String,
+    key: String,
+    state: &PluginState,
+) -> Result<(), PluginError> {
     let mut kv = state.kv_store.lock().unwrap();
     if let Some(store) = kv.get_mut(&plugin_id) {
         store.remove(&key);
@@ -507,6 +592,14 @@ pub async fn plugin_http_request(
     plugin_id: String,
     request: PluginHttpRequest,
     state: tauri::State<'_, PluginState>,
+) -> Result<PluginHttpResponse, PluginError> {
+    do_plugin_http_request(plugin_id, request, state.inner()).await
+}
+
+async fn do_plugin_http_request(
+    plugin_id: String,
+    request: PluginHttpRequest,
+    state: &PluginState,
 ) -> Result<PluginHttpResponse, PluginError> {
     // Verify plugin exists and has network permission
     let plugins = state.plugins.lock().unwrap();
@@ -548,6 +641,13 @@ pub fn plugin_get_sandbox_config(
     plugin_id: String,
     state: tauri::State<'_, PluginState>,
 ) -> Result<PluginSandboxConfig, PluginError> {
+    do_plugin_get_sandbox_config(plugin_id, state.inner())
+}
+
+fn do_plugin_get_sandbox_config(
+    plugin_id: String,
+    state: &PluginState,
+) -> Result<PluginSandboxConfig, PluginError> {
     let configs = state.sandbox_configs.lock().unwrap();
     configs
         .get(&plugin_id)
@@ -564,6 +664,14 @@ pub fn plugin_set_sandbox_config(
     config: PluginSandboxConfig,
     state: tauri::State<'_, PluginState>,
 ) -> Result<(), PluginError> {
+    do_plugin_set_sandbox_config(plugin_id, config, state.inner())
+}
+
+fn do_plugin_set_sandbox_config(
+    plugin_id: String,
+    config: PluginSandboxConfig,
+    state: &PluginState,
+) -> Result<(), PluginError> {
     let mut configs = state.sandbox_configs.lock().unwrap();
     configs.insert(plugin_id, config);
     Ok(())
@@ -574,6 +682,10 @@ pub fn plugin_load_wasm(
     path: String,
     state: tauri::State<'_, PluginState>,
 ) -> Result<PluginInfo, PluginError> {
+    do_plugin_load_wasm(path, state.inner())
+}
+
+fn do_plugin_load_wasm(path: String, state: &PluginState) -> Result<PluginInfo, PluginError> {
     let source = PathBuf::from(&path);
     if !source.exists() {
         return Err(PluginError::LoadFailed(format!(

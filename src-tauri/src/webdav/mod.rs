@@ -329,4 +329,71 @@ mod tests {
         assert!(build_client(true).is_ok());
         assert!(build_client(false).is_ok());
     }
+
+    #[test]
+    fn parse_propfind_defaults_content_length_to_none_on_unparseable_value() {
+        let xml = r#"<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>/f.bin</D:href>
+    <D:propstat><D:prop><D:getcontentlength>not-a-number</D:getcontentlength></D:prop></D:propstat>
+  </D:response>
+</D:multistatus>"#;
+        let entries = parse_propfind(xml, "http://example.com");
+        assert_eq!(entries[0].content_length, None);
+    }
+
+    #[test]
+    fn parse_propfind_handles_multiple_responses_in_one_document() {
+        let xml = r#"<D:multistatus xmlns:D="DAV:">
+  <D:response><D:href>/a/</D:href></D:response>
+  <D:response><D:href>/b/</D:href></D:response>
+  <D:response><D:href>/c/</D:href></D:response>
+</D:multistatus>"#;
+        let entries = parse_propfind(xml, "http://example.com");
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn webdav_error_display_and_serialize() {
+        let err = WebDavError::NotFound("sess1".into());
+        assert_eq!(err.to_string(), "Session not found: sess1");
+        assert_eq!(serde_json::to_string(&err).unwrap(), "\"Session not found: sess1\"");
+
+        let err = WebDavError::Http(404, "Not Found".into());
+        assert_eq!(err.to_string(), "HTTP 404: Not Found");
+
+        let err = WebDavError::AuthFailed;
+        assert_eq!(err.to_string(), "Authentication failed");
+    }
+
+    #[test]
+    fn webdav_entry_type_serializes_snake_case() {
+        assert_eq!(serde_json::to_string(&WebDavEntryType::File).unwrap(), "\"file\"");
+        assert_eq!(serde_json::to_string(&WebDavEntryType::Collection).unwrap(), "\"collection\"");
+    }
+
+    #[test]
+    fn webdav_config_and_session_serde_round_trip() {
+        let cfg = WebDavConfig {
+            url: "https://dav.example.com".into(),
+            username: Some("bob".into()),
+            password: Some("hunter2".into()),
+            verify_tls: true,
+        };
+        let json = serde_json::to_string(&cfg).unwrap();
+        let restored: WebDavConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.url, "https://dav.example.com");
+        assert!(restored.verify_tls);
+
+        let session = WebDavSession { id: "s1".into(), url: "https://dav.example.com".into() };
+        let restored: WebDavSession = serde_json::from_str(&serde_json::to_string(&session).unwrap()).unwrap();
+        assert_eq!(restored.id, "s1");
+    }
+
+    #[test]
+    fn webdav_state_new_starts_empty() {
+        let state = WebDavState::new();
+        assert!(state.sessions.lock().unwrap().is_empty());
+    }
 }

@@ -384,4 +384,84 @@ mod tests {
         let path = known_hosts_file_path();
         assert!(path.ends_with("CrossTerm/known_hosts"));
     }
+
+    #[test]
+    fn test_build_hello_joins_multiple_capabilities_with_no_separator_needed() {
+        let hello = build_hello(&[
+            "urn:ietf:params:netconf:base:1.1".to_string(),
+            "urn:ietf:params:netconf:capability:startup:1.0".to_string(),
+        ]);
+        assert!(hello.contains("<capability>urn:ietf:params:netconf:base:1.1</capability><capability>urn:ietf:params:netconf:capability:startup:1.0</capability>"));
+        assert!(!hello.contains("urn:ietf:params:netconf:base:1.0</capability>")); // default cap suppressed when caps given
+    }
+
+    #[test]
+    fn test_extract_session_id_ignores_malformed_value() {
+        assert_eq!(extract_session_id("<hello><session-id>not-a-number</session-id></hello>]]>]]>"), 0);
+    }
+
+    #[test]
+    fn test_extract_capabilities_returns_empty_when_none_present() {
+        assert!(extract_capabilities("<hello><capabilities></capabilities></hello>]]>]]>").is_empty());
+    }
+
+    #[test]
+    fn test_netconf_error_display_and_serialize() {
+        let err = NetconfError::NotFound("sess1".into());
+        assert_eq!(err.to_string(), "Session not found: sess1");
+        assert_eq!(serde_json::to_string(&err).unwrap(), "\"Session not found: sess1\"");
+
+        let err = NetconfError::HostKeyChanged("host:830".into());
+        assert!(err.to_string().contains("Host key for host:830 has changed"));
+
+        let err = NetconfError::NoCredentials;
+        assert_eq!(err.to_string(), "No credentials supplied — provide a password or a private key");
+    }
+
+    #[test]
+    fn test_netconf_error_from_russh_error() {
+        let err: NetconfError = russh::Error::CouldNotReadKey.into();
+        assert!(matches!(err, NetconfError::Ssh(msg) if msg.contains("Could not read key")));
+    }
+
+    #[test]
+    fn test_netconf_config_and_session_serde_round_trip() {
+        let cfg = NetconfConfig {
+            host: "router1".into(),
+            port: 830,
+            username: "admin".into(),
+            password: Some("secret".into()),
+            private_key: None,
+            private_key_passphrase: None,
+            capabilities: vec!["urn:ietf:params:netconf:base:1.1".into()],
+        };
+        let json = serde_json::to_string(&cfg).unwrap();
+        let restored: NetconfConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.host, "router1");
+        assert_eq!(restored.port, 830);
+
+        let session = NetconfSession {
+            id: "s1".into(),
+            host: "router1".into(),
+            server_capabilities: vec!["urn:ietf:params:netconf:base:1.0".into()],
+            session_id: 7,
+        };
+        let restored: NetconfSession = serde_json::from_str(&serde_json::to_string(&session).unwrap()).unwrap();
+        assert_eq!(restored.session_id, 7);
+    }
+
+    #[test]
+    fn test_netconf_rpc_result_serde_round_trip() {
+        let result = NetconfRpcResult { message_id: "m1".into(), xml: "<ok/>".into(), ok: true, error: None };
+        let json = serde_json::to_string(&result).unwrap();
+        let restored: NetconfRpcResult = serde_json::from_str(&json).unwrap();
+        assert!(restored.ok);
+        assert_eq!(restored.xml, "<ok/>");
+    }
+
+    #[test]
+    fn test_netconf_state_new_starts_empty() {
+        let state = NetconfState::new();
+        assert!(state.sessions.lock().unwrap().is_empty());
+    }
 }

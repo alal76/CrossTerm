@@ -174,6 +174,55 @@ fn timestamp_to_iso(secs: Option<u32>) -> Option<String> {
     })
 }
 
+/// Decides the sync action for a file present in both the local and remote
+/// listings, based purely on size comparison (used by `sftp_sync_compare`).
+fn compute_sync_action(local_size: u64, remote_size: u64) -> SyncAction {
+    if local_size != remote_size {
+        SyncAction::Conflict
+    } else {
+        SyncAction::Skip
+    }
+}
+
+/// Strips the SCP `C<mode> <size> <name>\n` response header, returning just
+/// the file data that follows (used by `sftp_scp_download`). Mirrors the
+/// original inline logic exactly: if no newline is found, `header_end`
+/// falls back to 0, so a malformed/headerless response still round-trips
+/// through the same `header_end + 1 < len` bounds check as the normal case.
+fn scp_extract_file_data(output: &[u8]) -> &[u8] {
+    let header_end = output.iter().position(|&b| b == b'\n').unwrap_or(0);
+    if header_end + 1 < output.len() {
+        &output[header_end + 1..]
+    } else {
+        output
+    }
+}
+
+/// Renders preview `data` for `sftp_preview` based on the detected content
+/// type: UTF-8 text for text-ish types, base64 for images/PDF, and a
+/// space-separated hex dump (wrapped every 32 bytes) for everything else.
+fn build_preview_data(content_type: &str, data_slice: &[u8]) -> String {
+    if content_type.starts_with("text/")
+        || content_type == "application/json"
+        || content_type == "text/yaml"
+    {
+        String::from_utf8_lossy(data_slice).to_string()
+    } else if content_type.starts_with("image/") || content_type == "application/pdf" {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD.encode(data_slice)
+    } else {
+        data_slice
+            .iter()
+            .take(4096)
+            .map(|b| format!("{:02x}", b))
+            .collect::<Vec<_>>()
+            .chunks(32)
+            .map(|chunk| chunk.join(" "))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
 // ── Tauri Commands ──────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -678,12 +727,7 @@ pub async fn sftp_scp_download(
     }
 
     // Parse SCP response header: skip the C<mode> <size> <name>\n prefix
-    let header_end = output.iter().position(|&b| b == b'\n').unwrap_or(0);
-    let file_data = if header_end + 1 < output.len() {
-        &output[header_end + 1..]
-    } else {
-        &output[..]
-    };
+    let file_data = scp_extract_file_data(&output);
 
     tokio::fs::write(&local_path, file_data).await?;
 
@@ -940,28 +984,7 @@ pub async fn sftp_preview(
     };
 
     let content_type = detect_content_type(&path);
-    let data = if content_type.starts_with("text/")
-        || content_type == "application/json"
-        || content_type == "text/yaml"
-    {
-        // Return as UTF-8 text
-        String::from_utf8_lossy(data_slice).to_string()
-    } else if content_type.starts_with("image/") || content_type == "application/pdf" {
-        // Return as base64
-        use base64::Engine;
-        base64::engine::general_purpose::STANDARD.encode(data_slice)
-    } else {
-        // Hex preview for binary files
-        data_slice
-            .iter()
-            .take(4096) // Max 4KB hex preview
-            .map(|b| format!("{:02x}", b))
-            .collect::<Vec<_>>()
-            .chunks(32)
-            .map(|chunk| chunk.join(" "))
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
+    let data = build_preview_data(content_type, data_slice);
 
     Ok(FilePreview {
         path,
@@ -1031,12 +1054,7 @@ pub async fn sftp_sync_compare(
     // Files in both local and remote
     for (name, (local_size, local_mod)) in &local_map {
         if let Some((remote_size, remote_mod)) = remote_map.get(name) {
-            let action = if local_size != remote_size {
-                // Different sizes → conflict
-                SyncAction::Conflict
-            } else {
-                SyncAction::Skip
-            };
+            let action = compute_sync_action(*local_size, *remote_size);
             entries.push(SyncEntry {
                 path: name.clone(),
                 local_modified: local_mod.clone(),
@@ -1813,5 +1831,222 @@ mod tests {
         let _ = handle
             .disconnect(Disconnect::ByApplication, "", "en")
             .await;
+    }
+
+    // ── detect_content_type ───────────────────────────────────────────
+
+    #[test]
+    fn test_detect_content_type_text_extensions() {
+        for ext in ["txt", "log", "md", "csv", "conf", "cfg", "ini"] {
+            assert_eq!(detect_content_type(&format!("file.{ext}")), "text/plain", "ext={ext}");
+        }
+    }
+
+    #[test]
+    fn test_detect_content_type_code_extensions_map_to_text_plain() {
+        for ext in ["py", "rs", "go", "rb", "sh", "bash", "zsh"] {
+            assert_eq!(detect_content_type(&format!("script.{ext}")), "text/plain", "ext={ext}");
+        }
+    }
+
+    #[test]
+    fn test_detect_content_type_structured_formats() {
+        assert_eq!(detect_content_type("data.json"), "application/json");
+        assert_eq!(detect_content_type("data.yaml"), "text/yaml");
+        assert_eq!(detect_content_type("data.yml"), "text/yaml");
+        assert_eq!(detect_content_type("data.xml"), "text/xml");
+    }
+
+    #[test]
+    fn test_detect_content_type_web_formats() {
+        assert_eq!(detect_content_type("index.html"), "text/html");
+        assert_eq!(detect_content_type("index.htm"), "text/html");
+        assert_eq!(detect_content_type("style.css"), "text/css");
+        assert_eq!(detect_content_type("app.js"), "text/javascript");
+        assert_eq!(detect_content_type("app.ts"), "text/javascript");
+    }
+
+    #[test]
+    fn test_detect_content_type_images_and_pdf() {
+        assert_eq!(detect_content_type("photo.png"), "image/png");
+        assert_eq!(detect_content_type("photo.jpg"), "image/jpeg");
+        assert_eq!(detect_content_type("photo.jpeg"), "image/jpeg");
+        assert_eq!(detect_content_type("anim.gif"), "image/gif");
+        assert_eq!(detect_content_type("icon.svg"), "image/svg+xml");
+        assert_eq!(detect_content_type("photo.webp"), "image/webp");
+        assert_eq!(detect_content_type("doc.pdf"), "application/pdf");
+    }
+
+    #[test]
+    fn test_detect_content_type_unknown_extension_is_octet_stream() {
+        assert_eq!(detect_content_type("archive.tar.gz"), "application/octet-stream");
+        assert_eq!(detect_content_type("noextension"), "application/octet-stream");
+        assert_eq!(detect_content_type(""), "application/octet-stream");
+    }
+
+    #[test]
+    fn test_detect_content_type_is_case_insensitive() {
+        assert_eq!(detect_content_type("FILE.TXT"), "text/plain");
+        assert_eq!(detect_content_type("Image.PNG"), "image/png");
+    }
+
+    #[test]
+    fn test_detect_content_type_uses_last_extension_after_dot() {
+        // rsplit('.').next() means it uses the *last* segment after a dot.
+        assert_eq!(detect_content_type("archive.tar.gz"), "application/octet-stream");
+        assert_eq!(detect_content_type("my.file.json"), "application/json");
+    }
+
+    // ── format_permissions / timestamp_to_iso ─────────────────────────
+
+    #[test]
+    fn test_format_permissions_some_value_formats_octal() {
+        let mut attrs = russh_sftp::protocol::FileAttributes::default();
+        attrs.permissions = Some(0o644);
+        assert_eq!(format_permissions(&attrs), Some("644".to_string()));
+    }
+
+    #[test]
+    fn test_format_permissions_none_when_absent() {
+        let attrs = russh_sftp::protocol::FileAttributes::default();
+        assert_eq!(format_permissions(&attrs), None);
+    }
+
+    #[test]
+    fn test_format_permissions_directory_bits() {
+        let mut attrs = russh_sftp::protocol::FileAttributes::default();
+        // Directory with rwxr-xr-x, plus the S_IFDIR bits often present on the wire.
+        attrs.permissions = Some(0o40755);
+        assert_eq!(format_permissions(&attrs), Some("40755".to_string()));
+    }
+
+    #[test]
+    fn test_timestamp_to_iso_none_input() {
+        assert_eq!(timestamp_to_iso(None), None);
+    }
+
+    #[test]
+    fn test_timestamp_to_iso_valid_epoch() {
+        // 2021-01-01T00:00:00Z
+        let result = timestamp_to_iso(Some(1_609_459_200));
+        assert!(result.is_some());
+        assert!(result.unwrap().starts_with("2021-01-01"));
+    }
+
+    #[test]
+    fn test_timestamp_to_iso_zero_epoch() {
+        let result = timestamp_to_iso(Some(0));
+        assert!(result.unwrap().starts_with("1970-01-01"));
+    }
+
+    // ── compute_sync_action ─────────────────────────────────────────────
+
+    #[test]
+    fn test_compute_sync_action_equal_sizes_skips() {
+        assert!(matches!(compute_sync_action(1024, 1024), SyncAction::Skip));
+    }
+
+    #[test]
+    fn test_compute_sync_action_different_sizes_conflict() {
+        assert!(matches!(compute_sync_action(1024, 2048), SyncAction::Conflict));
+        assert!(matches!(compute_sync_action(2048, 1024), SyncAction::Conflict));
+    }
+
+    #[test]
+    fn test_compute_sync_action_both_zero_skips() {
+        assert!(matches!(compute_sync_action(0, 0), SyncAction::Skip));
+    }
+
+    // ── scp_extract_file_data ────────────────────────────────────────────
+
+    #[test]
+    fn test_scp_extract_file_data_strips_header_line() {
+        let output = b"C0644 5 test.txt\nhello";
+        assert_eq!(scp_extract_file_data(output), b"hello");
+    }
+
+    #[test]
+    fn test_scp_extract_file_data_empty_body_after_header() {
+        let output = b"C0644 0 empty.txt\n";
+        // header_end + 1 == len, so the `<` bound fails and the full buffer
+        // (header included) is returned — matches the original inline logic.
+        assert_eq!(scp_extract_file_data(output), output);
+    }
+
+    #[test]
+    fn test_scp_extract_file_data_no_newline_present() {
+        // No '\n' at all: header_end defaults to 0. If len > 1, 0+1 < len
+        // is true, so this — like the original code — drops the first byte.
+        let output = b"nonewlinehere";
+        assert_eq!(scp_extract_file_data(output), &output[1..]);
+    }
+
+    #[test]
+    fn test_scp_extract_file_data_single_byte_no_newline() {
+        let output = b"x";
+        // 0 + 1 < 1 is false, so the single byte is returned unchanged.
+        assert_eq!(scp_extract_file_data(output), b"x");
+    }
+
+    // ── build_preview_data ───────────────────────────────────────────────
+
+    #[test]
+    fn test_build_preview_data_text_plain_returns_utf8() {
+        let data = build_preview_data("text/plain", b"hello world");
+        assert_eq!(data, "hello world");
+    }
+
+    #[test]
+    fn test_build_preview_data_json_returns_utf8() {
+        let data = build_preview_data("application/json", b"{\"a\":1}");
+        assert_eq!(data, "{\"a\":1}");
+    }
+
+    #[test]
+    fn test_build_preview_data_yaml_returns_utf8() {
+        let data = build_preview_data("text/yaml", b"a: 1");
+        assert_eq!(data, "a: 1");
+    }
+
+    #[test]
+    fn test_build_preview_data_image_returns_base64() {
+        let data = build_preview_data("image/png", b"\x89PNG\r\n");
+        use base64::Engine;
+        let expected = base64::engine::general_purpose::STANDARD.encode(b"\x89PNG\r\n");
+        assert_eq!(data, expected);
+    }
+
+    #[test]
+    fn test_build_preview_data_pdf_returns_base64() {
+        let data = build_preview_data("application/pdf", b"%PDF-1.4");
+        use base64::Engine;
+        let expected = base64::engine::general_purpose::STANDARD.encode(b"%PDF-1.4");
+        assert_eq!(data, expected);
+    }
+
+    #[test]
+    fn test_build_preview_data_binary_returns_hex_dump() {
+        let data = build_preview_data("application/octet-stream", &[0x00, 0xFF, 0x10]);
+        assert_eq!(data, "00 ff 10");
+    }
+
+    #[test]
+    fn test_build_preview_data_hex_dump_wraps_every_32_bytes() {
+        let bytes: Vec<u8> = (0u8..40).collect();
+        let data = build_preview_data("application/octet-stream", &bytes);
+        let lines: Vec<&str> = data.split('\n').collect();
+        assert_eq!(lines.len(), 2, "40 bytes should wrap into 2 lines of <=32 hex pairs");
+        assert_eq!(lines[0].split(' ').count(), 32);
+        assert_eq!(lines[1].split(' ').count(), 8);
+    }
+
+    #[test]
+    fn test_build_preview_data_hex_dump_truncates_to_4096_bytes() {
+        let bytes = vec![0xABu8; 10_000];
+        let data = build_preview_data("application/octet-stream", &bytes);
+        // Each byte -> 2 hex chars; 4096 bytes worth of hex chars plus one
+        // space per 32-byte group boundary minus the trailing newline math.
+        let hex_char_count: usize = data.chars().filter(|c| c.is_ascii_hexdigit()).count();
+        assert_eq!(hex_char_count, 4096 * 2, "should cap the hex preview at 4096 source bytes");
     }
 }

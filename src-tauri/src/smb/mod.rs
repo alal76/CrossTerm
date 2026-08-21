@@ -384,4 +384,75 @@ mod tests {
         let args = build_auth_args(&cfg);
         assert_eq!(args, vec!["-p", "1445"]);
     }
+
+    #[test]
+    fn test_build_auth_args_empty_when_no_credentials_and_default_port() {
+        let cfg = SmbConfig {
+            host: "h".to_string(),
+            port: 445,
+            username: None,
+            password: None,
+            domain: None,
+            share: "s".to_string(),
+        };
+        assert!(build_auth_args(&cfg).is_empty());
+    }
+
+    #[test]
+    fn test_parse_ls_output_empty_input_yields_no_entries() {
+        assert!(parse_ls_output("").is_empty());
+    }
+
+    #[test]
+    fn test_parse_ls_output_skips_domain_banner_line() {
+        let output = "  Domain=[WORKGROUP] OS=[Unix] Server=[Samba]\n  file.txt                            A       10  Mon Jan  1 00:00:00 2024\n";
+        let entries = parse_ls_output(output);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "file.txt");
+    }
+
+    #[test]
+    fn test_smb_error_display_and_serialize() {
+        let err = SmbError::NotFound("sess1".into());
+        assert_eq!(err.to_string(), "Session not found: sess1");
+        assert_eq!(serde_json::to_string(&err).unwrap(), "\"Session not found: sess1\"");
+
+        let err = SmbError::BinaryNotFound;
+        assert_eq!(err.to_string(), "smbclient binary not found — install samba-client");
+
+        let err = SmbError::AuthFailed;
+        assert_eq!(err.to_string(), "Authentication failed");
+    }
+
+    #[test]
+    fn test_smb_entry_type_serde_snake_case() {
+        assert_eq!(serde_json::to_string(&SmbEntryType::File).unwrap(), "\"file\"");
+        assert_eq!(serde_json::to_string(&SmbEntryType::Directory).unwrap(), "\"directory\"");
+    }
+
+    #[test]
+    fn test_smb_config_and_session_serde_round_trip() {
+        let cfg = SmbConfig {
+            host: "10.0.0.5".into(),
+            port: 445,
+            username: Some("bob".into()),
+            password: Some("secret".into()),
+            domain: None,
+            share: "data".into(),
+        };
+        let json = serde_json::to_string(&cfg).unwrap();
+        let restored: SmbConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.host, "10.0.0.5");
+        assert_eq!(restored.share, "data");
+
+        let session = SmbSession { id: "s1".into(), host: "10.0.0.5".into(), share: "data".into() };
+        let restored: SmbSession = serde_json::from_str(&serde_json::to_string(&session).unwrap()).unwrap();
+        assert_eq!(restored.id, "s1");
+    }
+
+    #[test]
+    fn test_smb_state_new_starts_empty() {
+        let state = SmbState::new();
+        assert!(state.sessions.lock().unwrap().is_empty());
+    }
 }

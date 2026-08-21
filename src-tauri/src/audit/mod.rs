@@ -1092,4 +1092,281 @@ mod tests {
         assert_eq!(report.top_accessed_hosts[2], ("host-c".to_string(), 1));
         assert_eq!(report.framework, "HIPAA");
     }
+
+    // ── extract_host ──────────────────────────────────────────────
+
+    #[test]
+    fn test_extract_host_host_prefix() {
+        assert_eq!(
+            extract_host("host:example.com extra info"),
+            Some("example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_host_connected_to_prefix() {
+        assert_eq!(
+            extract_host("Connected to server1.local via ssh"),
+            Some("server1.local".to_string())
+        );
+        // case-insensitive
+        assert_eq!(
+            extract_host("CONNECTED TO 10.0.0.5"),
+            Some("10.0.0.5".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_host_no_match() {
+        assert_eq!(extract_host("unlocked vault"), None);
+        assert_eq!(extract_host(""), None);
+    }
+
+    // ── local-hour helpers ───────────────────────────────────────────
+    // Build a DateTime<Utc> whose local-timezone hour is `hour`, so the
+    // tests are independent of the CI machine's timezone.
+
+    fn utc_at_local_hour(hour: u32) -> DateTime<Utc> {
+        use chrono::TimeZone;
+        let today = chrono::Local::now().date_naive();
+        let naive_time = chrono::NaiveTime::from_hms_opt(hour, 0, 0).unwrap();
+        let naive_dt = today.and_time(naive_time);
+        chrono::Local
+            .from_local_datetime(&naive_dt)
+            .single()
+            .unwrap_or_else(|| chrono::Local.from_utc_datetime(&naive_dt))
+            .with_timezone(&Utc)
+    }
+
+    #[test]
+    fn test_is_unusual_hour() {
+        assert!(is_unusual_hour(&utc_at_local_hour(0)));
+        assert!(is_unusual_hour(&utc_at_local_hour(3)));
+        assert!(!is_unusual_hour(&utc_at_local_hour(5)));
+        assert!(!is_unusual_hour(&utc_at_local_hour(14)));
+    }
+
+    #[test]
+    fn test_is_after_hours() {
+        assert!(is_after_hours(&utc_at_local_hour(7)));
+        assert!(is_after_hours(&utc_at_local_hour(19)));
+        assert!(is_after_hours(&utc_at_local_hour(23)));
+        assert!(!is_after_hours(&utc_at_local_hour(8)));
+        assert!(!is_after_hours(&utc_at_local_hour(12)));
+        assert!(!is_after_hours(&utc_at_local_hour(17)));
+    }
+
+    // ── is_auth_failed ───────────────────────────────────────────────
+
+    #[test]
+    fn test_is_auth_failed_positive() {
+        assert!(is_auth_failed(&make_event(AuditEventType::SessionConnect, "Auth failed for user bob")));
+        assert!(is_auth_failed(&make_event(AuditEventType::SessionConnect, "Authentication failed")));
+        assert!(is_auth_failed(&make_event(AuditEventType::SessionConnect, "login failed: bad password")));
+        assert!(is_auth_failed(&make_event(AuditEventType::SessionConnect, "Permission denied (publickey)")));
+        assert!(is_auth_failed(&make_event(AuditEventType::SessionConnect, "Invalid credentials supplied")));
+    }
+
+    #[test]
+    fn test_is_auth_failed_negative() {
+        assert!(!is_auth_failed(&make_event(AuditEventType::SessionConnect, "connected to host successfully")));
+        assert!(!is_auth_failed(&make_event(AuditEventType::VaultUnlock, "unlocked vault")));
+    }
+
+    // ── format_syslog_message ─────────────────────────────────────────
+
+    #[test]
+    fn test_format_syslog_message_contains_fields() {
+        let event = make_event(AuditEventType::VaultUnlock, "unlocked \"main\" vault");
+        let config = SyslogConfig {
+            host: "syslog.example.com".to_string(),
+            port: 514,
+            protocol: SyslogProtocol::Udp,
+            facility: 1,
+            app_name: "crossterm-test".to_string(),
+        };
+        let msg = format_syslog_message(&event, &config);
+        // PRI = facility*8 + severity = 1*8+6 = 14
+        assert!(msg.starts_with("<14>1 "));
+        assert!(msg.contains("crossterm-test"));
+        assert!(msg.contains("vault_unlock"));
+        // internal quotes must be escaped
+        assert!(msg.contains("unlocked \\\"main\\\" vault"));
+    }
+
+    #[test]
+    fn test_format_syslog_message_escapes_brackets_and_backslash() {
+        let event = make_event(AuditEventType::SettingsUpdate, "path C:\\temp\\[test]");
+        let config = SyslogConfig {
+            host: "127.0.0.1".to_string(),
+            port: 514,
+            protocol: SyslogProtocol::Tcp,
+            facility: 16,
+            app_name: "crossterm".to_string(),
+        };
+        let msg = format_syslog_message(&event, &config);
+        // Per RFC 5424 SD-VALUE escaping, only `]`, `"`, and `\` need
+        // escaping — `[` is unambiguous and stays bare.
+        assert!(msg.contains("C:\\\\temp\\\\[test\\]"));
+    }
+
+    // ── detect_anomalies ───────────────────────────────────────────────
+
+    fn make_event_at(event_type: AuditEventType, details: &str, ts: DateTime<Utc>) -> AuditEvent {
+        AuditEvent {
+            timestamp: ts,
+            event_type,
+            details: details.to_string(),
+        }
+    }
+
+    #[test]
+    fn test_detect_anomalies_empty() {
+        assert!(detect_anomalies(&[]).is_empty());
+    }
+
+    #[test]
+    fn test_detect_anomalies_unusual_hour() {
+        let events = vec![make_event_at(
+            AuditEventType::SessionConnect,
+            "connected to host:example.com",
+            utc_at_local_hour(2),
+        )];
+        let alerts = detect_anomalies(&events);
+        assert!(alerts.iter().any(|a| a.alert_type == AnomalyType::UnusualHour));
+    }
+
+    #[test]
+    fn test_detect_anomalies_rapid_failed_auth() {
+        let base = Utc::now();
+        let events: Vec<AuditEvent> = (0..5)
+            .map(|i| {
+                make_event_at(
+                    AuditEventType::SessionConnect,
+                    "auth failed: bad password",
+                    base + chrono::Duration::seconds(i * 10),
+                )
+            })
+            .collect();
+        let alerts = detect_anomalies(&events);
+        let rapid = alerts
+            .iter()
+            .find(|a| a.alert_type == AnomalyType::RapidFailedAuth)
+            .expect("expected a RapidFailedAuth alert");
+        assert_eq!(rapid.severity, AnomalySeverity::Critical);
+        assert_eq!(rapid.related_entry_ids.len(), 5);
+    }
+
+    #[test]
+    fn test_detect_anomalies_rapid_failed_auth_not_triggered_below_threshold() {
+        let base = Utc::now();
+        let events: Vec<AuditEvent> = (0..4)
+            .map(|i| {
+                make_event_at(
+                    AuditEventType::SessionConnect,
+                    "auth failed",
+                    base + chrono::Duration::seconds(i * 10),
+                )
+            })
+            .collect();
+        let alerts = detect_anomalies(&events);
+        assert!(!alerts.iter().any(|a| a.alert_type == AnomalyType::RapidFailedAuth));
+    }
+
+    #[test]
+    fn test_detect_anomalies_bulk_session_creation() {
+        let base = Utc::now();
+        let events: Vec<AuditEvent> = (0..10)
+            .map(|i| {
+                make_event_at(
+                    AuditEventType::SessionCreate,
+                    "session created",
+                    base + chrono::Duration::seconds(i),
+                )
+            })
+            .collect();
+        let alerts = detect_anomalies(&events);
+        assert!(alerts
+            .iter()
+            .any(|a| a.alert_type == AnomalyType::BulkSessionCreation));
+    }
+
+    #[test]
+    fn test_detect_anomalies_new_host_first_connect() {
+        let base = Utc::now();
+        let events = vec![
+            make_event_at(AuditEventType::SessionConnect, "connected to host:alpha", base),
+            make_event_at(
+                AuditEventType::SessionConnect,
+                "connected to host:alpha",
+                base + chrono::Duration::seconds(5),
+            ),
+            make_event_at(
+                AuditEventType::SessionConnect,
+                "connected to host:beta",
+                base + chrono::Duration::seconds(10),
+            ),
+        ];
+        let alerts = detect_anomalies(&events);
+        let new_host_alerts: Vec<_> = alerts
+            .iter()
+            .filter(|a| a.alert_type == AnomalyType::NewHostFirstConnect)
+            .collect();
+        // alpha should only be reported once (first occurrence), beta once.
+        assert_eq!(new_host_alerts.len(), 2);
+    }
+
+    #[test]
+    fn test_detect_anomalies_privileged_after_hours() {
+        let events = vec![make_event_at(
+            AuditEventType::VaultUnlock,
+            "unlocked vault",
+            utc_at_local_hour(22),
+        )];
+        let alerts = detect_anomalies(&events);
+        assert!(alerts
+            .iter()
+            .any(|a| a.alert_type == AnomalyType::PrivilegedAfterHours));
+    }
+
+    #[test]
+    fn test_detect_anomalies_privileged_during_business_hours_not_flagged() {
+        let events = vec![make_event_at(
+            AuditEventType::VaultUnlock,
+            "unlocked vault",
+            utc_at_local_hour(12),
+        )];
+        let alerts = detect_anomalies(&events);
+        assert!(!alerts
+            .iter()
+            .any(|a| a.alert_type == AnomalyType::PrivilegedAfterHours));
+    }
+
+    #[test]
+    fn test_detect_anomalies_large_data_transfer() {
+        let events = vec![make_event_at(
+            AuditEventType::SettingsUpdate,
+            "sftp transfer completed: 2147483648 bytes",
+            Utc::now(),
+        )];
+        let alerts = detect_anomalies(&events);
+        let alert = alerts
+            .iter()
+            .find(|a| a.alert_type == AnomalyType::LargeDataTransfer)
+            .expect("expected a LargeDataTransfer alert");
+        assert_eq!(alert.severity, AnomalySeverity::Warning);
+    }
+
+    #[test]
+    fn test_detect_anomalies_small_transfer_not_flagged() {
+        let events = vec![make_event_at(
+            AuditEventType::SettingsUpdate,
+            "sftp transfer completed: 1024 bytes",
+            Utc::now(),
+        )];
+        let alerts = detect_anomalies(&events);
+        assert!(!alerts
+            .iter()
+            .any(|a| a.alert_type == AnomalyType::LargeDataTransfer));
+    }
 }
