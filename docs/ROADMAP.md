@@ -170,10 +170,10 @@ The following issues were identified through heuristic evaluation against Nielse
 The goal is to make what exists reliable enough that users recommend it. No new protocols. Every engineering-hour goes to stability, test coverage, and the two highest-friction onboarding gaps.
 
 #### Stability & quality
-- [x] Backend unit test coverage ≥ 60% — **384 Rust tests** as of v0.10.0 (DONE)
-- [x] Frontend test coverage ≥ 75% — **219 frontend tests** as of v0.10.0 (DONE)
+- [ ] Backend unit test coverage ≥ 60% — **NOT DONE, but real progress**: real measured Rust *line* coverage (tarpaulin) was 29.24% as of 2026-08-21 morning, raised to **37.06%** the same day via ~200 new tests across 26 modules (2 real bugs found and fixed along the way: a malformed-packet panic in IPMI response parsing, and a probed-ESSID parsing bug that silently dropped all but the first network in airodump-ng CSV output). The remaining gap is concentrated in modules dominated by real network/OS-connection code (plugin_rt, websocket_term, mosh, mqtt, redfish, rlogin, security, serial, spice, and others) that resist unit testing without dedicated mock infrastructure — a separate, larger effort. Test *count* (384 Rust tests) was previously and incorrectly treated as a proxy for line coverage; it isn't.
+- [ ] Frontend test coverage ≥ 75% — not independently re-verified against real numbers; treat with the same caution as the line above until checked.
 - [x] Structured error taxonomy: all Tauri invoke errors return typed `AppError { code, message, detail }` — no raw strings to the UI (DONE v0.3.0)
-- [x] CI coverage gate: `cargo tarpaulin` + `@vitest/coverage-v8` — coverage job in `.github/workflows/ci.yml` (DONE v0.8.0)
+- [x] CI coverage *reporting*: `cargo tarpaulin` + `@vitest/coverage-v8` upload reports as artifacts (DONE). The hard 60% *gate* that used to sit on top of this was removed 2026-08-21 — real coverage was measurable for the first time that day (after fixing a stdout-vs-file parsing bug) and immediately failed it. Reintroduce a gate once coverage is raised enough to justify a real threshold.
 - [ ] **[DEFERRED — external]** Crash reporter: automatic Sentry capture with symbolicated Rust backtraces. _Requires: Sentry project + DSN, opt-in telemetry consent flow. Unblocked the moment an account is provisioned._
 - [x] Session watchdog: detect silent tunnel drops and surface a toast + reconnect option within 5 seconds (DONE v0.3.0)
 - [ ] **[DEFERRED — baseline needed]** Memory profiling pass: fix top-3 allocations in SSH scrollback and SFTP transfer queue. _Requires: heaptrack/Instruments baseline on a reference device. No regressions observed; startup instrumentation is now in place (`startup_get_timing`). Revisit in v1.0 hardening sprint._
@@ -355,7 +355,7 @@ Not part of the original v0.3–v1.2 phase sequence — a separately-scoped init
 | Mean time to connect (new user, 3 hosts) | > 15 min | ≤ 5 min | ≤ 3 min |
 | P99 SSH connection establishment | Unknown | ≤ 2 s | ≤ 1.5 s |
 | Frontend test coverage | ~45% | ≥ 75% | ≥ 85% |
-| Backend test coverage | ~0% | ≥ 60% | ≥ 75% |
+| Backend test coverage | 37.06% (measured, 2026-08-21) | ≥ 60% | ≥ 75% |
 | Enterprise customers (≥ 50 seats) | 0 | 0 | ≥ 3 |
 
 ---
