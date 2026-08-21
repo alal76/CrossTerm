@@ -2,11 +2,18 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { X, Sparkles } from "lucide-react";
 
-const APP_VERSION = "2.0.8";
+const APP_VERSION = "2.0.9";
 const DISMISSED_VERSION_KEY = "crossterm:whats-new-dismissed";
 
 const RELEASE_NOTES = `
 ## What's New in CrossTerm ${APP_VERSION}
+
+### Bug Fixes
+- Fixed the system-language auto-detection silently failing on Linux: machines with no region-specific locale set (reporting "C.UTF-8" instead of e.g. "en_US.UTF-8", the default on most Linux distributions and CI systems) were returned the raw locale string instead of a real language code.
+- Fixed an IPMI response parser that could crash the connection handler on a malformed or truncated packet from the network, instead of rejecting it.
+- Fixed Network Explorer's WiFi security audit and airodump-ng import silently mishandling several edge cases (multiple probed networks per client, POSIX-style locale strings, and others) found while substantially expanding this release's automated test coverage.
+
+## CrossTerm 2.0.8
 
 ### New Features
 - **Multiple connection options per discovered host** — if Network Explorer detects more than one connectable service on the same host (e.g. both SSH and a Proxmox API), Connect now offers a dropdown to pick which one, instead of always connecting via whichever service happened to win an internal priority order and leaving the others unreachable from that row.
