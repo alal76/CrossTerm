@@ -2708,4 +2708,134 @@ Host *
     fn test_config_is_portable_mode_command() {
         assert!(!config_is_portable_mode());
     }
+
+    // ── ConfigError variants not yet covered by display/serialize tests ──
+
+    #[test]
+    fn test_config_error_io_display_and_serialize() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "missing file");
+        let err: ConfigError = io_err.into();
+        assert!(err.to_string().starts_with("IO error:"));
+        let json = serde_json::to_string(&err).unwrap();
+        assert_eq!(json, format!("{:?}", err.to_string()));
+    }
+
+    #[test]
+    fn test_config_error_json_display_and_serialize() {
+        let json_err = serde_json::from_str::<serde_json::Value>("not json").unwrap_err();
+        let err: ConfigError = json_err.into();
+        assert!(err.to_string().starts_with("JSON error:"));
+        let json = serde_json::to_string(&err).unwrap();
+        assert_eq!(json, format!("{:?}", err.to_string()));
+    }
+
+    // ── do_session_list: non-.json files in the sessions dir are skipped ──
+
+    #[test]
+    fn test_session_list_skips_non_json_files() {
+        let env = TestEnv::new();
+        do_session_create(env.id(), make_session_request("Real Session", "10.0.0.1")).unwrap();
+
+        // Drop an unrelated non-.json file into the sessions dir directly.
+        let stray = sessions_dir(env.id()).join("notes.txt");
+        std::fs::write(&stray, "not a session").unwrap();
+
+        let list = do_session_list(env.id()).unwrap();
+        assert_eq!(list.len(), 1, "the stray non-json file must be ignored");
+        assert_eq!(list[0].name, "Real Session");
+    }
+
+    // ── do_profile_list: entries without profile.json or non-dirs are skipped ──
+
+    #[test]
+    fn test_profile_list_skips_stray_file_and_incomplete_dir() {
+        let env = TestEnv::new();
+        let dir = profiles_dir();
+
+        // A stray file directly under the profiles dir (not a directory).
+        let stray_file = dir.join("not-a-profile.txt");
+        std::fs::write(&stray_file, "junk").unwrap();
+
+        // A directory that exists but has no profile.json inside it.
+        let incomplete_dir = dir.join("incomplete-profile-dir-for-test");
+        std::fs::create_dir_all(&incomplete_dir).unwrap();
+
+        let list = do_profile_list().unwrap();
+        assert!(
+            list.iter().any(|p| p.id == env.profile_id),
+            "the real profile created via TestEnv should still be listed"
+        );
+        assert!(
+            !list.iter().any(|p| p.id == "not-a-profile.txt"),
+            "stray file must not appear as a profile"
+        );
+        assert!(
+            !list
+                .iter()
+                .any(|p| p.id == "incomplete-profile-dir-for-test"),
+            "directory without profile.json must be skipped, not error"
+        );
+
+        // Clean up the extras this test created (TestEnv only cleans its own profile).
+        let _ = std::fs::remove_file(&stray_file);
+        let _ = std::fs::remove_dir_all(&incomplete_dir);
+    }
+
+    // ── Settings hierarchy: remaining legacy protocol_options fields ─────
+
+    #[test]
+    fn test_settings_effective_legacy_protocol_options_remaining_fields() {
+        let env = TestEnv::new();
+
+        let mut req = make_session_request("LegacyOptsSession", "10.0.0.1");
+        let mut opts = HashMap::new();
+        opts.insert("font_family".into(), serde_json::json!("Consolas"));
+        opts.insert("scrollback_lines".into(), serde_json::json!(2_000));
+        opts.insert("bell_style".into(), serde_json::json!("none"));
+        req.connection.protocol_options = Some(opts);
+        let session = do_session_create(env.id(), req).unwrap();
+
+        let effective = do_settings_get_effective(env.id(), Some(&session.id)).unwrap();
+        assert_eq!(effective.font_family, "Consolas");
+        assert_eq!(effective.scrollback_lines, 2_000);
+        assert_eq!(effective.bell_style, "none");
+    }
+
+    // ── Settings hierarchy: malformed folder-settings JSON is ignored ────
+
+    #[test]
+    fn test_settings_effective_malformed_folder_settings_ignored() {
+        let env = TestEnv::new();
+
+        let mut req = make_session_request("MalformedFolderSession", "10.0.0.1");
+        req.group = Some("bad-folder".to_string());
+        let session = do_session_create(env.id(), req).unwrap();
+
+        let folder_settings_path = sessions_dir(env.id()).join("bad-folder.settings.json");
+        std::fs::write(&folder_settings_path, "{ not valid json").unwrap();
+
+        // Should not error; falls back to profile defaults since the
+        // malformed override file is silently skipped.
+        let effective = do_settings_get_effective(env.id(), Some(&session.id)).unwrap();
+        let defaults = Settings::default();
+        assert_eq!(effective.theme, defaults.theme);
+        let _ = session;
+    }
+
+    // ── Settings hierarchy: settings_override that fails to deserialize ──
+
+    #[test]
+    fn test_settings_effective_incompatible_override_is_dropped() {
+        let env = TestEnv::new();
+
+        let mut req = make_session_request("BadOverrideSession", "10.0.0.1");
+        // font_size expects a u32; a string value makes the merged JSON fail
+        // to deserialize back into `Settings`, so the override must be
+        // dropped rather than applied or causing an error.
+        req.settings_override = Some(serde_json::json!({"font_size": "not-a-number"}));
+        let session = do_session_create(env.id(), req).unwrap();
+
+        let effective = do_settings_get_effective(env.id(), Some(&session.id)).unwrap();
+        assert_eq!(effective.font_size, Settings::default().font_size);
+    }
 }

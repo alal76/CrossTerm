@@ -899,4 +899,26 @@ mod tests {
         let entries = parse_blob_entries(b"[]").unwrap();
         assert!(entries.is_empty());
     }
+
+    #[test]
+    fn test_azure_parse_vms_empty_private_ip_filtered_to_none() {
+        // Mirrors the already-covered empty-publicIps case: an empty
+        // `privateIps` string should also be filtered to `None`, not kept
+        // as `Some("")`.
+        let json = r#"[
+            {
+                "id": "/subscriptions/abc/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm1",
+                "name": "vm-no-private-ip",
+                "location": "eastus",
+                "powerState": "VM running",
+                "publicIps": "1.2.3.4",
+                "privateIps": "",
+                "hardwareProfile": { "vmSize": "Standard_B1s" }
+            }
+        ]"#;
+        let vms = parse_vms(json).unwrap();
+        assert_eq!(vms.len(), 1);
+        assert_eq!(vms[0].public_ip, Some("1.2.3.4".to_string()));
+        assert_eq!(vms[0].private_ip, None);
+    }
 }
