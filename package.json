@@ -1,7 +1,7 @@
 {
   "name": "crossterm",
   "private": true,
-  "version": "2.0.10",
+  "version": "2.0.11",
   "author": "Abhishek Lal",
   "license": "AGPL-3.0-only",
   "repository": {
