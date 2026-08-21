@@ -215,6 +215,10 @@ pub async fn mqtt_disconnect(
 
 #[tauri::command]
 pub fn mqtt_list_sessions(state: tauri::State<'_, MqttState>) -> Vec<MqttSession> {
+    do_mqtt_list_sessions(state.inner())
+}
+
+fn do_mqtt_list_sessions(state: &MqttState) -> Vec<MqttSession> {
     state.sessions.lock().unwrap().values().map(|(s, _)| s.clone()).collect()
 }
 
@@ -227,5 +231,114 @@ mod tests {
         assert!(matches!(QoS::from(MqttQos::AtMostOnce), QoS::AtMostOnce));
         assert!(matches!(QoS::from(MqttQos::AtLeastOnce), QoS::AtLeastOnce));
         assert!(matches!(QoS::from(MqttQos::ExactlyOnce), QoS::ExactlyOnce));
+    }
+
+    #[test]
+    fn test_mqtt_qos_serde_snake_case() {
+        assert_eq!(serde_json::to_string(&MqttQos::AtMostOnce).unwrap(), "\"at_most_once\"");
+        assert_eq!(serde_json::to_string(&MqttQos::AtLeastOnce).unwrap(), "\"at_least_once\"");
+        assert_eq!(serde_json::to_string(&MqttQos::ExactlyOnce).unwrap(), "\"exactly_once\"");
+        let parsed: MqttQos = serde_json::from_str("\"exactly_once\"").unwrap();
+        assert_eq!(parsed, MqttQos::ExactlyOnce);
+    }
+
+    #[test]
+    fn test_mqtt_error_display_and_serialize() {
+        assert_eq!(
+            MqttError::NotFound("s1".into()).to_string(),
+            "Session not found: s1"
+        );
+        assert_eq!(
+            MqttError::Connection("refused".into()).to_string(),
+            "Connection error: refused"
+        );
+        assert_eq!(MqttError::Publish("nope".into()).to_string(), "Publish error: nope");
+        assert_eq!(
+            MqttError::Subscribe("denied".into()).to_string(),
+            "Subscribe error: denied"
+        );
+        let json = serde_json::to_string(&MqttError::NotFound("abc".into())).unwrap();
+        assert_eq!(json, "\"Session not found: abc\"");
+    }
+
+    #[test]
+    fn test_mqtt_config_serde_roundtrip() {
+        let config = MqttConfig {
+            host: "broker.local".into(),
+            port: 8883,
+            client_id: "ct-1".into(),
+            username: Some("u".into()),
+            password: None,
+            keep_alive_secs: 30,
+            use_tls: true,
+            clean_session: true,
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let parsed: MqttConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.host, "broker.local");
+        assert_eq!(parsed.port, 8883);
+        assert!(parsed.use_tls);
+        assert_eq!(parsed.password, None);
+    }
+
+    #[test]
+    fn test_mqtt_no_cert_verifier_accepts_any_cert() {
+        use rustls::client::danger::ServerCertVerifier;
+        let verifier = MqttNoCertVerifier;
+        let cert = rustls::pki_types::CertificateDer::from(vec![0u8; 4]);
+        let server_name = rustls::pki_types::ServerName::try_from("broker.local").unwrap();
+        let result = verifier.verify_server_cert(
+            &cert,
+            &[],
+            &server_name,
+            &[],
+            rustls::pki_types::UnixTime::now(),
+        );
+        assert!(result.is_ok());
+        assert!(!verifier.supported_verify_schemes().is_empty());
+    }
+
+    #[test]
+    fn test_mqtt_state_new_is_empty_and_list_sessions() {
+        let state = MqttState::new();
+        assert!(state.sessions.lock().unwrap().is_empty());
+        assert!(do_mqtt_list_sessions(&state).is_empty());
+
+        // AsyncClient::new only wires up in-process channels; it doesn't
+        // perform any network I/O until the event loop is polled, so it's
+        // safe to construct here to exercise session bookkeeping.
+        let opts = MqttOptions::new("test-client", "127.0.0.1", 1883);
+        let (client, _event_loop) = AsyncClient::new(opts, 16);
+        let session = MqttSession {
+            id: "sess-1".into(),
+            host: "127.0.0.1".into(),
+            client_id: "test-client".into(),
+        };
+        state
+            .sessions
+            .lock()
+            .unwrap()
+            .insert("sess-1".into(), (session, client));
+
+        let listed = do_mqtt_list_sessions(&state);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, "sess-1");
+        assert_eq!(listed[0].client_id, "test-client");
+    }
+
+    #[test]
+    fn test_mqtt_message_serde_roundtrip() {
+        let msg = MqttMessage {
+            session_id: "s1".into(),
+            topic: "sensors/temp".into(),
+            payload: "21.5".into(),
+            qos: 1,
+            retain: true,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let parsed: MqttMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.topic, "sensors/temp");
+        assert_eq!(parsed.qos, 1);
+        assert!(parsed.retain);
     }
 }

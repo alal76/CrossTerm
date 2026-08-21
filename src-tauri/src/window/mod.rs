@@ -28,6 +28,14 @@ pub struct DetachedTab {
     pub session_id: String,
 }
 
+// ── Helpers ──
+
+/// Builds the window label used for a detached tab window. Extracted so it's
+/// unit-testable without a full `tauri::AppHandle`.
+fn tab_window_label(tab_id: &str) -> String {
+    format!("tab-{}", tab_id)
+}
+
 // ── Commands ──
 
 #[tauri::command]
@@ -41,7 +49,7 @@ pub async fn window_create_for_tab(
 ) -> Result<String, WindowError> {
     use tauri::WebviewWindowBuilder;
 
-    let label = format!("tab-{}", tab_id);
+    let label = tab_window_label(&tab_id);
     let mut builder = WebviewWindowBuilder::new(
         &app,
         &label,
@@ -109,5 +117,39 @@ mod tests {
     fn test_window_error_display() {
         let err = WindowError::NotFound("test".to_string());
         assert_eq!(err.to_string(), "Window not found: test");
+    }
+
+    #[test]
+    fn test_window_error_tauri_variant_display() {
+        let err = WindowError::Tauri("boom".to_string());
+        assert_eq!(err.to_string(), "Tauri error: boom");
+    }
+
+    #[test]
+    fn test_window_error_serializes_as_string() {
+        let err = WindowError::NotFound("abc".into());
+        let json = serde_json::to_string(&err).unwrap();
+        assert_eq!(json, "\"Window not found: abc\"");
+    }
+
+    #[test]
+    fn test_tab_window_label_format() {
+        assert_eq!(tab_window_label("123"), "tab-123");
+        assert_eq!(tab_window_label(""), "tab-");
+        assert_eq!(tab_window_label("abc-def"), "tab-abc-def");
+    }
+
+    #[test]
+    fn test_detached_tab_serde_roundtrip() {
+        let tab = DetachedTab {
+            window_label: "tab-1".into(),
+            tab_id: "1".into(),
+            session_id: "s1".into(),
+        };
+        let json = serde_json::to_string(&tab).unwrap();
+        let parsed: DetachedTab = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.window_label, "tab-1");
+        assert_eq!(parsed.tab_id, "1");
+        assert_eq!(parsed.session_id, "s1");
     }
 }

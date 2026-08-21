@@ -123,6 +123,10 @@ pub async fn rlogin_connect(config: RloginConfig, state: tauri::State<'_, Rlogin
 
 #[tauri::command]
 pub fn rlogin_send(id: String, data: String, state: tauri::State<'_, RloginState>) -> Result<(), RloginError> {
+    do_rlogin_send(id, data, state.inner())
+}
+
+fn do_rlogin_send(id: String, data: String, state: &RloginState) -> Result<(), RloginError> {
     state
         .writers
         .lock()
@@ -135,6 +139,10 @@ pub fn rlogin_send(id: String, data: String, state: tauri::State<'_, RloginState
 
 #[tauri::command]
 pub fn rlogin_disconnect(id: String, state: tauri::State<'_, RloginState>) -> Result<(), RloginError> {
+    do_rlogin_disconnect(id, state.inner())
+}
+
+fn do_rlogin_disconnect(id: String, state: &RloginState) -> Result<(), RloginError> {
     state.sessions.lock().unwrap().remove(&id).ok_or_else(|| RloginError::NotFound(id.clone()))?;
     state.writers.lock().unwrap().remove(&id);
     Ok(())
@@ -142,6 +150,10 @@ pub fn rlogin_disconnect(id: String, state: tauri::State<'_, RloginState>) -> Re
 
 #[tauri::command]
 pub fn rlogin_list(state: tauri::State<'_, RloginState>) -> Vec<RloginSession> {
+    do_rlogin_list(state.inner())
+}
+
+fn do_rlogin_list(state: &RloginState) -> Vec<RloginSession> {
     state.sessions.lock().unwrap().values().cloned().collect()
 }
 
@@ -184,5 +196,94 @@ mod tests {
         // Leading NUL immediately followed by the field-separator NUL
         // since local_username is empty.
         assert_eq!(&handshake[0..2], &[0, 0]);
+    }
+
+    #[test]
+    fn test_rlogin_error_display_and_serialize() {
+        assert_eq!(
+            RloginError::NotFound("x".into()).to_string(),
+            "Connection not found: x"
+        );
+        assert_eq!(
+            RloginError::ConnectionFailed("refused".into()).to_string(),
+            "Connection failed: refused"
+        );
+        let json = serde_json::to_string(&RloginError::NotFound("abc".into())).unwrap();
+        assert_eq!(json, "\"Connection not found: abc\"");
+    }
+
+    #[test]
+    fn test_rlogin_config_serde_roundtrip() {
+        let config = RloginConfig {
+            host: "10.0.0.1".into(),
+            port: 513,
+            local_username: "alal".into(),
+            remote_username: "root".into(),
+            terminal_type: "vt100".into(),
+            terminal_speed: 9600,
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let parsed: RloginConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.host, "10.0.0.1");
+        assert_eq!(parsed.terminal_speed, 9600);
+    }
+
+    /// Returns the state plus the channel receiver, which the caller must
+    /// keep alive for the duration of the test — dropping it closes the
+    /// channel and turns every subsequent send into a `ConnectionFailed`.
+    fn make_state_with_session(
+        id: &str,
+    ) -> (RloginState, tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>) {
+        let state = RloginState::new();
+        state.sessions.lock().unwrap().insert(
+            id.to_string(),
+            RloginSession {
+                id: id.to_string(),
+                host: "10.0.0.1".into(),
+                remote_username: "root".into(),
+            },
+        );
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+        state.writers.lock().unwrap().insert(id.to_string(), tx);
+        (state, rx)
+    }
+
+    #[test]
+    fn test_do_rlogin_send_success_and_not_found() {
+        let (state, _rx) = make_state_with_session("s1");
+        do_rlogin_send("s1".into(), "ls\n".into(), &state).expect("send ok");
+
+        let err = do_rlogin_send("nope".into(), "x".into(), &state).unwrap_err();
+        assert!(matches!(err, RloginError::NotFound(_)));
+    }
+
+    #[test]
+    fn test_do_rlogin_send_after_receiver_dropped() {
+        let state = RloginState::new();
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+        drop(rx);
+        state.writers.lock().unwrap().insert("s1".into(), tx);
+
+        let err = do_rlogin_send("s1".into(), "x".into(), &state).unwrap_err();
+        assert!(matches!(err, RloginError::ConnectionFailed(_)));
+    }
+
+    #[test]
+    fn test_do_rlogin_disconnect_and_list() {
+        let (state, _rx) = make_state_with_session("s1");
+        assert_eq!(do_rlogin_list(&state).len(), 1);
+
+        do_rlogin_disconnect("s1".into(), &state).expect("disconnect ok");
+        assert!(do_rlogin_list(&state).is_empty());
+        assert!(!state.writers.lock().unwrap().contains_key("s1"));
+
+        let err = do_rlogin_disconnect("s1".into(), &state).unwrap_err();
+        assert!(matches!(err, RloginError::NotFound(_)));
+    }
+
+    #[test]
+    fn test_do_rlogin_list_empty_by_default() {
+        let state = RloginState::new();
+        assert!(do_rlogin_list(&state).is_empty());
     }
 }

@@ -91,6 +91,36 @@ fn base_url(cfg: &RedfishConfig) -> String {
     format!("{scheme}://{}:{}/redfish/v1", cfg.host, cfg.port)
 }
 
+/// Parses a single `Systems/{id}` Redfish JSON object into a `RedfishSystem`.
+/// Extracted from `redfish_get_systems` so the JSON-shape handling is
+/// unit-testable without a live BMC.
+fn parse_redfish_system(sys: &Value) -> RedfishSystem {
+    RedfishSystem {
+        id: sys["Id"].as_str().unwrap_or("").to_string(),
+        name: sys["Name"].as_str().unwrap_or("").to_string(),
+        manufacturer: sys["Manufacturer"].as_str().map(str::to_string),
+        model: sys["Model"].as_str().map(str::to_string),
+        serial: sys["SerialNumber"].as_str().map(str::to_string),
+        power_state: sys["PowerState"].as_str().map(str::to_string),
+        bios_version: sys["BiosVersion"].as_str().map(str::to_string),
+    }
+}
+
+/// Builds the absolute URL for a system member from its `@odata.id` href.
+/// Extracted from `redfish_get_systems` for unit testing.
+fn member_system_url(cfg: &RedfishConfig, href: &str) -> String {
+    let scheme = if cfg.use_tls { "https" } else { "http" };
+    format!("{scheme}://{}:{}{href}", cfg.host, cfg.port)
+}
+
+/// The `ResetType` value sent to `ComputerSystem.Reset`. Redfish expects the
+/// PascalCase spec name, which matches this enum's `Debug` output verbatim
+/// (e.g. `GracefulShutdown`), since the variants are already named for the
+/// spec rather than renamed via serde.
+fn reset_type(action: &RedfishPowerAction) -> String {
+    format!("{action:?}")
+}
+
 #[tauri::command]
 pub async fn redfish_connect(
     config: RedfishConfig,
@@ -140,22 +170,13 @@ pub async fn redfish_get_systems(
     if let Some(arr) = members["Members"].as_array() {
         for member in arr {
             if let Some(href) = member["@odata.id"].as_str() {
-                let scheme = if cfg.use_tls { "https" } else { "http" };
-                let sys_url = format!("{scheme}://{}:{}{href}", cfg.host, cfg.port);
+                let sys_url = member_system_url(&cfg, href);
                 if let Ok(resp) = client.get(&sys_url)
                     .basic_auth(&cfg.username, Some(&cfg.password))
                     .header(ACCEPT, "application/json")
                     .send().await {
                     if let Ok(sys) = resp.json::<Value>().await {
-                        out.push(RedfishSystem {
-                            id: sys["Id"].as_str().unwrap_or("").to_string(),
-                            name: sys["Name"].as_str().unwrap_or("").to_string(),
-                            manufacturer: sys["Manufacturer"].as_str().map(str::to_string),
-                            model: sys["Model"].as_str().map(str::to_string),
-                            serial: sys["SerialNumber"].as_str().map(str::to_string),
-                            power_state: sys["PowerState"].as_str().map(str::to_string),
-                            bios_version: sys["BiosVersion"].as_str().map(str::to_string),
-                        });
+                        out.push(parse_redfish_system(&sys));
                     }
                 }
             }
@@ -175,7 +196,7 @@ pub async fn redfish_power_control(
         .get(&id).cloned().ok_or_else(|| RedfishError::NotFound(id.clone()))?;
 
     let action_url = format!("{base}/Systems/{system_id}/Actions/ComputerSystem.Reset");
-    let body = serde_json::json!({ "ResetType": format!("{action:?}") });
+    let body = serde_json::json!({ "ResetType": reset_type(&action) });
 
     let resp = client
         .post(&action_url)
@@ -195,12 +216,20 @@ pub async fn redfish_power_control(
 
 #[tauri::command]
 pub fn redfish_disconnect(id: String, state: tauri::State<'_, RedfishState>) -> Result<(), RedfishError> {
+    do_redfish_disconnect(id, state.inner())
+}
+
+fn do_redfish_disconnect(id: String, state: &RedfishState) -> Result<(), RedfishError> {
     state.sessions.lock().unwrap().remove(&id).ok_or(RedfishError::NotFound(id))?;
     Ok(())
 }
 
 #[tauri::command]
 pub fn redfish_list(state: tauri::State<'_, RedfishState>) -> Vec<RedfishSession> {
+    do_redfish_list(state.inner())
+}
+
+fn do_redfish_list(state: &RedfishState) -> Vec<RedfishSession> {
     state.sessions.lock().unwrap().iter().map(|(id, (cfg, _, base))| RedfishSession {
         id: id.clone(), host: cfg.host.clone(), service_root: base.clone(),
     }).collect()
@@ -235,5 +264,116 @@ mod tests {
     fn build_client_succeeds_with_and_without_tls_verification() {
         assert!(build_client(true).is_ok());
         assert!(build_client(false).is_ok());
+    }
+
+    #[test]
+    fn test_parse_redfish_system_full_fields() {
+        let json = serde_json::json!({
+            "Id": "1",
+            "Name": "System 1",
+            "Manufacturer": "Dell",
+            "Model": "R740",
+            "SerialNumber": "SN123",
+            "PowerState": "On",
+            "BiosVersion": "2.1.0"
+        });
+        let sys = parse_redfish_system(&json);
+        assert_eq!(sys.id, "1");
+        assert_eq!(sys.name, "System 1");
+        assert_eq!(sys.manufacturer.as_deref(), Some("Dell"));
+        assert_eq!(sys.model.as_deref(), Some("R740"));
+        assert_eq!(sys.serial.as_deref(), Some("SN123"));
+        assert_eq!(sys.power_state.as_deref(), Some("On"));
+        assert_eq!(sys.bios_version.as_deref(), Some("2.1.0"));
+    }
+
+    #[test]
+    fn test_parse_redfish_system_missing_fields_defaults_gracefully() {
+        let json = serde_json::json!({});
+        let sys = parse_redfish_system(&json);
+        assert_eq!(sys.id, "");
+        assert_eq!(sys.name, "");
+        assert_eq!(sys.manufacturer, None);
+        assert_eq!(sys.model, None);
+        assert_eq!(sys.serial, None);
+        assert_eq!(sys.power_state, None);
+        assert_eq!(sys.bios_version, None);
+    }
+
+    #[test]
+    fn test_member_system_url_respects_tls_flag() {
+        assert_eq!(
+            member_system_url(&sample_config(true), "/redfish/v1/Systems/1"),
+            "https://10.0.0.5:443/redfish/v1/Systems/1"
+        );
+        assert_eq!(
+            member_system_url(&sample_config(false), "/redfish/v1/Systems/1"),
+            "http://10.0.0.5:8080/redfish/v1/Systems/1"
+        );
+    }
+
+    #[test]
+    fn test_reset_type_matches_pascal_case_spec_names() {
+        assert_eq!(reset_type(&RedfishPowerAction::On), "On");
+        assert_eq!(reset_type(&RedfishPowerAction::ForceOff), "ForceOff");
+        assert_eq!(
+            reset_type(&RedfishPowerAction::GracefulShutdown),
+            "GracefulShutdown"
+        );
+        assert_eq!(
+            reset_type(&RedfishPowerAction::GracefulRestart),
+            "GracefulRestart"
+        );
+        assert_eq!(reset_type(&RedfishPowerAction::ForceRestart), "ForceRestart");
+        assert_eq!(reset_type(&RedfishPowerAction::Nmi), "Nmi");
+    }
+
+    #[test]
+    fn test_redfish_power_action_serde_pascal_case() {
+        let json = serde_json::to_string(&RedfishPowerAction::GracefulShutdown).unwrap();
+        assert_eq!(json, "\"GracefulShutdown\"");
+        let parsed: RedfishPowerAction = serde_json::from_str("\"ForceOff\"").unwrap();
+        assert_eq!(parsed, RedfishPowerAction::ForceOff);
+    }
+
+    #[test]
+    fn test_redfish_error_display_variants() {
+        assert_eq!(
+            RedfishError::NotFound("x".into()).to_string(),
+            "Session not found: x"
+        );
+        assert_eq!(
+            RedfishError::Http(404, "nope".into()).to_string(),
+            "HTTP error 404: nope"
+        );
+        assert_eq!(RedfishError::AuthFailed.to_string(), "Authentication failed");
+        assert_eq!(
+            RedfishError::Request("timeout".into()).to_string(),
+            "Request error: timeout"
+        );
+    }
+
+    #[test]
+    fn test_do_redfish_disconnect_and_list() {
+        let state = RedfishState::new();
+        let client = build_client(false).unwrap();
+        let cfg = sample_config(false);
+        let base = base_url(&cfg);
+        state
+            .sessions
+            .lock()
+            .unwrap()
+            .insert("sess-1".into(), (cfg, client, base.clone()));
+
+        let list = do_redfish_list(&state);
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, "sess-1");
+        assert_eq!(list[0].service_root, base);
+
+        do_redfish_disconnect("sess-1".into(), &state).expect("disconnect ok");
+        assert!(do_redfish_list(&state).is_empty());
+
+        let err = do_redfish_disconnect("sess-1".into(), &state).unwrap_err();
+        assert!(matches!(err, RedfishError::NotFound(_)));
     }
 }

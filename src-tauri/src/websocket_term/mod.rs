@@ -160,6 +160,10 @@ pub fn wsterm_send(
     data: String,
     state: tauri::State<'_, WsTermState>,
 ) -> Result<(), WsTermError> {
+    do_wsterm_send(id, data, state.inner())
+}
+
+fn do_wsterm_send(id: String, data: String, state: &WsTermState) -> Result<(), WsTermError> {
     let senders = state.senders.lock().unwrap();
     let tx = senders.get(&id).ok_or_else(|| WsTermError::NotFound(id.clone()))?;
     tx.send(data).map_err(|e| WsTermError::Ws(e.to_string()))
@@ -167,6 +171,10 @@ pub fn wsterm_send(
 
 #[tauri::command]
 pub fn wsterm_disconnect(id: String, state: tauri::State<'_, WsTermState>) -> Result<(), WsTermError> {
+    do_wsterm_disconnect(id, state.inner())
+}
+
+fn do_wsterm_disconnect(id: String, state: &WsTermState) -> Result<(), WsTermError> {
     state.sessions.lock().unwrap().remove(&id)
         .ok_or_else(|| WsTermError::NotFound(id.clone()))?;
     state.senders.lock().unwrap().remove(&id);
@@ -175,6 +183,10 @@ pub fn wsterm_disconnect(id: String, state: tauri::State<'_, WsTermState>) -> Re
 
 #[tauri::command]
 pub fn wsterm_list(state: tauri::State<'_, WsTermState>) -> Vec<WsTermSession> {
+    do_wsterm_list(state.inner())
+}
+
+fn do_wsterm_list(state: &WsTermState) -> Vec<WsTermSession> {
     state.sessions.lock().unwrap().values().cloned().collect()
 }
 
@@ -199,5 +211,143 @@ impl rustls::client::danger::ServerCertVerifier for NoCertVerifier {
     }
     fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
         rustls::crypto::ring::default_provider().signature_verification_algorithms.supported_schemes()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ws_term_error_serializes_as_display_string() {
+        let err = WsTermError::NotFound("abc".into());
+        let json = serde_json::to_string(&err).unwrap();
+        assert_eq!(json, "\"Connection not found: abc\"");
+
+        let err = WsTermError::Ws("boom".into());
+        assert_eq!(serde_json::to_string(&err).unwrap(), "\"WebSocket error: boom\"");
+
+        let err = WsTermError::UrlParse("bad url".into());
+        assert_eq!(
+            serde_json::to_string(&err).unwrap(),
+            "\"URL parse error: bad url\""
+        );
+    }
+
+    #[test]
+    fn test_wsterm_config_serde_roundtrip() {
+        let cfg = WsTermConfig {
+            url: "wss://host:7681".into(),
+            token: Some("tok123".into()),
+            verify_tls: true,
+        };
+        let json = serde_json::to_string(&cfg).unwrap();
+        let parsed: WsTermConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.url, "wss://host:7681");
+        assert_eq!(parsed.token.as_deref(), Some("tok123"));
+        assert!(parsed.verify_tls);
+    }
+
+    #[test]
+    fn test_wsterm_state_new_is_empty() {
+        let state = WsTermState::new();
+        assert!(state.sessions.lock().unwrap().is_empty());
+        assert!(state.senders.lock().unwrap().is_empty());
+        assert!(do_wsterm_list(&state).is_empty());
+    }
+
+    #[test]
+    fn test_wsterm_send_not_found() {
+        let state = WsTermState::new();
+        let err = do_wsterm_send("nope".into(), "data".into(), &state).unwrap_err();
+        assert!(matches!(err, WsTermError::NotFound(_)));
+    }
+
+    #[test]
+    fn test_wsterm_send_success_delivers_to_channel() {
+        let state = WsTermState::new();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        state.senders.lock().unwrap().insert("s1".into(), tx);
+
+        do_wsterm_send("s1".into(), "hello".into(), &state).expect("send ok");
+        let received = rx.try_recv().expect("message queued");
+        assert_eq!(received, "hello");
+    }
+
+    #[test]
+    fn test_wsterm_send_after_receiver_dropped_errors() {
+        let state = WsTermState::new();
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        drop(rx);
+        state.senders.lock().unwrap().insert("s1".into(), tx);
+
+        let err = do_wsterm_send("s1".into(), "hello".into(), &state).unwrap_err();
+        assert!(matches!(err, WsTermError::Ws(_)));
+    }
+
+    #[test]
+    fn test_wsterm_disconnect_removes_session_and_sender() {
+        let state = WsTermState::new();
+        state.sessions.lock().unwrap().insert(
+            "s1".into(),
+            WsTermSession {
+                id: "s1".into(),
+                url: "ws://x".into(),
+            },
+        );
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        state.senders.lock().unwrap().insert("s1".into(), tx);
+
+        do_wsterm_disconnect("s1".into(), &state).expect("disconnect ok");
+        assert!(!state.sessions.lock().unwrap().contains_key("s1"));
+        assert!(!state.senders.lock().unwrap().contains_key("s1"));
+    }
+
+    #[test]
+    fn test_wsterm_disconnect_not_found() {
+        let state = WsTermState::new();
+        let err = do_wsterm_disconnect("nope".into(), &state).unwrap_err();
+        assert!(matches!(err, WsTermError::NotFound(_)));
+    }
+
+    #[test]
+    fn test_wsterm_list_returns_all_sessions() {
+        let state = WsTermState::new();
+        state.sessions.lock().unwrap().insert(
+            "s1".into(),
+            WsTermSession {
+                id: "s1".into(),
+                url: "ws://a".into(),
+            },
+        );
+        state.sessions.lock().unwrap().insert(
+            "s2".into(),
+            WsTermSession {
+                id: "s2".into(),
+                url: "ws://b".into(),
+            },
+        );
+        let list = do_wsterm_list(&state);
+        assert_eq!(list.len(), 2);
+        let mut ids: Vec<_> = list.iter().map(|s| s.id.clone()).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["s1".to_string(), "s2".to_string()]);
+    }
+
+    #[test]
+    fn test_no_cert_verifier_accepts_any_cert() {
+        use rustls::client::danger::ServerCertVerifier;
+        let verifier = NoCertVerifier;
+        let cert = rustls::pki_types::CertificateDer::from(vec![0u8; 4]);
+        let server_name = rustls::pki_types::ServerName::try_from("example.com").unwrap();
+        let result = verifier.verify_server_cert(
+            &cert,
+            &[],
+            &server_name,
+            &[],
+            rustls::pki_types::UnixTime::now(),
+        );
+        assert!(result.is_ok());
+        assert!(!verifier.supported_verify_schemes().is_empty());
     }
 }

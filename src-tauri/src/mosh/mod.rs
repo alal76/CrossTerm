@@ -191,6 +191,10 @@ pub fn mosh_write(
     data: String,
     state: tauri::State<'_, MoshState>,
 ) -> Result<(), MoshError> {
+    do_mosh_write(id, data, state.inner())
+}
+
+fn do_mosh_write(id: String, data: String, state: &MoshState) -> Result<(), MoshError> {
     let sessions = state.sessions.lock().unwrap();
     let session = sessions.get(&id).ok_or_else(|| MoshError::NotFound(id.clone()))?;
     let mut writer = session.master_write.lock().unwrap();
@@ -206,6 +210,10 @@ pub fn mosh_resize(
     rows: u16,
     state: tauri::State<'_, MoshState>,
 ) -> Result<(), MoshError> {
+    do_mosh_resize(id, cols, rows, state.inner())
+}
+
+fn do_mosh_resize(id: String, cols: u16, rows: u16, state: &MoshState) -> Result<(), MoshError> {
     let sessions = state.sessions.lock().unwrap();
     let session = sessions.get(&id).ok_or_else(|| MoshError::NotFound(id.clone()))?;
     session
@@ -219,6 +227,10 @@ pub fn mosh_disconnect(
     id: String,
     state: tauri::State<'_, MoshState>,
 ) -> Result<(), MoshError> {
+    do_mosh_disconnect(id, state.inner())
+}
+
+fn do_mosh_disconnect(id: String, state: &MoshState) -> Result<(), MoshError> {
     let mut sessions = state.sessions.lock().unwrap();
     let mut session = sessions.remove(&id).ok_or_else(|| MoshError::NotFound(id.clone()))?;
     session.shutdown.store(true, Ordering::Relaxed);
@@ -232,6 +244,10 @@ pub fn mosh_disconnect(
 
 #[tauri::command]
 pub fn mosh_list(state: tauri::State<'_, MoshState>) -> Vec<MoshConnectionInfo> {
+    do_mosh_list(state.inner())
+}
+
+fn do_mosh_list(state: &MoshState) -> Vec<MoshConnectionInfo> {
     state.sessions.lock().unwrap().values().map(|s| s.info.clone()).collect()
 }
 
@@ -262,5 +278,138 @@ mod tests {
             build_ssh_arg(&config),
             "ssh -p 2222 -i /home/alal/.ssh/id_ed25519 -o StrictHostKeyChecking=no"
         );
+    }
+
+    #[test]
+    fn test_build_ssh_arg_with_port_range_and_identity_only() {
+        let config = MoshConfig {
+            host: "h".into(), port: 22, username: "u".into(),
+            identity_file: Some("/key".into()), udp_port_range: Some("60000:60010".into()),
+            ssh_options: None, cols: Some(120), rows: Some(40),
+        };
+        // udp_port_range doesn't affect build_ssh_arg (handled separately in mosh_connect)
+        assert_eq!(build_ssh_arg(&config), "ssh -p 22 -i /key");
+    }
+
+    #[test]
+    fn test_mosh_error_display_and_serialize() {
+        assert_eq!(
+            MoshError::NotFound("x".into()).to_string(),
+            "Connection not found: x"
+        );
+        assert_eq!(
+            MoshError::BinaryNotFound.to_string(),
+            "Mosh binary not found — install mosh on the client"
+        );
+        assert_eq!(MoshError::Pty("boom".into()).to_string(), "PTY error: boom");
+
+        let json = serde_json::to_string(&MoshError::NotFound("abc".into())).unwrap();
+        assert_eq!(json, "\"Connection not found: abc\"");
+    }
+
+    #[test]
+    fn test_mosh_config_serde_roundtrip() {
+        let config = MoshConfig {
+            host: "10.0.0.1".into(), port: 22, username: "alal".into(),
+            identity_file: None, udp_port_range: Some("60000:60010".into()),
+            ssh_options: None, cols: Some(100), rows: Some(30),
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let parsed: MoshConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.host, "10.0.0.1");
+        assert_eq!(parsed.udp_port_range.as_deref(), Some("60000:60010"));
+        assert_eq!(parsed.cols, Some(100));
+    }
+
+    /// Builds a real `MoshSession` backed by an actual local PTY running a
+    /// plain shell (not the `mosh` binary — that's exercised only in
+    /// `mosh_connect`, which additionally requires the binary to be
+    /// installed and a live SSH target). This lets `mosh_write`,
+    /// `mosh_resize`, `mosh_disconnect`, and `mosh_list`'s session-management
+    /// logic be exercised for real, mirroring `terminal::tests::create_test_session`.
+    fn create_test_mosh_session(state: &MoshState) -> MoshConnectionInfo {
+        let pty_system = native_pty_system();
+        let pair = pty_system
+            .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
+            .expect("openpty");
+
+        let shell = if cfg!(windows) { "cmd.exe" } else { "/bin/sh" };
+        let cmd = CommandBuilder::new(shell);
+        pair.slave.spawn_command(cmd).expect("spawn shell");
+        drop(pair.slave);
+
+        let id = Uuid::new_v4().to_string();
+        let info = MoshConnectionInfo {
+            id: id.clone(),
+            host: "test-host".into(),
+            username: "test-user".into(),
+        };
+
+        let master_write: Arc<Mutex<Box<dyn Write + Send>>> =
+            Arc::new(Mutex::new(pair.master.take_writer().expect("writer")));
+        let mut reader = pair.master.try_clone_reader().expect("reader");
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let shutdown_clone = shutdown.clone();
+
+        let reader_handle = std::thread::spawn(move || {
+            let mut buf = [0u8; 4096];
+            loop {
+                if shutdown_clone.load(Ordering::Relaxed) {
+                    break;
+                }
+                match reader.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(_) => continue,
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let session = MoshSession {
+            info: info.clone(),
+            master_write,
+            master_pty: pair.master,
+            shutdown,
+            reader_handle: Some(reader_handle),
+        };
+        state.sessions.lock().unwrap().insert(id, session);
+        info
+    }
+
+    #[test]
+    fn test_mosh_write_and_list_and_disconnect() {
+        let state = MoshState::new();
+        let info = create_test_mosh_session(&state);
+
+        assert_eq!(do_mosh_list(&state).len(), 1);
+        assert_eq!(do_mosh_list(&state)[0].id, info.id);
+
+        do_mosh_write(info.id.clone(), "echo hi\n".into(), &state).expect("write ok");
+
+        do_mosh_resize(info.id.clone(), 100, 40, &state).expect("resize ok");
+
+        do_mosh_disconnect(info.id.clone(), &state).expect("disconnect ok");
+        assert!(do_mosh_list(&state).is_empty());
+
+        // Operating on a disconnected/unknown session should error.
+        let err = do_mosh_write(info.id.clone(), "x".into(), &state).unwrap_err();
+        assert!(matches!(err, MoshError::NotFound(_)));
+        let err = do_mosh_resize(info.id.clone(), 10, 10, &state).unwrap_err();
+        assert!(matches!(err, MoshError::NotFound(_)));
+        let err = do_mosh_disconnect(info.id, &state).unwrap_err();
+        assert!(matches!(err, MoshError::NotFound(_)));
+    }
+
+    #[test]
+    fn test_mosh_write_unknown_session() {
+        let state = MoshState::new();
+        let err = do_mosh_write("nope".into(), "x".into(), &state).unwrap_err();
+        assert!(matches!(err, MoshError::NotFound(_)));
+    }
+
+    #[test]
+    fn test_mosh_list_empty_by_default() {
+        let state = MoshState::new();
+        assert!(do_mosh_list(&state).is_empty());
     }
 }

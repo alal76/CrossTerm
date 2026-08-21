@@ -116,6 +116,10 @@ pub async fn serial_connect(
     config: SerialConfig,
     state: tauri::State<'_, SerialState>,
 ) -> Result<String, SerialError> {
+    do_serial_connect(config, state.inner())
+}
+
+fn do_serial_connect(config: SerialConfig, state: &SerialState) -> Result<String, SerialError> {
     if config.port_name.is_empty() {
         return Err(SerialError::ConfigError("Port name cannot be empty".into()));
     }
@@ -138,6 +142,10 @@ pub async fn serial_disconnect(
     conn_id: String,
     state: tauri::State<'_, SerialState>,
 ) -> Result<(), SerialError> {
+    do_serial_disconnect(conn_id, state.inner())
+}
+
+fn do_serial_disconnect(conn_id: String, state: &SerialState) -> Result<(), SerialError> {
     let mut conns = state.connections.lock().unwrap();
     match conns.remove(&conn_id) {
         Some(_) => Ok(()),
@@ -151,6 +159,10 @@ pub async fn serial_write(
     data: Vec<u8>,
     state: tauri::State<'_, SerialState>,
 ) -> Result<(), SerialError> {
+    do_serial_write(conn_id, data, state.inner())
+}
+
+fn do_serial_write(conn_id: String, data: Vec<u8>, state: &SerialState) -> Result<(), SerialError> {
     let conns = state.connections.lock().unwrap();
     if !conns.contains_key(&conn_id) {
         return Err(SerialError::NotConnected(conn_id));
@@ -166,6 +178,10 @@ pub async fn serial_set_baud(
     baud_rate: u32,
     state: tauri::State<'_, SerialState>,
 ) -> Result<(), SerialError> {
+    do_serial_set_baud(conn_id, baud_rate, state.inner())
+}
+
+fn do_serial_set_baud(conn_id: String, baud_rate: u32, state: &SerialState) -> Result<(), SerialError> {
     let mut conns = state.connections.lock().unwrap();
     match conns.get_mut(&conn_id) {
         Some(conn) => {
@@ -183,6 +199,10 @@ pub async fn serial_set_dtr(
     level: bool,
     state: tauri::State<'_, SerialState>,
 ) -> Result<(), SerialError> {
+    do_serial_set_dtr(conn_id, level, state.inner())
+}
+
+fn do_serial_set_dtr(conn_id: String, level: bool, state: &SerialState) -> Result<(), SerialError> {
     let conns = state.connections.lock().unwrap();
     if !conns.contains_key(&conn_id) {
         return Err(SerialError::NotConnected(conn_id));
@@ -198,6 +218,10 @@ pub async fn serial_set_rts(
     level: bool,
     state: tauri::State<'_, SerialState>,
 ) -> Result<(), SerialError> {
+    do_serial_set_rts(conn_id, level, state.inner())
+}
+
+fn do_serial_set_rts(conn_id: String, level: bool, state: &SerialState) -> Result<(), SerialError> {
     let conns = state.connections.lock().unwrap();
     if !conns.contains_key(&conn_id) {
         return Err(SerialError::NotConnected(conn_id));
@@ -296,5 +320,118 @@ mod tests {
         }
 
         assert_eq!(state.connections.lock().unwrap().len(), 3);
+    }
+
+    fn sample_config(port: &str) -> SerialConfig {
+        SerialConfig {
+            port_name: port.to_string(),
+            baud_rate: 9600,
+            data_bits: DataBits::Eight,
+            stop_bits: StopBits::One,
+            parity: Parity::None,
+            flow_control: FlowControl::None,
+        }
+    }
+
+    #[test]
+    fn test_do_serial_connect_rejects_empty_port_name() {
+        let state = SerialState::new();
+        let err = do_serial_connect(sample_config(""), &state).unwrap_err();
+        assert!(matches!(err, SerialError::ConfigError(_)));
+        assert!(state.connections.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_do_serial_connect_success_registers_connection() {
+        let state = SerialState::new();
+        let id = do_serial_connect(sample_config("/dev/ttyUSB0"), &state).expect("connect ok");
+        let conns = state.connections.lock().unwrap();
+        let conn = conns.get(&id).expect("connection registered");
+        assert!(conn.connected);
+        assert_eq!(conn.config.port_name, "/dev/ttyUSB0");
+    }
+
+    #[test]
+    fn test_do_serial_disconnect_success_and_not_connected() {
+        let state = SerialState::new();
+        let id = do_serial_connect(sample_config("/dev/ttyUSB0"), &state).unwrap();
+
+        do_serial_disconnect(id.clone(), &state).expect("disconnect ok");
+        assert!(!state.connections.lock().unwrap().contains_key(&id));
+
+        let err = do_serial_disconnect(id, &state).unwrap_err();
+        assert!(matches!(err, SerialError::NotConnected(_)));
+    }
+
+    #[test]
+    fn test_do_serial_write_requires_existing_connection() {
+        let state = SerialState::new();
+        let err = do_serial_write("nope".into(), vec![1, 2, 3], &state).unwrap_err();
+        assert!(matches!(err, SerialError::NotConnected(_)));
+
+        let id = do_serial_connect(sample_config("/dev/ttyUSB0"), &state).unwrap();
+        assert!(do_serial_write(id, vec![1, 2, 3], &state).is_ok());
+    }
+
+    #[test]
+    fn test_do_serial_set_baud_updates_config_and_errors_when_missing() {
+        let state = SerialState::new();
+        let id = do_serial_connect(sample_config("/dev/ttyUSB0"), &state).unwrap();
+
+        do_serial_set_baud(id.clone(), 115200, &state).expect("set baud ok");
+        assert_eq!(
+            state.connections.lock().unwrap().get(&id).unwrap().config.baud_rate,
+            115200
+        );
+
+        let err = do_serial_set_baud("nope".into(), 9600, &state).unwrap_err();
+        assert!(matches!(err, SerialError::NotConnected(_)));
+    }
+
+    #[test]
+    fn test_do_serial_set_dtr_and_rts() {
+        let state = SerialState::new();
+        let id = do_serial_connect(sample_config("/dev/ttyUSB0"), &state).unwrap();
+
+        assert!(do_serial_set_dtr(id.clone(), true, &state).is_ok());
+        assert!(do_serial_set_rts(id, false, &state).is_ok());
+
+        assert!(matches!(
+            do_serial_set_dtr("nope".into(), true, &state).unwrap_err(),
+            SerialError::NotConnected(_)
+        ));
+        assert!(matches!(
+            do_serial_set_rts("nope".into(), true, &state).unwrap_err(),
+            SerialError::NotConnected(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_serial_list_ports_returns_empty_stub() {
+        let ports = serial_list_ports().await.expect("list ok");
+        assert!(ports.is_empty());
+    }
+
+    #[test]
+    fn test_serial_error_display_variants() {
+        assert_eq!(
+            SerialError::ConnectionFailed("x".into()).to_string(),
+            "Connection failed: x"
+        );
+        assert_eq!(SerialError::NotConnected("y".into()).to_string(), "Not connected: y");
+        assert_eq!(SerialError::WriteFailed("z".into()).to_string(), "Write failed: z");
+        assert_eq!(SerialError::PortNotFound("w".into()).to_string(), "Port not found: w");
+        assert_eq!(SerialError::ConfigError("v".into()).to_string(), "Configuration error: v");
+    }
+
+    #[test]
+    fn test_data_bits_stop_bits_parity_flow_control_serde() {
+        assert_eq!(serde_json::to_string(&DataBits::Five).unwrap(), "\"five\"");
+        assert_eq!(serde_json::to_string(&StopBits::Two).unwrap(), "\"two\"");
+        assert_eq!(serde_json::to_string(&Parity::Odd).unwrap(), "\"odd\"");
+        assert_eq!(
+            serde_json::to_string(&FlowControl::Software).unwrap(),
+            "\"software\""
+        );
     }
 }
