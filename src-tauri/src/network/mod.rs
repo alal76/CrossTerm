@@ -3789,11 +3789,18 @@ fn parse_airodump_csv(csv_path: &str) -> Result<(Vec<AirodumpNetwork>, Vec<Airod
             let station_mac = fields[0].to_string();
             if station_mac.len() < 17 { continue; }
             let bssid = fields[5].to_string();
-            let probes: Vec<String> = if fields.len() > 6 {
-                fields[6].split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
-            } else {
-                Vec::new()
-            };
+            // Probed ESSIDs are themselves comma-separated in real airodump-ng
+            // output, but the outer `trimmed.split(',')` above already split
+            // the whole line on every comma — so a client that probed for
+            // more than one network has each probed ESSID land in its own
+            // trailing field (fields[6], fields[7], ...), not all inside
+            // fields[6] as one string. Collect every field from 6 onward,
+            // not just the first.
+            let probes: Vec<String> = fields[6..]
+                .iter()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
             clients.push(AirodumpClient {
                 station_mac,
                 bssid: bssid.clone(),
@@ -6153,5 +6160,520 @@ mod tunnel_tests {
             matches!(event.status, TunnelHealthStatus::Active),
             "stub must return Active status"
         );
+    }
+
+    // ── extract_html_title ──────────────────────────────────────────────
+
+    #[test]
+    fn test_extract_html_title_finds_title_case_insensitively() {
+        let raw = "<html><head><TITLE>My Router Admin</TITLE></head></html>";
+        assert_eq!(extract_html_title(raw).as_deref(), Some("My Router Admin"));
+    }
+
+    #[test]
+    fn test_extract_html_title_trims_whitespace() {
+        let raw = "<title>  Padded Title  </title>";
+        assert_eq!(extract_html_title(raw).as_deref(), Some("Padded Title"));
+    }
+
+    #[test]
+    fn test_extract_html_title_none_when_absent() {
+        assert_eq!(extract_html_title("<html><body>no title here</body></html>"), None);
+    }
+
+    #[test]
+    fn test_extract_html_title_none_when_empty() {
+        assert_eq!(extract_html_title("<title></title>"), None);
+        assert_eq!(extract_html_title("<title>   </title>"), None);
+    }
+
+    #[test]
+    fn test_extract_html_title_none_when_unclosed() {
+        assert_eq!(extract_html_title("<title>Never closed"), None);
+    }
+
+    // ── to_title_case ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_to_title_case_capitalizes_first_lowercases_rest() {
+        assert_eq!(to_title_case("windows"), "Windows");
+        assert_eq!(to_title_case("LINUX"), "Linux");
+        assert_eq!(to_title_case("mACOS"), "Macos");
+    }
+
+    #[test]
+    fn test_to_title_case_empty_string() {
+        assert_eq!(to_title_case(""), "");
+    }
+
+    #[test]
+    fn test_to_title_case_single_char() {
+        assert_eq!(to_title_case("a"), "A");
+    }
+
+    // ── parse_band_from_channel ──────────────────────────────────────────
+
+    #[test]
+    fn test_parse_band_from_channel_uses_freq_hint_first() {
+        assert!(matches!(parse_band_from_channel(1, Some("6GHz")), WifiBand::Band6GHz));
+        assert!(matches!(parse_band_from_channel(1, Some("5 ghz")), WifiBand::Band5GHz));
+        assert!(matches!(parse_band_from_channel(100, Some("2.4ghz")), WifiBand::Band2_4GHz));
+    }
+
+    #[test]
+    fn test_parse_band_from_channel_falls_back_to_channel_number() {
+        assert!(matches!(parse_band_from_channel(6, None), WifiBand::Band2_4GHz));
+        assert!(matches!(parse_band_from_channel(14, None), WifiBand::Band2_4GHz));
+        assert!(matches!(parse_band_from_channel(36, None), WifiBand::Band5GHz));
+        assert!(matches!(parse_band_from_channel(177, None), WifiBand::Band5GHz));
+        assert!(matches!(parse_band_from_channel(200, None), WifiBand::Unknown));
+    }
+
+    #[test]
+    fn test_parse_band_from_channel_ignores_unrecognized_hint() {
+        // Hint present but matches none of the known substrings — falls
+        // through to the channel-number table, not treated as an error.
+        assert!(matches!(parse_band_from_channel(6, Some("bogus")), WifiBand::Band2_4GHz));
+    }
+
+    // ── parse_macos_security ────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_macos_security_maps_every_known_variant() {
+        assert!(matches!(parse_macos_security("WPA3_ENTERPRISE"), WifiSecurity::Wpa3Enterprise));
+        assert!(matches!(parse_macos_security("wpa3_transition"), WifiSecurity::Wpa3Transition));
+        assert!(matches!(parse_macos_security("WPA3 Personal (SAE)"), WifiSecurity::Wpa3Sae));
+        assert!(matches!(parse_macos_security("wpa2_enterprise"), WifiSecurity::Wpa2Enterprise));
+        assert!(matches!(parse_macos_security("WPA2_802.1X"), WifiSecurity::Wpa2Enterprise));
+        assert!(matches!(parse_macos_security("wpa2 personal"), WifiSecurity::Wpa2Psk));
+        assert!(matches!(parse_macos_security("WPA Personal"), WifiSecurity::WpaPsk));
+        assert!(matches!(parse_macos_security("wep"), WifiSecurity::Wep));
+        assert!(matches!(parse_macos_security("none"), WifiSecurity::Open));
+        assert!(matches!(parse_macos_security(""), WifiSecurity::Open));
+    }
+
+    #[test]
+    fn test_parse_macos_security_unknown_preserves_raw_string() {
+        match parse_macos_security("some future protocol") {
+            WifiSecurity::Unknown(raw) => assert_eq!(raw, "some future protocol"),
+            other => panic!("expected Unknown variant, got {other:?}"),
+        }
+    }
+
+    // ── parse_signal_noise ──────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_signal_noise_parses_both_values() {
+        assert_eq!(parse_signal_noise("-65 dBm / -92 dBm"), (Some(-65), Some(-92)));
+    }
+
+    #[test]
+    fn test_parse_signal_noise_handles_missing_noise() {
+        assert_eq!(parse_signal_noise("-65 dBm"), (Some(-65), None));
+    }
+
+    #[test]
+    fn test_parse_signal_noise_none_on_garbage() {
+        assert_eq!(parse_signal_noise("n/a"), (None, None));
+    }
+
+    // ── parse_channel_info ───────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_channel_info_full_format() {
+        let (channel, width, freq_hint) = parse_channel_info("36 (5GHz, 80MHz)");
+        assert_eq!(channel, 36);
+        assert_eq!(width, Some(80));
+        assert_eq!(freq_hint, Some("(5GHz, 80MHz)"));
+    }
+
+    #[test]
+    fn test_parse_channel_info_bare_number() {
+        let (channel, width, freq_hint) = parse_channel_info("11");
+        assert_eq!(channel, 11);
+        assert_eq!(width, None);
+        assert_eq!(freq_hint, None);
+    }
+
+    #[test]
+    fn test_parse_channel_info_each_width_value() {
+        assert_eq!(parse_channel_info("6 (20MHz)").1, Some(20));
+        assert_eq!(parse_channel_info("6 (40MHz)").1, Some(40));
+        assert_eq!(parse_channel_info("36 (80MHz)").1, Some(80));
+        assert_eq!(parse_channel_info("36 (160MHz)").1, Some(160));
+    }
+
+    #[test]
+    fn test_parse_channel_info_no_digits_defaults_to_zero() {
+        assert_eq!(parse_channel_info("(unknown)").0, 0);
+    }
+
+    // ── assess_security ──────────────────────────────────────────────────
+
+    fn wifi_net(ssid: &str, security: WifiSecurity, is_current: bool, signal_dbm: Option<i32>) -> WifiNetwork {
+        WifiNetwork {
+            ssid: ssid.to_string(),
+            bssid: None,
+            channel: 6,
+            channel_width_mhz: None,
+            band: WifiBand::Band2_4GHz,
+            frequency_mhz: None,
+            signal_dbm,
+            noise_dbm: None,
+            security,
+            phy_mode: None,
+            is_current,
+        }
+    }
+
+    #[test]
+    fn test_assess_security_flags_open_network_as_critical() {
+        let nets = vec![wifi_net("CoffeeShop", WifiSecurity::Open, false, None)];
+        let issues = assess_security(&nets);
+        assert!(issues.iter().any(|i| i.ssid == "CoffeeShop" && i.severity == "critical"));
+    }
+
+    #[test]
+    fn test_assess_security_flags_wep_as_critical() {
+        let nets = vec![wifi_net("OldRouter", WifiSecurity::Wep, false, None)];
+        let issues = assess_security(&nets);
+        assert!(issues.iter().any(|i| i.ssid == "OldRouter" && i.severity == "critical"));
+    }
+
+    #[test]
+    fn test_assess_security_flags_wpa2_current_network_as_info_only() {
+        let nets = vec![wifi_net("Home", WifiSecurity::Wpa2Psk, true, Some(-50))];
+        let issues = assess_security(&nets);
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].severity, "info");
+    }
+
+    #[test]
+    fn test_assess_security_does_not_flag_wpa2_on_non_current_network() {
+        let nets = vec![wifi_net("Neighbor", WifiSecurity::Wpa2Psk, false, Some(-50))];
+        let issues = assess_security(&nets);
+        assert!(issues.is_empty());
+    }
+
+    #[test]
+    fn test_assess_security_flags_hidden_ssid() {
+        let nets = vec![wifi_net("", WifiSecurity::Wpa3Sae, false, None)];
+        let issues = assess_security(&nets);
+        assert!(issues.iter().any(|i| i.issue.contains("Hidden SSID")));
+    }
+
+    #[test]
+    fn test_assess_security_flags_weak_signal_on_current_network_only() {
+        let weak_current = vec![wifi_net("Home", WifiSecurity::Wpa3Sae, true, Some(-85))];
+        let issues = assess_security(&weak_current);
+        assert!(issues.iter().any(|i| i.issue.contains("Very weak signal")));
+
+        let weak_other = vec![wifi_net("Neighbor", WifiSecurity::Wpa3Sae, false, Some(-85))];
+        assert!(assess_security(&weak_other).is_empty());
+    }
+
+    #[test]
+    fn test_assess_security_moderate_signal_is_info_severity() {
+        let nets = vec![wifi_net("Home", WifiSecurity::Wpa3Sae, true, Some(-75))];
+        let issues = assess_security(&nets);
+        assert!(issues.iter().any(|i| i.issue.contains("Moderate signal") && i.severity == "info"));
+    }
+
+    #[test]
+    fn test_assess_security_no_issues_for_strong_wpa3_network() {
+        let nets = vec![wifi_net("SecureHome", WifiSecurity::Wpa3Sae, true, Some(-40))];
+        assert!(assess_security(&nets).is_empty());
+    }
+
+    // ── compute_channel_congestion ───────────────────────────────────────
+
+    fn wifi_net_on_channel(ssid: &str, channel: u32, band: WifiBand, signal_dbm: Option<i32>) -> WifiNetwork {
+        WifiNetwork {
+            ssid: ssid.to_string(),
+            bssid: None,
+            channel,
+            channel_width_mhz: None,
+            band,
+            frequency_mhz: None,
+            signal_dbm,
+            noise_dbm: None,
+            security: WifiSecurity::Wpa2Psk,
+            phy_mode: None,
+            is_current: false,
+        }
+    }
+
+    #[test]
+    fn test_compute_channel_congestion_counts_networks_per_channel() {
+        let nets = vec![
+            wifi_net_on_channel("A", 6, WifiBand::Band2_4GHz, Some(-40)),
+            wifi_net_on_channel("B", 6, WifiBand::Band2_4GHz, Some(-60)),
+            wifi_net_on_channel("C", 11, WifiBand::Band2_4GHz, Some(-50)),
+        ];
+        let (congestion, _rec2g, _rec5g) = compute_channel_congestion(&nets);
+        let ch6 = congestion.iter().find(|c| c.channel == 6).expect("channel 6 entry");
+        assert_eq!(ch6.network_count, 2);
+        assert_eq!(ch6.strongest_signal_dbm, Some(-40));
+        assert_eq!(ch6.weakest_signal_dbm, Some(-60));
+        let ch11 = congestion.iter().find(|c| c.channel == 11).expect("channel 11 entry");
+        assert_eq!(ch11.network_count, 1);
+    }
+
+    #[test]
+    fn test_compute_channel_congestion_levels() {
+        // 0-1 networks = low, 2-3 = medium, 4+ = high
+        let one = vec![wifi_net_on_channel("A", 1, WifiBand::Band2_4GHz, None)];
+        assert_eq!(compute_channel_congestion(&one).0[0].congestion_level, "low");
+
+        let three: Vec<WifiNetwork> = (0..3).map(|i| wifi_net_on_channel(&format!("N{i}"), 1, WifiBand::Band2_4GHz, None)).collect();
+        assert_eq!(compute_channel_congestion(&three).0[0].congestion_level, "medium");
+
+        let five: Vec<WifiNetwork> = (0..5).map(|i| wifi_net_on_channel(&format!("N{i}"), 1, WifiBand::Band2_4GHz, None)).collect();
+        assert_eq!(compute_channel_congestion(&five).0[0].congestion_level, "high");
+    }
+
+    #[test]
+    fn test_compute_channel_congestion_recommends_least_used_2g_channel() {
+        // Channel 1 has two networks, 6 and 11 have none — 6/11 should be
+        // recommended ahead of 1.
+        let nets = vec![
+            wifi_net_on_channel("A", 1, WifiBand::Band2_4GHz, None),
+            wifi_net_on_channel("B", 1, WifiBand::Band2_4GHz, None),
+        ];
+        let (_congestion, recommended_2g, _rec5g) = compute_channel_congestion(&nets);
+        assert_eq!(recommended_2g.len(), 3);
+        assert_ne!(recommended_2g[0], 1, "the busiest channel should not be the top recommendation");
+    }
+
+    #[test]
+    fn test_compute_channel_congestion_recommends_5g_channels_capped_at_five() {
+        let (_congestion, _rec2g, recommended_5g) = compute_channel_congestion(&[]);
+        assert_eq!(recommended_5g.len(), 5);
+    }
+
+    #[test]
+    fn test_compute_channel_congestion_empty_input() {
+        let (congestion, recommended_2g, recommended_5g) = compute_channel_congestion(&[]);
+        assert!(congestion.is_empty());
+        assert_eq!(recommended_2g.len(), 3);
+        assert_eq!(recommended_5g.len(), 5);
+    }
+
+    // ── extract_tailscale_peer ───────────────────────────────────────────
+
+    #[test]
+    fn test_extract_tailscale_peer_prefers_dns_name_over_hostname() {
+        let json: serde_json::Value = serde_json::from_str(r#"{
+            "TailscaleIPs": ["100.64.0.5"],
+            "DNSName": "laptop.tailnet.ts.net.",
+            "HostName": "laptop",
+            "OS": "linux",
+            "Online": true
+        }"#).unwrap();
+        let peer = extract_tailscale_peer(&json, false).expect("valid peer");
+        assert_eq!(peer.ip, "100.64.0.5");
+        assert_eq!(peer.hostname, "laptop.tailnet.ts.net", "trailing dot must be stripped");
+        assert_eq!(peer.os.as_deref(), Some("linux"));
+        assert!(peer.online);
+        assert!(!peer.is_self);
+    }
+
+    #[test]
+    fn test_extract_tailscale_peer_falls_back_to_hostname_when_no_dns_name() {
+        let json: serde_json::Value = serde_json::from_str(r#"{
+            "TailscaleIPs": ["100.64.0.6"],
+            "HostName": "desktop"
+        }"#).unwrap();
+        let peer = extract_tailscale_peer(&json, true).expect("valid peer");
+        assert_eq!(peer.hostname, "desktop");
+        assert!(peer.is_self);
+        // Online defaults to is_self when the field is absent.
+        assert!(peer.online);
+    }
+
+    #[test]
+    fn test_extract_tailscale_peer_none_when_no_ipv4() {
+        let json: serde_json::Value = serde_json::from_str(r#"{
+            "TailscaleIPs": ["fd7a:115c:a1e0::5"],
+            "HostName": "v6only"
+        }"#).unwrap();
+        assert!(extract_tailscale_peer(&json, false).is_none());
+    }
+
+    #[test]
+    fn test_extract_tailscale_peer_none_when_hostname_empty() {
+        let json: serde_json::Value = serde_json::from_str(r#"{
+            "TailscaleIPs": ["100.64.0.7"]
+        }"#).unwrap();
+        assert!(extract_tailscale_peer(&json, false).is_none());
+    }
+
+    #[test]
+    fn test_extract_tailscale_peer_none_when_no_ips_field() {
+        let json: serde_json::Value = serde_json::from_str(r#"{"HostName": "nowhere"}"#).unwrap();
+        assert!(extract_tailscale_peer(&json, false).is_none());
+    }
+
+    // ── aircrack_search_paths / resolve_tool ────────────────────────────
+
+    #[test]
+    fn test_aircrack_search_paths_includes_standard_unix_dirs() {
+        let paths = aircrack_search_paths();
+        assert!(paths.contains(&"/usr/bin".to_string()));
+        assert!(paths.contains(&"/usr/local/bin".to_string()));
+        assert!(paths.contains(&"/opt/homebrew/bin".to_string()));
+    }
+
+    #[test]
+    fn test_aircrack_search_paths_deduplicates_against_path_env() {
+        // /usr/bin is already in the hardcoded list; PATH containing it too
+        // must not produce a duplicate entry.
+        let paths = aircrack_search_paths();
+        let count = paths.iter().filter(|p| p.as_str() == "/usr/bin").count();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_resolve_tool_falls_back_to_bare_name_when_not_found() {
+        // A tool name that will not exist under any of the search paths.
+        let resolved = resolve_tool("definitely-not-a-real-aircrack-tool-xyz");
+        assert_eq!(resolved, "definitely-not-a-real-aircrack-tool-xyz");
+    }
+
+    #[test]
+    fn test_resolve_tool_finds_a_real_binary_on_path() {
+        // `sh` is present at /bin/sh on every platform this runs CI on, but
+        // resolve_tool only searches its hardcoded sbin/bin dirs plus
+        // $PATH — use something virtually guaranteed to be on $PATH itself
+        // rather than assume /bin is searched.
+        let path_dirs: Vec<String> = std::env::var("PATH")
+            .map(|p| p.split(':').map(String::from).collect())
+            .unwrap_or_default();
+        if let Some(dir) = path_dirs.iter().find(|d| std::path::Path::new(&format!("{d}/ls")).exists()) {
+            let resolved = resolve_tool("ls");
+            assert_eq!(resolved, format!("{dir}/ls"));
+        }
+        // If `ls` isn't found on PATH in this environment, silently skip —
+        // the fallback-to-bare-name behavior is already covered above.
+    }
+
+    // ── require_disclaimer ───────────────────────────────────────────────
+
+    #[test]
+    fn test_require_disclaimer_rejects_when_not_accepted() {
+        let state = NetworkState::new();
+        assert!(require_disclaimer(&state).is_err());
+    }
+
+    #[test]
+    fn test_require_disclaimer_accepts_once_flag_is_set() {
+        let state = NetworkState::new();
+        state.aircrack_disclaimer_accepted.store(true, Ordering::SeqCst);
+        assert!(require_disclaimer(&state).is_ok());
+    }
+
+    // ── new_dns_server_registry ──────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_new_dns_server_registry_starts_empty() {
+        let registry = new_dns_server_registry();
+        let guard = registry.read().await;
+        assert!(guard.is_empty());
+    }
+
+    // ── parse_airodump_csv ───────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_airodump_csv_parses_networks_and_clients() {
+        let csv = "BSSID, First time seen, Last time seen, channel, Speed, Privacy, Cipher, Authentication, Power, # beacons, # IV, LAN IP, ID-length, ESSID, Key\n\
+AA:BB:CC:DD:EE:FF, 2026-01-01 00:00:00, 2026-01-01 00:01:00, 6, 54, WPA2, CCMP, PSK, -45, 120, 30, 0.0.0.0, 8, HomeNet, \n\
+\n\
+Station MAC, First time seen, Last time seen, Power, # packets, BSSID, Probed ESSIDs\n\
+11:22:33:44:55:66, 2026-01-01 00:00:30, 2026-01-01 00:01:00, -50, 40, AA:BB:CC:DD:EE:FF, HomeNet,OtherNet\n";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("dump-01.csv");
+        std::fs::write(&path, csv).unwrap();
+
+        let (networks, clients) = parse_airodump_csv(path.to_str().unwrap()).expect("valid csv");
+        assert_eq!(networks.len(), 1);
+        assert_eq!(networks[0].bssid, "AA:BB:CC:DD:EE:FF");
+        assert_eq!(networks[0].channel, 6);
+        assert_eq!(networks[0].essid, "HomeNet");
+        assert_eq!(networks[0].power, -45);
+        assert_eq!(networks[0].clients, 1, "the one client associated with this BSSID must be counted");
+
+        assert_eq!(clients.len(), 1);
+        assert_eq!(clients[0].station_mac, "11:22:33:44:55:66");
+        assert_eq!(clients[0].bssid, "AA:BB:CC:DD:EE:FF");
+        assert_eq!(clients[0].probes, vec!["HomeNet".to_string(), "OtherNet".to_string()]);
+    }
+
+    #[test]
+    fn test_parse_airodump_csv_missing_file_returns_err() {
+        let result = parse_airodump_csv("/nonexistent/path/that/should/not/exist.csv");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_airodump_csv_skips_malformed_short_lines() {
+        let csv = "BSSID, First time seen, Last time seen, channel, Speed, Privacy, Cipher, Authentication, Power, # beacons, # IV, LAN IP, ID-length, ESSID, Key\n\
+too, short, a, line\n";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("dump-02.csv");
+        std::fs::write(&path, csv).unwrap();
+
+        let (networks, clients) = parse_airodump_csv(path.to_str().unwrap()).expect("valid csv");
+        assert!(networks.is_empty());
+        assert!(clients.is_empty());
+    }
+
+    // ── aircrack_audit ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_aircrack_audit_appends_entry_with_given_fields() {
+        let state = NetworkState::new();
+        aircrack_audit(&state, AircrackOpKind::Scan, "wlan0mon", Some("AA:BB:CC:DD:EE:FF"), "airodump-ng wlan0mon", "started");
+        let log = state.aircrack_audit_log.lock().unwrap();
+        assert_eq!(log.len(), 1);
+        assert!(matches!(log[0].operation, AircrackOpKind::Scan));
+        assert_eq!(log[0].interface, "wlan0mon");
+        assert_eq!(log[0].target.as_deref(), Some("AA:BB:CC:DD:EE:FF"));
+        assert_eq!(log[0].command, "airodump-ng wlan0mon");
+        assert_eq!(log[0].result, "started");
+        assert!(!log[0].timestamp.is_empty());
+    }
+
+    #[test]
+    fn test_aircrack_audit_accumulates_multiple_entries_in_order() {
+        let state = NetworkState::new();
+        aircrack_audit(&state, AircrackOpKind::MonitorStart, "wlan0", None, "airmon-ng start wlan0", "ok");
+        aircrack_audit(&state, AircrackOpKind::MonitorStop, "wlan0mon", None, "airmon-ng stop wlan0mon", "ok");
+        let log = state.aircrack_audit_log.lock().unwrap();
+        assert_eq!(log.len(), 2);
+        assert!(matches!(log[0].operation, AircrackOpKind::MonitorStart));
+        assert!(matches!(log[1].operation, AircrackOpKind::MonitorStop));
+    }
+
+    #[test]
+    fn test_aircrack_audit_target_none_when_not_given() {
+        let state = NetworkState::new();
+        aircrack_audit(&state, AircrackOpKind::Deauth, "wlan0mon", None, "aireplay-ng --deauth", "sent");
+        let log = state.aircrack_audit_log.lock().unwrap();
+        assert!(log[0].target.is_none());
+    }
+
+    // ── check_tool_exists ────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_check_tool_exists_true_for_a_real_system_binary() {
+        // `ls` is present via `which` on every CI runner this project
+        // targets (macOS/Linux/Windows-with-coreutils-in-PATH), unlike
+        // aircrack-ng which is not installed in CI at all.
+        assert!(check_tool_exists("ls").await);
+    }
+
+    #[tokio::test]
+    async fn test_check_tool_exists_false_for_a_nonexistent_binary() {
+        assert!(!check_tool_exists("definitely-not-a-real-binary-xyz-123").await);
     }
 }
