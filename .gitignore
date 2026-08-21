@@ -4,6 +4,7 @@ node_modules/
 # Build output
 dist/
 src-tauri/target/
+src-tauri/fuzz/target/
 coverage/
 coverage-rust/
 
