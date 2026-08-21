@@ -508,16 +508,14 @@ pub async fn cloud_aws_list_s3_objects(
     parse_s3_objects(&json)
 }
 
-#[tauri::command]
-pub async fn cloud_aws_cloudwatch_tail(
-    app: tauri::AppHandle,
-    log_group: String,
-    log_stream: Option<String>,
-) -> Result<(), CloudError> {
+/// Build the `aws logs tail` argument list, optionally scoping to a single
+/// log stream. Split out from the command so the branch (stream filter
+/// present vs. absent) is unit-testable without invoking the real CLI.
+fn cloudwatch_tail_args(log_group: &str, log_stream: &Option<String>) -> Vec<String> {
     let mut args = vec![
         "logs".to_string(),
         "tail".to_string(),
-        log_group,
+        log_group.to_string(),
         "--follow".to_string(),
         "--format".to_string(),
         "short".to_string(),
@@ -525,8 +523,19 @@ pub async fn cloud_aws_cloudwatch_tail(
 
     if let Some(stream) = log_stream {
         args.push("--log-stream-names".to_string());
-        args.push(stream);
+        args.push(stream.clone());
     }
+
+    args
+}
+
+#[tauri::command]
+pub async fn cloud_aws_cloudwatch_tail(
+    app: tauri::AppHandle,
+    log_group: String,
+    log_stream: Option<String>,
+) -> Result<(), CloudError> {
+    let args = cloudwatch_tail_args(&log_group, &log_stream);
 
     let mut child = tokio::process::Command::new("aws")
         .args(&args)
@@ -1005,6 +1014,92 @@ aws_secret_access_key = je7MtGbClwBF/2Zp9Utk/h3yCo8nvbEXAMPLEKEY
         assert_eq!(summary.total_cost, 0.0);
         assert!(summary.by_service.is_empty());
         assert_eq!(summary.currency, "USD");
+    }
+
+    #[test]
+    fn test_aws_parse_ec2_reservation_missing_instances_key_yields_empty() {
+        // A reservation with no "Instances" key at all (not just an empty
+        // array) should be skipped gracefully via unwrap_or(&Vec::new()).
+        let json = r#"{ "Reservations": [ { "ReservationId": "r-1" } ] }"#;
+        let instances = parse_ec2_instances(json).unwrap();
+        assert!(instances.is_empty());
+    }
+
+    #[test]
+    fn test_aws_parse_ec2_tags_present_without_name_key_falls_back_to_empty() {
+        // Tags array is present and non-empty, but none of the entries has
+        // Key == "Name" — exercises the find_map returning None branch,
+        // distinct from the "no Tags at all" case already covered above.
+        let json = r#"{
+            "Reservations": [
+                {
+                    "Instances": [
+                        {
+                            "InstanceId": "i-untagged",
+                            "InstanceType": "t3.small",
+                            "State": { "Name": "running" },
+                            "LaunchTime": "2024-03-01T00:00:00Z",
+                            "Tags": [
+                                { "Key": "Environment", "Value": "prod" },
+                                { "Key": "Team", "Value": "infra" }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }"#;
+        let instances = parse_ec2_instances(json).unwrap();
+        assert_eq!(instances.len(), 1);
+        assert_eq!(instances[0].name, "");
+    }
+
+    #[test]
+    fn test_aws_cost_summary_group_missing_keys_defaults_to_unknown_service() {
+        let json: serde_json::Value = serde_json::from_str(
+            r#"{
+                "ResultsByTime": [
+                    {
+                        "Groups": [
+                            {
+                                "Metrics": { "BlendedCost": { "Amount": "5.00", "Unit": "USD" } }
+                            }
+                        ]
+                    }
+                ]
+            }"#,
+        )
+        .unwrap();
+        let summary = parse_cost_response(&json, "s".to_string(), "e".to_string());
+        assert_eq!(summary.by_service.len(), 1);
+        assert_eq!(summary.by_service[0].service_name, "Unknown");
+        assert!((summary.by_service[0].cost - 5.00).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_cloudwatch_tail_args_without_stream() {
+        let args = cloudwatch_tail_args("my-log-group", &None);
+        assert_eq!(
+            args,
+            vec!["logs", "tail", "my-log-group", "--follow", "--format", "short"]
+        );
+    }
+
+    #[test]
+    fn test_cloudwatch_tail_args_with_stream() {
+        let args = cloudwatch_tail_args("my-log-group", &Some("stream-1".to_string()));
+        assert_eq!(
+            args,
+            vec![
+                "logs",
+                "tail",
+                "my-log-group",
+                "--follow",
+                "--format",
+                "short",
+                "--log-stream-names",
+                "stream-1"
+            ]
+        );
     }
 
     #[test]

@@ -202,6 +202,13 @@ struct VncClipboardEvent {
     text: String,
 }
 
+/// A degenerate raw-image update (zero width/height, or no pixel bytes)
+/// carries nothing worth forwarding to the frontend. Split out from
+/// `handle_vnc_event` so this guard is unit-testable without an `AppHandle`.
+fn is_empty_raw_image(width: u16, height: u16, data_len: usize) -> bool {
+    width == 0 || height == 0 || data_len == 0
+}
+
 // ── Event loop ───────────────────────────────────────────────────────────
 
 async fn handle_vnc_event(
@@ -226,7 +233,7 @@ async fn handle_vnc_event(
             );
         }
         VncEvent::RawImage(rect, data) => {
-            if rect.width == 0 || rect.height == 0 || data.is_empty() {
+            if is_empty_raw_image(rect.width, rect.height, data.len()) {
                 return;
             }
             let encoded = base64::engine::general_purpose::STANDARD.encode(&data);
@@ -723,5 +730,70 @@ mod tests {
         assert_eq!(restored.id, "abc");
         assert_eq!(restored.width, 1024);
         assert!(restored.view_only);
+    }
+
+    // ── is_empty_raw_image ──────────────────────────────────────────────
+
+    #[test]
+    fn is_empty_raw_image_true_when_width_is_zero() {
+        assert!(is_empty_raw_image(0, 10, 100));
+    }
+
+    #[test]
+    fn is_empty_raw_image_true_when_height_is_zero() {
+        assert!(is_empty_raw_image(10, 0, 100));
+    }
+
+    #[test]
+    fn is_empty_raw_image_true_when_data_is_empty() {
+        assert!(is_empty_raw_image(10, 10, 0));
+    }
+
+    #[test]
+    fn is_empty_raw_image_false_for_a_well_formed_update() {
+        assert!(!is_empty_raw_image(10, 10, 400));
+    }
+
+    // ── Result / event payload serde shapes ──────────────────────────────
+
+    #[test]
+    fn vnc_connect_result_serializes_expected_fields() {
+        let result = VncConnectResult { id: "conn-1".into(), width: 1024, height: 768 };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"id\":\"conn-1\""));
+        assert!(json.contains("\"width\":1024"));
+        assert!(json.contains("\"height\":768"));
+    }
+
+    #[test]
+    fn vnc_event_payloads_serialize_expected_fields() {
+        let resize = VncResizeEvent { connection_id: "c1".into(), width: 640, height: 480 };
+        let json = serde_json::to_string(&resize).unwrap();
+        assert!(json.contains("\"connection_id\":\"c1\""));
+        assert!(json.contains("\"width\":640"));
+
+        let frame = VncFrameEvent {
+            connection_id: "c1".into(),
+            x: 1,
+            y: 2,
+            width: 10,
+            height: 20,
+            data_base64: "QUJD".into(),
+        };
+        let json = serde_json::to_string(&frame).unwrap();
+        assert!(json.contains("\"x\":1"));
+        assert!(json.contains("\"data_base64\":\"QUJD\""));
+
+        let connected = VncConnectedEvent { connection_id: "c1".into(), width: 800, height: 600 };
+        let json = serde_json::to_string(&connected).unwrap();
+        assert!(json.contains("\"width\":800"));
+
+        let disconnected = VncDisconnectedEvent { connection_id: "c1".into(), reason: "user_requested".into() };
+        let json = serde_json::to_string(&disconnected).unwrap();
+        assert!(json.contains("\"reason\":\"user_requested\""));
+
+        let clipboard = VncClipboardEvent { connection_id: "c1".into(), text: "copied text".into() };
+        let json = serde_json::to_string(&clipboard).unwrap();
+        assert!(json.contains("\"text\":\"copied text\""));
     }
 }

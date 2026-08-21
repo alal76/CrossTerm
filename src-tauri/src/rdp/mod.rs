@@ -422,6 +422,29 @@ fn emit_frame(app: &AppHandle, conn_id: &str, image: &DecodedImage, rect: &Inclu
     );
 }
 
+/// Map a frontend mouse button/event-type pair to the RDP fast-path
+/// pointer flags. Split out from `rdp_send_mouse` so this mapping is
+/// unit-testable without a live connection (the command needs a real
+/// `tauri::State` connection entry to reach this logic otherwise).
+fn rdp_mouse_flags(button: &RdpMouseButton, event_type: &RdpMouseEventType) -> PointerFlags {
+    match (button, event_type) {
+        (_, RdpMouseEventType::Move) => PointerFlags::MOVE,
+        (RdpMouseButton::Left, RdpMouseEventType::Down) => {
+            PointerFlags::LEFT_BUTTON | PointerFlags::DOWN
+        }
+        (RdpMouseButton::Left, _) => PointerFlags::LEFT_BUTTON,
+        (RdpMouseButton::Right, RdpMouseEventType::Down) => {
+            PointerFlags::RIGHT_BUTTON | PointerFlags::DOWN
+        }
+        (RdpMouseButton::Right, _) => PointerFlags::RIGHT_BUTTON,
+        (RdpMouseButton::Middle, RdpMouseEventType::Down) => {
+            PointerFlags::MIDDLE_BUTTON_OR_WHEEL | PointerFlags::DOWN
+        }
+        (RdpMouseButton::Middle, _) => PointerFlags::MIDDLE_BUTTON_OR_WHEEL,
+        _ => PointerFlags::MOVE,
+    }
+}
+
 // ── Session thread ──────────────────────────────────────────────────────
 
 type TlsStream = rustls::StreamOwned<ClientConnection, TcpStream>;
@@ -692,22 +715,7 @@ pub fn rdp_send_mouse(
         .get(&connection_id)
         .ok_or_else(|| RdpError::NotFound(connection_id.clone()))?;
 
-    let flags = match (&event.button, &event.event_type) {
-        (_, RdpMouseEventType::Move) => PointerFlags::MOVE,
-        (RdpMouseButton::Left, RdpMouseEventType::Down) => {
-            PointerFlags::LEFT_BUTTON | PointerFlags::DOWN
-        }
-        (RdpMouseButton::Left, _) => PointerFlags::LEFT_BUTTON,
-        (RdpMouseButton::Right, RdpMouseEventType::Down) => {
-            PointerFlags::RIGHT_BUTTON | PointerFlags::DOWN
-        }
-        (RdpMouseButton::Right, _) => PointerFlags::RIGHT_BUTTON,
-        (RdpMouseButton::Middle, RdpMouseEventType::Down) => {
-            PointerFlags::MIDDLE_BUTTON_OR_WHEEL | PointerFlags::DOWN
-        }
-        (RdpMouseButton::Middle, _) => PointerFlags::MIDDLE_BUTTON_OR_WHEEL,
-        _ => PointerFlags::MOVE,
-    };
+    let flags = rdp_mouse_flags(&event.button, &event.event_type);
 
     let fp = FastPathInputEvent::MouseEvent(MousePdu {
         flags,
@@ -1080,5 +1088,127 @@ mod tests {
         let restored: RdpRedirectionConfig = serde_json::from_str(&serde_json::to_string(&redir).unwrap()).unwrap();
         assert!(restored.printer);
         assert_eq!(restored.drives.len(), 1);
+    }
+
+    // ── rdp_mouse_flags ──────────────────────────────────────────────
+
+    #[test]
+    fn test_rdp_mouse_flags_move_ignores_button() {
+        for button in [RdpMouseButton::Left, RdpMouseButton::Right, RdpMouseButton::Middle, RdpMouseButton::None] {
+            assert_eq!(rdp_mouse_flags(&button, &RdpMouseEventType::Move), PointerFlags::MOVE);
+        }
+    }
+
+    #[test]
+    fn test_rdp_mouse_flags_left_button() {
+        assert_eq!(
+            rdp_mouse_flags(&RdpMouseButton::Left, &RdpMouseEventType::Down),
+            PointerFlags::LEFT_BUTTON | PointerFlags::DOWN
+        );
+        assert_eq!(
+            rdp_mouse_flags(&RdpMouseButton::Left, &RdpMouseEventType::Up),
+            PointerFlags::LEFT_BUTTON
+        );
+        assert_eq!(
+            rdp_mouse_flags(&RdpMouseButton::Left, &RdpMouseEventType::Scroll),
+            PointerFlags::LEFT_BUTTON
+        );
+    }
+
+    #[test]
+    fn test_rdp_mouse_flags_right_button() {
+        assert_eq!(
+            rdp_mouse_flags(&RdpMouseButton::Right, &RdpMouseEventType::Down),
+            PointerFlags::RIGHT_BUTTON | PointerFlags::DOWN
+        );
+        assert_eq!(
+            rdp_mouse_flags(&RdpMouseButton::Right, &RdpMouseEventType::Up),
+            PointerFlags::RIGHT_BUTTON
+        );
+    }
+
+    #[test]
+    fn test_rdp_mouse_flags_middle_button() {
+        assert_eq!(
+            rdp_mouse_flags(&RdpMouseButton::Middle, &RdpMouseEventType::Down),
+            PointerFlags::MIDDLE_BUTTON_OR_WHEEL | PointerFlags::DOWN
+        );
+        assert_eq!(
+            rdp_mouse_flags(&RdpMouseButton::Middle, &RdpMouseEventType::Up),
+            PointerFlags::MIDDLE_BUTTON_OR_WHEEL
+        );
+    }
+
+    #[test]
+    fn test_rdp_mouse_flags_none_button_defaults_to_move() {
+        // RdpMouseButton::None with a non-Move event type falls through to
+        // the catch-all arm, distinct from the explicit Move-always case.
+        assert_eq!(rdp_mouse_flags(&RdpMouseButton::None, &RdpMouseEventType::Down), PointerFlags::MOVE);
+        assert_eq!(rdp_mouse_flags(&RdpMouseButton::None, &RdpMouseEventType::Up), PointerFlags::MOVE);
+        assert_eq!(rdp_mouse_flags(&RdpMouseButton::None, &RdpMouseEventType::Scroll), PointerFlags::MOVE);
+    }
+
+    // ── Event payload / result serde shapes ────────────────────────────
+
+    #[test]
+    fn test_rdp_connection_status_all_variants_round_trip() {
+        for status in [RdpConnectionStatus::Connecting, RdpConnectionStatus::Connected, RdpConnectionStatus::Disconnected] {
+            let json = serde_json::to_string(&status).unwrap();
+            let restored: RdpConnectionStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(format!("{restored:?}"), format!("{status:?}"));
+        }
+    }
+
+    #[test]
+    fn test_rdp_connect_result_serializes_expected_fields() {
+        let result = RdpConnectResult { id: "conn-1".into(), width: 1024, height: 768 };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"id\":\"conn-1\""));
+        assert!(json.contains("\"width\":1024"));
+        assert!(json.contains("\"height\":768"));
+    }
+
+    #[test]
+    fn test_rdp_connection_info_round_trip() {
+        let info = RdpConnectionInfo {
+            id: "abc".into(),
+            host: "10.0.0.1".into(),
+            port: 3389,
+            username: "admin".into(),
+            status: RdpConnectionStatus::Connected,
+            width: 1920,
+            height: 1080,
+            connected_at: Some("2024-01-01T00:00:00Z".into()),
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        let restored: RdpConnectionInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.id, "abc");
+        assert_eq!(restored.host, "10.0.0.1");
+        assert_eq!(restored.width, 1920);
+        assert_eq!(restored.connected_at.as_deref(), Some("2024-01-01T00:00:00Z"));
+    }
+
+    #[test]
+    fn test_rdp_event_payloads_serialize_expected_fields() {
+        let connected = RdpConnectedEvent { connection_id: "c1".into(), width: 800, height: 600 };
+        let json = serde_json::to_string(&connected).unwrap();
+        assert!(json.contains("\"connection_id\":\"c1\""));
+        assert!(json.contains("\"width\":800"));
+
+        let frame = RdpFrameEvent {
+            connection_id: "c1".into(),
+            x: 1,
+            y: 2,
+            width: 10,
+            height: 20,
+            data_base64: "QUJD".into(),
+        };
+        let json = serde_json::to_string(&frame).unwrap();
+        assert!(json.contains("\"x\":1"));
+        assert!(json.contains("\"data_base64\":\"QUJD\""));
+
+        let disconnected = RdpDisconnectedEvent { connection_id: "c1".into(), reason: "user_requested".into() };
+        let json = serde_json::to_string(&disconnected).unwrap();
+        assert!(json.contains("\"reason\":\"user_requested\""));
     }
 }
