@@ -122,8 +122,11 @@ tonic = { version = "0.12", default-features = false, features = ["channel", "tl
 rumqttc = { version = "0.25", default-features = false, features = ["use-rustls"] }
 which = "6"
 
-# Clipboard
-arboard = "3"
+# Clipboard - the official plugin (not arboard directly), since it has real
+# Android/iOS support (plain-text write/clear via native platform code) that
+# arboard itself lacks entirely - arboard failed to even compile for
+# aarch64-linux-android.
+tauri-plugin-clipboard-manager = "2"
 kube = { version = "0.97", default-features = false, features = ["client", "config", "rustls-tls", "ws"] }
 k8s-openapi = { version = "0.23", features = ["v1_31"] }
 spice-client = { version = "0.2.0", default-features = false }

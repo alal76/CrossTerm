@@ -1353,17 +1353,16 @@ pub fn vault_check_orphans(
 
 #[tauri::command]
 pub async fn vault_clipboard_copy(
+    app: AppHandle,
     config_state: tauri::State<'_, crate::config::ConfigState>,
     text: String,
     clear_after_secs: u32,
 ) -> Result<(), VaultError> {
-    {
-        let mut clipboard = arboard::Clipboard::new()
-            .map_err(|e| VaultError::Encryption(format!("Clipboard error: {}", e)))?;
-        clipboard
-            .set_text(&text)
-            .map_err(|e| VaultError::Encryption(format!("Clipboard error: {}", e)))?;
-    }
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+
+    app.clipboard()
+        .write_text(text)
+        .map_err(|e| VaultError::Encryption(format!("Clipboard error: {}", e)))?;
 
     let pid = config_state
         .active_profile_id
@@ -1378,11 +1377,10 @@ pub async fn vault_clipboard_copy(
     );
 
     let delay = clear_after_secs;
+    let app_for_clear = app.clone();
     tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(delay as u64)).await;
-        if let Ok(mut clipboard) = arboard::Clipboard::new() {
-            let _ = clipboard.set_text("");
-        }
+        let _ = app_for_clear.clipboard().clear();
     });
 
     Ok(())
@@ -2068,14 +2066,6 @@ mod tests {
         let detail = vault.credential_get(&vid, &id).unwrap();
         assert_eq!(detail.name, "Shared Cred");
         assert_eq!(detail.data["password"], "s3cret!");
-    }
-
-    // ── Clipboard ───────────────────────────────────────────────────
-
-    #[test]
-    fn test_clipboard_arboard_available() {
-        let result = arboard::Clipboard::new();
-        assert!(result.is_ok() || result.is_err());
     }
 
     // ── UT-V-20: Biometric availability ─────────────────────────────
