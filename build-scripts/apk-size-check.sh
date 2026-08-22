@@ -1,6 +1,9 @@
 #!/bin/bash
+# Usage: ./build-scripts/apk-size-check.sh [path-to-apk]
+# Defaults to the release APK's standard output path; pass a path explicitly
+# for a debug build (e.g. .../apk/universal/debug/app-universal-debug.apk).
 set -euo pipefail
-APK="src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk"
+APK="${1:-src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk}"
 if [ -f "$APK" ]; then
   SIZE=$(stat -f%z "$APK" 2>/dev/null || stat --printf="%s" "$APK")
   SIZE_MB=$((SIZE / 1048576))
