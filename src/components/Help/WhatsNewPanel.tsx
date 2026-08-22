@@ -2,11 +2,16 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { X, Sparkles } from "lucide-react";
 
-const APP_VERSION = "2.0.14";
+const APP_VERSION = "2.0.15";
 const DISMISSED_VERSION_KEY = "crossterm:whats-new-dismissed";
 
 const RELEASE_NOTES = `
 ## What's New in CrossTerm ${APP_VERSION}
+
+### Under the Hood
+- No user-facing changes in this release. Added cross-platform build scripts for producing desktop and Android binaries, and fixed several packaging scripts that had drifted from the real app (a Homebrew uninstall cleanup path, a plaintext-credential-leak security check, and the Flatpak/Linux desktop integration files all referenced the wrong internal names, so they silently didn't do what they were supposed to).
+
+## CrossTerm 2.0.14
 
 ### Under the Hood
 - No user-facing changes in this release (the vault always has a real backend in the packaged app). Fixed a bug that only showed up running outside the real app shell (e.g. our own test suite): the credential vault could force its "Create Vault" screen open even when a vault already existed, if the backend connection wasn't available yet. Also re-enabled the full end-to-end test suite in CI, which had been disabled since mid-August.
