@@ -2,11 +2,16 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { X, Sparkles } from "lucide-react";
 
-const APP_VERSION = "2.0.15";
+const APP_VERSION = "2.0.16";
 const DISMISSED_VERSION_KEY = "crossterm:whats-new-dismissed";
 
 const RELEASE_NOTES = `
 ## What's New in CrossTerm ${APP_VERSION}
+
+### Under the Hood
+- No user-facing changes in this release. Added a real Android build to CI (the app now compiles and packages for Android for the first time), which surfaced and fixed genuine cross-compilation gaps: the terminal library's old serial-port dependency and the clipboard library both had no Android support at all, and a couple of our own platform-specific code paths needed small fixes. Also fixed a real, if narrow, Windows bug found along the way: a newer terminal library version can make Windows hang waiting for a cursor-position handshake our own automated tests don't answer (real usage isn't affected, since the app's terminal display already handles this correctly).
+
+## CrossTerm 2.0.15
 
 ### Under the Hood
 - No user-facing changes in this release. Added cross-platform build scripts for producing desktop and Android binaries, and fixed several packaging scripts that had drifted from the real app (a Homebrew uninstall cleanup path, a plaintext-credential-leak security check, and the Flatpak/Linux desktop integration files all referenced the wrong internal names, so they silently didn't do what they were supposed to).
