@@ -692,6 +692,28 @@ mod tests {
         String::from_utf8_lossy(&data).to_string()
     }
 
+    /// Polls `read_output(buf)` until it contains `needle` or `timeout` elapses,
+    /// returning the last-seen output either way. A fixed sleep here is
+    /// inherently racy against real shell startup/echo timing (which varies by
+    /// OS, shell, and how loaded the machine is - e.g. a shell may emit an
+    /// initial escape query like DSR `\x1b[6n` before echoing anything back),
+    /// so tests that spawn a real shell poll for the expected content instead
+    /// of assuming it's present after one fixed delay.
+    fn wait_for_output_containing(
+        buf: &Arc<Mutex<Vec<u8>>>,
+        needle: &str,
+        timeout: std::time::Duration,
+    ) -> String {
+        let start = std::time::Instant::now();
+        loop {
+            let text = read_output(buf);
+            if text.contains(needle) || start.elapsed() >= timeout {
+                return text;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+
     // ── PTY-backed tests (bypassing AppHandle) ──────────────────────
 
     #[test]
@@ -725,9 +747,7 @@ mod tests {
             .write(&info.id, b"echo hello\n")
             .expect("Failed to write to terminal");
 
-        std::thread::sleep(std::time::Duration::from_millis(500));
-
-        let text = read_output(&output);
+        let text = wait_for_output_containing(&output, "hello", std::time::Duration::from_secs(5));
         assert!(
             text.contains("hello"),
             "Output should contain 'hello', got: {:?}",
@@ -922,7 +942,7 @@ mod tests {
         // Create terminal, start logging to a temp file, write data,
         // stop logging. Verify log file contains output.
         let manager = TerminalManager::new();
-        let (info, _output) = create_test_session(&manager, None, None, None, None, None)
+        let (info, output) = create_test_session(&manager, None, None, None, None, None)
             .expect("Failed to create test terminal");
 
         let tmp_dir = std::env::temp_dir();
@@ -937,7 +957,11 @@ mod tests {
             .write(&info.id, b"echo logtest123\n")
             .expect("Failed to write to terminal");
 
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        // The reader thread appends to the in-memory buffer and writes the
+        // same chunk to the log file back-to-back within one iteration, so
+        // once the buffer contains this, the log file write for it has
+        // already happened too - a safe, pollable proxy for "logged yet?".
+        wait_for_output_containing(&output, "logtest123", std::time::Duration::from_secs(5));
 
         manager
             .stop_logging(&info.id)
