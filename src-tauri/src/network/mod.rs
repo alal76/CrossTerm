@@ -3711,7 +3711,21 @@ fn aircrack_audit(
     });
 }
 
+/// Gates every `network_aircrack_*` command behind two independent checks:
+/// the `aircrack_tools` feature flag (operator opt-in, defaults off) and the
+/// runtime disclaimer-acceptance flag (per-session, set by
+/// `network_aircrack_accept_disclaimer`). Both must pass — accepting the
+/// disclaimer alone previously bypassed the feature flag entirely, since
+/// nothing here ever checked it despite `aircrack_tools` defaulting to
+/// `false` specifically to keep this tooling opt-in.
 fn require_disclaimer(state: &NetworkState) -> Result<(), NetworkError> {
+    if !crate::config::aircrack_tools_enabled() {
+        return Err(NetworkError::Io(
+            "aircrack-ng tools are disabled. Enable \"aircrack-ng Security Tools\" in \
+             Settings first."
+                .into(),
+        ));
+    }
     if !state.aircrack_disclaimer_accepted.load(Ordering::SeqCst) {
         return Err(NetworkError::Io(
             "You must accept the educational disclaimer before using aircrack-ng tools. \
@@ -6793,9 +6807,26 @@ mod tunnel_tests {
 
     #[test]
     fn test_require_disclaimer_accepts_once_flag_is_set() {
+        // Both gates are independent: the aircrack_tools feature flag lives
+        // in a process-wide static in config::, so it's explicitly reset
+        // afterward to avoid leaking state into other tests in this binary.
+        crate::config::config_set_feature_flag("aircrack_tools".to_string(), true).unwrap();
         let state = NetworkState::new();
         state.aircrack_disclaimer_accepted.store(true, Ordering::SeqCst);
-        assert!(require_disclaimer(&state).is_ok());
+        let result = require_disclaimer(&state);
+        crate::config::config_set_feature_flag("aircrack_tools".to_string(), false).unwrap();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_require_disclaimer_rejects_when_flag_disabled_even_with_disclaimer_accepted() {
+        // The real bug this fixed: accepting the disclaimer alone used to be
+        // sufficient, silently bypassing the feature flag (which defaults to
+        // false specifically to keep this tooling opt-in).
+        crate::config::config_set_feature_flag("aircrack_tools".to_string(), false).unwrap();
+        let state = NetworkState::new();
+        state.aircrack_disclaimer_accepted.store(true, Ordering::SeqCst);
+        assert!(require_disclaimer(&state).is_err());
     }
 
     // ── new_dns_server_registry ──────────────────────────────────────────

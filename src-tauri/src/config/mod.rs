@@ -1389,6 +1389,18 @@ fn get_feature_flags_lock() -> &'static std::sync::Mutex<FeatureFlags> {
     FEATURE_FLAGS.get_or_init(|| std::sync::Mutex::new(FeatureFlags::default()))
 }
 
+/// Whether the aircrack-ng tooling feature flag is currently enabled.
+/// Used by `network::require_disclaimer` as a second, independent gate
+/// alongside the runtime disclaimer-acceptance check — this flag defaults
+/// to `false` and is meant to require explicit operator opt-in before any
+/// `network_aircrack_*` command can run at all, disclaimer or not.
+pub(crate) fn aircrack_tools_enabled() -> bool {
+    get_feature_flags_lock()
+        .lock()
+        .map(|flags| flags.aircrack_tools)
+        .unwrap_or(false)
+}
+
 #[tauri::command]
 pub fn config_get_feature_flags() -> Result<FeatureFlags, String> {
     let flags = get_feature_flags_lock()

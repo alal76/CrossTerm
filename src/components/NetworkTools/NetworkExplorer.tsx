@@ -47,6 +47,7 @@ import {
 import type { ExploreResult, ExploreProgress, ExploreHostFound, ExploreMdnsUpdate, MdnsRecord, ServiceFilter, Session, TailscalePeer } from '@/types';
 import { SessionType } from '@/types';
 import { useSessionStore } from '@/stores/sessionStore';
+import { useFeatureFlagsStore } from '@/stores/featureFlagsStore';
 import { useToast } from '@/components/Shared/Toast';
 import WifiScanner from '@/components/NetworkTools/WifiScanner';
 import AircrackPanel from '@/components/NetworkTools/AircrackPanel';
@@ -388,6 +389,19 @@ export default function NetworkExplorer() {
   const { addSession, openTab } = useSessionStore();
   const { toast } = useToast();
   const [toolTab, setToolTab] = useState<'explore' | 'wifi' | 'aircrack' | 'scan' | 'wol'>('explore');
+  // aircrack-ng tooling (deauth, handshake capture, cracking) is disabled by
+  // default (see featureFlagsStore's own doc comment: "security-sensitive;
+  // also requires disclaimer acceptance") but nothing previously enforced
+  // that — the tab rendered and worked regardless of this flag. Gated here;
+  // the backend's require_disclaimer() check is a separate, narrower gate
+  // (did the user click through the ethics disclaimer) and doesn't cover
+  // this flag either, so both need to independently pass.
+  const aircrackEnabled = useFeatureFlagsStore((s) => s.aircrack_tools);
+  useEffect(() => {
+    if (!aircrackEnabled && toolTab === 'aircrack') {
+      setToolTab('explore');
+    }
+  }, [aircrackEnabled, toolTab]);
   const [cidr, setCidr] = useState('');
   const [scanning, setScanning] = useState(false);
   const [results, setResults] = useState<ExploreResult[]>([]);
@@ -1000,18 +1014,20 @@ export default function NetworkExplorer() {
           <Wifi size={14} />
           {t('network.wifi')}
         </button>
-        <button
-          onClick={() => setToolTab('aircrack')}
-          className={clsx(
-            'flex items-center gap-1.5 border-b-2 px-3 py-1.5 text-xs font-medium transition-colors',
-            toolTab === 'aircrack'
-              ? 'border-red-500 text-red-400'
-              : 'border-transparent text-text-secondary hover:text-text-primary'
-          )}
-        >
-          <ShieldAlert size={14} />
-          {t('network.aircrackTab')}
-        </button>
+        {aircrackEnabled && (
+          <button
+            onClick={() => setToolTab('aircrack')}
+            className={clsx(
+              'flex items-center gap-1.5 border-b-2 px-3 py-1.5 text-xs font-medium transition-colors',
+              toolTab === 'aircrack'
+                ? 'border-red-500 text-red-400'
+                : 'border-transparent text-text-secondary hover:text-text-primary'
+            )}
+          >
+            <ShieldAlert size={14} />
+            {t('network.aircrackTab')}
+          </button>
+        )}
         <button
           onClick={() => setToolTab('scan')}
           className={clsx(
@@ -1040,7 +1056,7 @@ export default function NetworkExplorer() {
 
       {toolTab === 'wifi' ? (
         <WifiScanner />
-      ) : toolTab === 'aircrack' ? (
+      ) : toolTab === 'aircrack' && aircrackEnabled ? (
         <AircrackPanel />
       ) : toolTab === 'scan' ? (
         <NetworkScanner />
