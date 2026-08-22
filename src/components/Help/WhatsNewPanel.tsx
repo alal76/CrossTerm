@@ -2,11 +2,19 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { X, Sparkles } from "lucide-react";
 
-const APP_VERSION = "2.0.16";
+const APP_VERSION = "2.0.17";
 const DISMISSED_VERSION_KEY = "crossterm:whats-new-dismissed";
 
 const RELEASE_NOTES = `
 ## What's New in CrossTerm ${APP_VERSION}
+
+### Bug Fixes
+- Fixed the "aircrack-ng Security Tools" setting not actually being enforced: the Aircrack tab in Network Explorer stayed visible and usable even with the setting switched off, as long as you'd clicked through its ethics disclaimer once. The setting is now checked on both sides, so it's off means off.
+
+### Under the Hood
+- Extended the standalone \`network-explore-cli\` developer tool with full command-line options and documentation, and closed a gap where it silently found less than the GUI's Network Explorer does (it now also probes SNMP and IPMI, matching the app).
+
+## CrossTerm 2.0.16
 
 ### Under the Hood
 - No user-facing changes in this release. Added a real Android build to CI (the app now compiles and packages for Android for the first time), which surfaced and fixed genuine cross-compilation gaps: the terminal library's old serial-port dependency and the clipboard library both had no Android support at all, and a couple of our own platform-specific code paths needed small fixes. Also fixed a real, if narrow, Windows bug found along the way: a newer terminal library version can make Windows hang waiting for a cursor-position handshake our own automated tests don't answer (real usage isn't affected, since the app's terminal display already handles this correctly).
