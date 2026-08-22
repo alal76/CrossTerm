@@ -21,16 +21,23 @@ if [ -n "${TMPDIR:-}" ] && [ -d "$TMPDIR" ]; then
     SCAN_DIRS+=("$TMPDIR")
 fi
 
-# App data directories (platform-specific)
+# App data directories (platform-specific). Must match where the app's own
+# Rust code (dirs::data_dir().join("CrossTerm") — see src-tauri/src/vault/mod.rs,
+# config/mod.rs, ssh/connection.rs, audit/mod.rs, netconf/mod.rs, ssh/mod.rs)
+# actually writes vault/profile/session data — NOT the Tauri bundle identifier
+# (com.crossterm.desktop), which this app deliberately doesn't use for storage
+# paths. This previously scanned "com.crossterm", a directory the app never
+# writes to, so this check always silently passed without ever scanning the
+# real app data directory.
 case "$(uname -s)" in
     Darwin)
-        APP_DATA="$HOME/Library/Application Support/com.crossterm"
+        APP_DATA="$HOME/Library/Application Support/CrossTerm"
         ;;
     Linux)
-        APP_DATA="${XDG_DATA_HOME:-$HOME/.local/share}/com.crossterm"
+        APP_DATA="${XDG_DATA_HOME:-$HOME/.local/share}/CrossTerm"
         ;;
     MINGW*|MSYS*|CYGWIN*)
-        APP_DATA="${APPDATA:-$HOME/AppData/Roaming}/com.crossterm"
+        APP_DATA="${APPDATA:-$HOME/AppData/Roaming}/CrossTerm"
         ;;
 esac
 

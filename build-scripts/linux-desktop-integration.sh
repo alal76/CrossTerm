@@ -7,14 +7,14 @@ cat > "$DESKTOP_FILE" << 'EOF'
 Type=Application
 Name=CrossTerm
 Comment=Cross-platform terminal emulator
-Exec=crossterm --working-dir %f
+Exec=crossterm-app --working-dir %f
 Icon=crossterm
 Terminal=false
 Categories=System;TerminalEmulator;
 Actions=new-window;
 [Desktop Action new-window]
 Name=New Window
-Exec=crossterm
+Exec=crossterm-app
 EOF
 
 # Nautilus script
@@ -22,7 +22,7 @@ NAUTILUS_DIR="$HOME/.local/share/nautilus/scripts"
 mkdir -p "$NAUTILUS_DIR"
 cat > "$NAUTILUS_DIR/Open in CrossTerm" << 'EOF'
 #!/bin/bash
-crossterm --working-dir "$NAUTILUS_SCRIPT_CURRENT_URI"
+crossterm-app --working-dir "$NAUTILUS_SCRIPT_CURRENT_URI"
 EOF
 chmod +x "$NAUTILUS_DIR/Open in CrossTerm"
 echo "Desktop integration installed"

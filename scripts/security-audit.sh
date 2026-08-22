@@ -25,9 +25,11 @@ run_check() {
     echo ""
 }
 
-# 1. cargo audit — check for RUSTSEC advisories
+# 1. cargo audit — check for RUSTSEC advisories (reuses cargo-audit.sh's
+#    documented --ignore exceptions; calling `cargo audit` directly here
+#    would fail on RUSTSEC-2023-0071, which is deliberately accepted)
 run_check "cargo audit" \
-    cargo audit --file "$PROJECT_ROOT/src-tauri/Cargo.lock"
+    "$SCRIPT_DIR/cargo-audit.sh"
 
 # 2. npm audit — check for high/critical npm advisories
 run_check "npm audit" \

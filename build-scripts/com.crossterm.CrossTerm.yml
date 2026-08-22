@@ -1,6 +1,7 @@
 app-id: com.crossterm.CrossTerm
+# 23.08 is end-of-life (2-year support window); 25.08 is current as of 2026.
 runtime: org.freedesktop.Platform
-runtime-version: '23.08'
+runtime-version: '25.08'
 sdk: org.freedesktop.Sdk
 command: crossterm
 finish-args:
@@ -14,4 +15,8 @@ modules:
     buildsystem: simple
     build-commands:
       - cargo build --release --manifest-path src-tauri/Cargo.toml
-      - install -Dm755 src-tauri/target/release/crossterm /app/bin/crossterm
+      # The Cargo package (and its real compiled binary) is named
+      # "crossterm-app" (src-tauri/Cargo.toml's [package].name), not
+      # "crossterm" — only the Flatpak-exposed command name above is
+      # "crossterm".
+      - install -Dm755 src-tauri/target/release/crossterm-app /app/bin/crossterm

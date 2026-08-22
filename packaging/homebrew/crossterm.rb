@@ -14,9 +14,13 @@ cask "crossterm" do
 
   app "CrossTerm.app"
 
+  # Must match src-tauri/tauri.conf.json's "identifier" (com.crossterm.desktop),
+  # not the cask's own token ("crossterm") or app name — macOS keys support/
+  # preference/cache paths by bundle identifier, and this previously pointed
+  # at "com.crossterm.app", which was never the app's real identifier.
   zap trash: [
-    "~/Library/Application Support/com.crossterm.app",
-    "~/Library/Preferences/com.crossterm.app.plist",
-    "~/Library/Caches/com.crossterm.app",
+    "~/Library/Application Support/com.crossterm.desktop",
+    "~/Library/Preferences/com.crossterm.desktop.plist",
+    "~/Library/Caches/com.crossterm.desktop",
   ]
 end
