@@ -105,3 +105,9 @@ The Explorer keeps a running log of connection attempts made from scan results d
 ## Security & Ethics
 
 The Network Explorer uses TCP connection attempts, ICMP probes, and standard-protocol handshakes (HTTP GET, TLS handshake, RTSP OPTIONS) to identify services — the same class of traffic an ordinary client generates. It never sends exploit payloads. Only scan networks you own or have explicit written permission to scan; unauthorized port scanning may be illegal in your jurisdiction and violates the terms of service of most cloud providers.
+
+---
+
+## Command-line version
+
+The same scan pipeline is also available as a standalone command-line tool, `network-explore-cli` — no app, vault, or UI required. Useful for auditing a server subnet from a terminal (including over SSH with no display) or scripting scan results into other tooling. See [`docs/network-explore-cli.md`](https://github.com/alal76/CrossTerm/blob/main/docs/network-explore-cli.md) in the repository for the full flag reference and output schema.

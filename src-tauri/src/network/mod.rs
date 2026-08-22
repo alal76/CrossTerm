@@ -239,7 +239,9 @@ pub enum ServiceFilter {
 }
 
 impl ServiceFilter {
-    fn port(&self) -> u16 {
+    /// `pub` so `network-explore-cli` (a separate binary crate linking
+    /// against this one) can look up real port numbers for `--list-services`.
+    pub fn port(&self) -> u16 {
         match self {
             ServiceFilter::Ssh => 22,
             ServiceFilter::Vnc => 5900,
@@ -2526,6 +2528,8 @@ pub async fn run_explore_and_dump(
     extra_ports: &[u16],
     timeout_ms: u64,
     out_path: &str,
+    snmp_communities: &[String],
+    extra_vendor_hints: &[String],
 ) -> Result<usize, NetworkError> {
     let addresses = parse_cidr(cidr)?;
     let timeout = Duration::from_millis(timeout_ms);
@@ -2545,21 +2549,55 @@ pub async fn run_explore_and_dump(
     ports.dedup();
     let ports = Arc::new(ports);
 
+    // Mirrors network_explore_start's community-list handling: "public" is
+    // always tried first (it's the default on the overwhelming majority of
+    // devices), plus whatever else the caller supplied.
+    let mut communities = vec!["public".to_string()];
+    communities.extend(snmp_communities.iter().filter(|c| *c != "public").cloned());
+    let communities = Arc::new(communities);
+    let extra_vendor_hints = Arc::new(extra_vendor_hints.to_vec());
+
     let semaphore = Arc::new(Semaphore::new(25));
     let host_futs = addresses.into_iter().map(|addr| {
         let ip = IpAddr::V4(addr);
         let ports = Arc::clone(&ports);
         let sem = Arc::clone(&semaphore);
         let dns_registry = Arc::clone(&dns_registry);
+        let communities = Arc::clone(&communities);
+        let extra_vendor_hints = Arc::clone(&extra_vendor_hints);
         async move {
             let _permit = sem.acquire_owned().await.unwrap();
+            // Same UDP-vs-TCP timeout reasoning as network_explore_start: a
+            // silent UDP port (no SNMP/IPMI agent) never replies at all, so
+            // it always burns its full timeout — keep that short regardless
+            // of how generous the TCP/ping timeout is.
+            let udp_timeout = Duration::from_millis(300).min(timeout);
             let port_futures: Vec<_> = ports.iter().map(|&p| check_port(ip, p, timeout)).collect();
-            let (port_results, (ping_alive, ttl), arp_mac) = tokio::join!(
+            let (port_results, (ping_alive, ttl), snmp_result, ipmi_result, arp_mac) = tokio::join!(
                 futures::future::join_all(port_futures),
                 ping_host(ip, timeout),
+                probe_snmp_any(ip, 161, udp_timeout, &communities),
+                probe_ipmi(ip, 623, udp_timeout),
                 resolve_arp_mac_once(ip),
             );
-            let open_ports: Vec<OpenPort> = port_results.into_iter().flatten().collect();
+            let mut open_ports: Vec<OpenPort> = port_results.into_iter().flatten().collect();
+            if let Some(sys_descr) = snmp_result {
+                open_ports.push(OpenPort {
+                    port: 161,
+                    service_name: "snmp".to_string(),
+                    protocol: "udp".to_string(),
+                    version: Some(sys_descr),
+                    ..Default::default()
+                });
+            }
+            if ipmi_result.is_some() {
+                open_ports.push(OpenPort {
+                    port: 623,
+                    service_name: "ipmi".to_string(),
+                    protocol: "udp".to_string(),
+                    ..Default::default()
+                });
+            }
             if !host_is_present(&open_ports, ping_alive, &arp_mac) {
                 return None;
             }
@@ -2571,7 +2609,7 @@ pub async fn run_explore_and_dump(
                 resolve_arp_mac(ip),
             );
             let mac_vendor = if let Some(ref mac) = mac_address { lookup_mac_vendor(mac).await } else { None };
-            let (os_guess, evidence) = guess_os(&open_ports, ttl, &[]);
+            let (os_guess, evidence) = guess_os(&open_ports, ttl, &extra_vendor_hints);
             let suggested_session_type = suggest_session_type(&open_ports);
             let candidate_session_types = suggest_session_types(&open_ports);
             Some(ExploreResult {
@@ -5828,7 +5866,7 @@ mod tests {
         let cidr = std::env::var("NETWORK_DEBUG_CIDR").unwrap_or_else(|_| "192.168.0.0/24".to_string());
         let out_path = std::env::var("NETWORK_DEBUG_OUT")
             .unwrap_or_else(|_| "/tmp/network_debug_scan.json".to_string());
-        run_explore_and_dump(&cidr, None, &[], 1500, &out_path).await.unwrap();
+        run_explore_and_dump(&cidr, None, &[], 1500, &out_path, &[], &[]).await.unwrap();
     }
 }
 

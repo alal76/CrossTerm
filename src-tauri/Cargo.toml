@@ -122,6 +122,9 @@ tonic = { version = "0.12", default-features = false, features = ["channel", "tl
 rumqttc = { version = "0.25", default-features = false, features = ["use-rustls"] }
 which = "6"
 
+# network-explore-cli argument parsing
+clap = { version = "4", features = ["derive"] }
+
 # Clipboard - the official plugin (not arboard directly), since it has real
 # Android/iOS support (plain-text write/clear via native platform code) that
 # arboard itself lacks entirely - arboard failed to even compile for
