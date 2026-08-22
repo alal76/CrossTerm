@@ -323,6 +323,12 @@ jobs:
   integration-tests:
     runs-on: ubuntu-latest
     needs: build
+    # Report independently of whether the desktop build matrix passed - a
+    # failure on, say, windows-latest shouldn't hide whether integration
+    # tests are green on Linux. Still skips if the whole run was superseded/
+    # cancelled by a newer push (the common case in this repo), just not on
+    # a plain build failure.
+    if: ${{ !cancelled() }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -413,6 +419,9 @@ jobs:
     # valid reasons (need a real Tauri backend/Docker/window manager).
     runs-on: ubuntu-latest
     needs: build
+    # Report independently of the desktop build matrix's outcome - see the
+    # identical note on integration-tests above.
+    if: ${{ !cancelled() }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -529,6 +538,9 @@ jobs:
   coverage:
     runs-on: ubuntu-latest
     needs: build
+    # Report independently of the desktop build matrix's outcome - see the
+    # identical note on integration-tests above.
+    if: ${{ !cancelled() }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
