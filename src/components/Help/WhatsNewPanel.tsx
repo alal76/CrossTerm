@@ -2,11 +2,16 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { X, Sparkles } from "lucide-react";
 
-const APP_VERSION = "2.0.13";
+const APP_VERSION = "2.0.14";
 const DISMISSED_VERSION_KEY = "crossterm:whats-new-dismissed";
 
 const RELEASE_NOTES = `
 ## What's New in CrossTerm ${APP_VERSION}
+
+### Under the Hood
+- No user-facing changes in this release (the vault always has a real backend in the packaged app). Fixed a bug that only showed up running outside the real app shell (e.g. our own test suite): the credential vault could force its "Create Vault" screen open even when a vault already existed, if the backend connection wasn't available yet. Also re-enabled the full end-to-end test suite in CI, which had been disabled since mid-August.
+
+## CrossTerm 2.0.13
 
 ### Under the Hood
 - No user-facing changes in this release. Added tests for Snippets (previously untested), VncViewer, WebDavBrowser, SpiceViewer, and the feature-flags store, as part of an ongoing effort to raise real measured test coverage.
