@@ -23,6 +23,9 @@ interface VaultState {
 
   /** True when no vaults are unlocked for the active profile */
   vaultLocked: boolean;
+  /** True when the last listVaults() call found no Tauri backend at all (e.g. running in a
+   * plain browser during dev/e2e) — distinct from "zero vaults exist yet on a real backend". */
+  noBackend: boolean;
 
   listVaults: () => Promise<void>;
   createVault: (password: string, name?: string, isDefault?: boolean) => Promise<VaultInfo>;
@@ -58,6 +61,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   loading: false,
   error: null,
   vaultLocked: true,
+  noBackend: false,
 
   listVaults: async () => {
     try {
@@ -80,7 +84,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
       const resolvedActive = activeId && !lockStates[activeId]
         ? activeId
         : vaults.find((v) => !lockStates[v.id])?.id ?? vaults[0]?.id ?? null;
-      set({ vaults, vaultLockStates: lockStates, vaultLocked: !anyUnlocked, activeVaultId: resolvedActive });
+      set({ vaults, vaultLockStates: lockStates, vaultLocked: !anyUnlocked, activeVaultId: resolvedActive, noBackend });
     } catch (e) {
       set({ error: String(e) });
     }

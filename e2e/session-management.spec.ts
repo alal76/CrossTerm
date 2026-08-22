@@ -128,8 +128,10 @@ test.describe('Session Management', () => {
     const sidebar = page.locator('nav');
     await expect(sidebar).toBeVisible();
 
-    // The Sessions panel shows "New Session" button in the empty state (no backend)
-    await expect(sidebar.getByText('New Session')).toBeVisible();
+    // The Sessions panel shows "New Session" button in the empty state (no backend).
+    // Uses the role locator, not getByText, since the empty-state paragraph
+    // ("Create a new session or import...") also substring-matches "New Session".
+    await expect(sidebar.getByRole('button', { name: 'New Session' })).toBeVisible();
 
     // Open a tab to verify keyboard shortcuts are functional
     await page.keyboard.press('Control+t');

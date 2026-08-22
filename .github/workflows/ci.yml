@@ -311,12 +311,22 @@ jobs:
         run: docker compose down --volumes --remove-orphans
 
   e2e-tests:
-    # Disabled: no Playwright global-setup bootstraps a vault, so on a fresh
-    # CI app every spec except vault.spec.ts hits VaultUnlock's full-screen
-    # overlay instead of the app underneath (8/23 failing). Real fix needs a
-    # global-setup that creates/unlocks a vault once for the other specs to
-    # reuse — tracked in docs/ENGINEERING_PLAN.md's known-follow-ups list.
-    if: false
+    # Re-enabled 2026-08-22, after fixing two real, stacked blockers (found by
+    # reproducing all 9 failures locally, not just from the old comment here):
+    #  1. The "What's New" panel was gating on an exact version-string match
+    #     against a static e2e/storage-state.json fixture that goes stale on
+    #     every release (a prior fix, ed1b005, hardcoded the dismissed
+    #     version and immediately started going stale again the next bump).
+    #     e2e/global-setup.ts now drives the real dismiss button instead, so
+    #     the fixture regenerates correctly before every run regardless of
+    #     app version.
+    #  2. Underneath that, VaultUnlock forced its "Create Vault" screen open
+    #     whenever no Tauri backend is present (true for every spec here,
+    #     which run against a stubbed IPC layer, not a real backend) — a
+    #     real bug in src/stores/vaultStore.ts's noBackend handling, fixed
+    #     there directly, not worked around in test code.
+    # 13 tests run for real now; 10 stay `test.skip` for unrelated, still-
+    # valid reasons (need a real Tauri backend/Docker/window manager).
     runs-on: ubuntu-latest
     needs: build
     steps:

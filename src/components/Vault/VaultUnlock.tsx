@@ -305,13 +305,17 @@ export default function VaultUnlock() {
   const vaults = useVaultStore((s) => s.vaults);
   const vaultLocked = useVaultStore((s) => s.vaultLocked);
   const vaultLockStates = useVaultStore((s) => s.vaultLockStates);
+  const noBackend = useVaultStore((s) => s.noBackend);
   const unlockVault = useVaultStore((s) => s.unlockVault);
   const createVault = useVaultStore((s) => s.createVault);
   const deleteVault = useVaultStore((s) => s.deleteVault);
   const listVaults = useVaultStore((s) => s.listVaults);
 
-  // True only during first launch before any vault has been created.
-  const isFirstVault = !checkingVault && vaults.length === 0;
+  // True only during first launch before any vault has been created. Excludes
+  // the no-backend case (e.g. dev/e2e running outside the real Tauri webview)
+  // since there's no backend to persist a created vault to — forcing this
+  // form open there would just block the rest of the UI for no reason.
+  const isFirstVault = !checkingVault && !noBackend && vaults.length === 0;
   // Only vaults that still need unlocking — unlocked vaults are not shown.
   const lockedVaults = vaults.filter((v) => vaultLockStates[v.id]);
 
