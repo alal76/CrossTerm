@@ -58,8 +58,14 @@ pub async fn window_create_for_tab(
     .title(&title)
     .inner_size(900.0, 600.0)
     .min_inner_size(400.0, 300.0)
-    .decorations(true)
     .resizable(true);
+
+    // Mobile has no windowing concept of decorations (title bar/borders) -
+    // WebviewWindowBuilder doesn't expose this method there at all.
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        builder = builder.decorations(true);
+    }
 
     if let (Some(x), Some(y)) = (x, y) {
         builder = builder.position(x, y);

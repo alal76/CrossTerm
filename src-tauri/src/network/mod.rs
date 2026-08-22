@@ -984,8 +984,19 @@ fn dns_lookup_via_getnameinfo(ip: IpAddr) -> Option<String> {
     use std::ffi::CStr;
     use std::mem;
 
+    // Android's bionic libc declares getnameinfo()'s hostlen parameter as
+    // `size_t` rather than `socklen_t` like glibc/macOS's libc do — libc-rs's
+    // Android bindings follow suit, so the cast target has to differ here.
+    // (The buffer element type doesn't need the same treatment: `libc::c_char`
+    // is already `u8` on Android and `i8` elsewhere, matching each platform's
+    // real ABI, unlike a hardcoded `i8` buffer.)
+    #[cfg(target_os = "android")]
+    type HostLen = usize;
+    #[cfg(not(target_os = "android"))]
+    type HostLen = libc::socklen_t;
+
     let ip_str = ip.to_string();
-    let mut host = [0i8; 256];
+    let mut host = [0 as libc::c_char; 256];
 
     let ret = match ip {
         IpAddr::V4(v4) => unsafe {
@@ -996,7 +1007,7 @@ fn dns_lookup_via_getnameinfo(ip: IpAddr) -> Option<String> {
                 &sin as *const libc::sockaddr_in as *const libc::sockaddr,
                 mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
                 host.as_mut_ptr(),
-                host.len() as libc::socklen_t,
+                host.len() as HostLen,
                 std::ptr::null_mut(),
                 0,
                 0, // no NI_NAMEREQD — allows mDNS/.local resolution via system resolver
@@ -1010,7 +1021,7 @@ fn dns_lookup_via_getnameinfo(ip: IpAddr) -> Option<String> {
                 &sin6 as *const libc::sockaddr_in6 as *const libc::sockaddr,
                 mem::size_of::<libc::sockaddr_in6>() as libc::socklen_t,
                 host.as_mut_ptr(),
-                host.len() as libc::socklen_t,
+                host.len() as HostLen,
                 std::ptr::null_mut(),
                 0,
                 0,
