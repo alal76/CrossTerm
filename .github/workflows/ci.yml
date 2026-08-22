@@ -503,6 +503,16 @@ jobs:
         # with coverage instrumentation itself. Skipped here only; it still
         # runs normally in the plain `cargo test` step of the build job.
         #
+        # test_ssh_generate_key_rsa_creates_key_pair generates a real RSA
+        # keypair (ssh_key::PrivateKey::random), which makes many getrandom()
+        # syscalls while rejection-sampling candidate primes — under
+        # tarpaulin's per-syscall ptrace tracing that's slow enough to exceed
+        # the 120s --timeout below with no intermediate output (observed:
+        # >2 minutes with zero test output, vs. a sub-second ED25519/ECDSA
+        # keygen in the same file, which needs far fewer random syscalls).
+        # Same category of issue as test_ping_loopback above; skipped here
+        # only, for the same reason.
+        #
         # Emits both Lcov (for the artifact upload below) and Json (read by
         # the reporting step further down) from one instrumented run — this
         # used to run the entire single-threaded, instrumented test suite a
@@ -511,7 +521,7 @@ jobs:
           cargo tarpaulin --out Lcov --out Json --output-dir ../coverage-rust \
             --exclude-files "src/main.rs" \
             --timeout 120 \
-            -- --test-threads=1 --skip test_ping_loopback
+            -- --test-threads=1 --skip test_ping_loopback --skip test_ssh_generate_key_rsa_creates_key_pair
 
       - name: Frontend coverage (vitest)
         # This is a second, redundant run of the entire frontend suite
