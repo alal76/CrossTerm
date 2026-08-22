@@ -78,7 +78,7 @@ regex = "1"
 totp-rs = { version = "5", features = ["gen_secret", "otpauth"] }
 
 # Terminal
-portable-pty = "0.8"
+portable-pty = "0.9"
 anyhow = "1.0"
 thiserror = "1.0"
 dirs = "5"
