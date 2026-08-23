@@ -96,10 +96,17 @@ describe("RemoteFileBrowser", () => {
   it("shows the empty-directory message when the listing is empty", async () => {
     connectSshTab();
     render(<RemoteFileBrowser />);
-    // Default findByText timeout (1000ms) was tight enough to flake on
-    // Windows CI runners: this waits on a three-deep await chain
-    // (sftp_open -> ssh_exec -> sftp_list) before the empty state renders.
-    expect(await screen.findByText("This directory is empty.", {}, { timeout: 5000 })).toBeInTheDocument();
+    // This is the three-deep await chain (sftp_open -> ssh_exec -> sftp_list)
+    // that every other test in this file anchors on via `waitFor(() =>
+    // mockInvoke toHaveBeenCalledWith(...))` before asserting on the DOM.
+    // This test used to skip straight to a bare `findByText` with a longer
+    // timeout, which was the one thing that made it different from its
+    // siblings — and the one thing that kept flaking on Windows CI even at
+    // 5000ms. Anchoring on the actual mock call first, like the rest of the
+    // file does, removes the reliance on findByText's own polling picking up
+    // the DOM mutation.
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("sftp_list", { sessionId: "sftp-1", path: "/home/user" }));
+    expect(await screen.findByText("This directory is empty.")).toBeInTheDocument();
   });
 
   it("expands a directory to load its children on click", async () => {
