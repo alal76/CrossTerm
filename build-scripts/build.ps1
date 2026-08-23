@@ -52,7 +52,7 @@ switch ($Target) {
         Write-Host "==> Building CrossTerm desktop bundle for Windows..."
         npx tauri build
         if ($LASTEXITCODE -ne 0) { throw "tauri build failed" }
-        Write-Host "==> Done. Bundles: src-tauri/target/release/bundle/"
+        Write-Host "==> Done. Bundles: target/release/bundle/"
     }
 
     'android' {

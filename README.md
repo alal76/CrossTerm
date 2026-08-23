@@ -152,7 +152,7 @@ npm run tauri dev
 
 # Production build
 npm run tauri build
-# → binaries in src-tauri/target/release/bundle/
+# → binaries in target/release/bundle/
 ```
 
 ### Tests

@@ -19,4 +19,4 @@ modules:
       # "crossterm-app" (src-tauri/Cargo.toml's [package].name), not
       # "crossterm" — only the Flatpak-exposed command name above is
       # "crossterm".
-      - install -Dm755 src-tauri/target/release/crossterm-app /app/bin/crossterm
+      - install -Dm755 target/release/crossterm-app /app/bin/crossterm

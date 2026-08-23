@@ -425,6 +425,14 @@ async fn test_ssh_concurrent_sessions() {
     let mut tasks = Vec::new();
     for i in 0..10u32 {
         tasks.push(tokio::spawn(async move {
+            // Stagger connection starts: sshd's default MaxStartups (10:30:100)
+            // starts probabilistically dropping new pre-auth connections once
+            // more than 10 are in flight at once, and 10 tasks all calling
+            // connect()+authenticate() in the same instant can transiently
+            // exceed that. Sessions still overlap heavily (each session takes
+            // well over 200ms end-to-end), so this stays a genuine concurrency
+            // test — it just avoids a simultaneous connection burst.
+            tokio::time::sleep(Duration::from_millis(20 * i as u64)).await;
             let handle = test_ssh_connect(SSH_HOST, SSH_PORT, TEST_USER, TEST_PASS).await;
             let output = ssh_exec_cmd(&handle, &format!("echo session_{i}")).await;
             let _ = handle.disconnect(Disconnect::ByApplication, "", "en").await;

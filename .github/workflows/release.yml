@@ -63,7 +63,7 @@ jobs:
       - name: Generate checksums
         if: runner.os != 'Windows'
         run: |
-          cd src-tauri/target/release/bundle
+          cd target/release/bundle
           find . -type f \( -name "*.deb" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.msi" -o -name "*.app.tar.gz" \) \
             -exec sh -c 'shasum -a 256 "$1" > "$1.sha256"' _ {} \;
 
@@ -71,7 +71,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Get-ChildItem -Path src-tauri/target/release/bundle -Recurse -Include *.msi,*.exe |
+          Get-ChildItem -Path target/release/bundle -Recurse -Include *.msi,*.exe |
             ForEach-Object {
               $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash
               "$hash  $($_.Name)" | Out-File "$($_.FullName).sha256"
@@ -81,7 +81,7 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           draft: false
-          files: src-tauri/target/release/bundle/**/*.sha256
+          files: target/release/bundle/**/*.sha256
 
   homebrew-publish:
     runs-on: macos-latest
