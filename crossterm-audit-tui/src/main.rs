@@ -2,17 +2,20 @@
 //! network reachability, built on the same scan-result JSON schema
 //! `network-explore-cli` writes. No Tauri/GUI dependency at build or run
 //! time; see docs/network-audit-tui-plan.md for the design and roadmap this
-//! implements (currently: Phase 1, a static host browser only — no live
-//! scanning or session launching yet).
+//! implements (Phase 2: live scanning via `network-explore-cli`, shelled out
+//! to in the background — Phase 1 was a static host browser only).
 //!
 //! Usage:
 //!   crossterm-audit-tui [SCAN_JSON]
 //!
 //! Run `network-explore-cli` first to produce a scan file, then browse it
 //! here: `network-explore-cli 192.168.1.0/24 && crossterm-audit-tui network_scan.json`
+//! — or start with nothing loaded and press `n` inside the browser to run a
+//! scan directly.
 
 mod app;
 mod model;
+mod scan;
 mod ui;
 
 use app::App;
@@ -89,10 +92,12 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> io::
     loop {
         terminal.draw(|frame| ui::draw(frame, app))?;
 
-        // A 200ms poll timeout keeps this responsive to input without
-        // busy-looping; there's no background/async work in Phase 1 that
-        // would need a shorter tick.
-        if event::poll(Duration::from_millis(200))? {
+        // A shorter poll timeout while a background scan is running means
+        // its completion gets picked up (and the screen refreshed) promptly
+        // instead of waiting out a full idle-tick; 200ms is plenty
+        // responsive the rest of the time without busy-looping.
+        let poll_timeout = if app.is_scanning() { Duration::from_millis(50) } else { Duration::from_millis(200) };
+        if event::poll(poll_timeout)? {
             if let Event::Key(key) = event::read()? {
                 // Crossterm reports both press and release on some
                 // platforms/terminals; only act on press to avoid
@@ -102,6 +107,8 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> io::
                 }
             }
         }
+
+        app.poll_scan();
 
         if app.should_quit {
             return Ok(());

@@ -34,6 +34,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
         Screen::Detail(idx) => draw_detail(frame, area, app, *idx),
         Screen::Help => draw_help(frame, area, app),
         Screen::QuitConfirm => draw_quit_confirm(frame, area),
+        Screen::ScanPrompt(input) => draw_scan_prompt(frame, area, input),
+        Screen::Scanning(cidr) => draw_scanning(frame, area, cidr),
+        Screen::ScanError(msg) => draw_scan_error(frame, area, msg),
     }
 
     draw_legend(frame, chunks[2], app);
@@ -54,10 +57,13 @@ fn draw_title_bar(frame: &mut Frame, area: Rect, app: &App) {
 
 fn draw_legend(frame: &mut Frame, area: Rect, app: &App) {
     let items: &[(&str, &str)] = match app.screen {
-        Screen::Browser => &[("F1", "Help"), ("F3", "View"), ("F10", "Quit")],
+        Screen::Browser => &[("F1", "Help"), ("F2/n", "New Scan"), ("F3", "View"), ("F10", "Quit")],
         Screen::Detail(_) => &[("Esc", "Back")],
         Screen::Help => &[("Esc", "Back")],
         Screen::QuitConfirm => &[("Y", "Yes"), ("N/Esc", "No")],
+        Screen::ScanPrompt(_) => &[("Enter", "Scan"), ("Esc", "Cancel")],
+        Screen::Scanning(_) => &[],
+        Screen::ScanError(_) => &[("any key", "Dismiss")],
     };
     let mut spans = Vec::new();
     for (key, label) in items {
@@ -207,6 +213,7 @@ fn draw_help(frame: &mut Frame, area: Rect, app: &App) {
         Line::from(""),
         Line::from("  Up/Down, j/k    Move selection"),
         Line::from("  Enter, F3       View host detail"),
+        Line::from("  F2, n           New scan (runs network-explore-cli)"),
         Line::from("  F1              This help screen"),
         Line::from("  F10, q          Quit"),
         Line::from("  Esc             Back / cancel"),
@@ -243,4 +250,32 @@ fn draw_quit_confirm(frame: &mut Frame, area: Rect) {
     frame.render_widget(Clear, popup);
     let block = Block::default().borders(Borders::ALL).title(" Quit? ");
     frame.render_widget(Paragraph::new("Quit? [Y/n]").block(block), popup);
+}
+
+fn draw_scan_prompt(frame: &mut Frame, area: Rect, input: &str) {
+    let popup = centered_rect(50, 20, area);
+    frame.render_widget(Clear, popup);
+    let block = Block::default().borders(Borders::ALL).title(" New Scan — CIDR to scan ");
+    let text = vec![
+        Line::from(format!("{input}\u{2588}")),
+        Line::from(""),
+        Line::from(Span::styled("e.g. 192.168.1.0/24", Style::default().fg(Color::DarkGray))),
+    ];
+    frame.render_widget(Paragraph::new(text).block(block), popup);
+}
+
+fn draw_scanning(frame: &mut Frame, area: Rect, cidr: &str) {
+    let popup = centered_rect(50, 20, area);
+    frame.render_widget(Clear, popup);
+    let block = Block::default().borders(Borders::ALL).title(" Scanning ");
+    let text = format!("Scanning {cidr}...\n\nThis runs network-explore-cli in the background;\nthe browser will refresh automatically when it's done.");
+    frame.render_widget(Paragraph::new(text).block(block), popup);
+}
+
+fn draw_scan_error(frame: &mut Frame, area: Rect, msg: &str) {
+    let popup = centered_rect(60, 30, area);
+    frame.render_widget(Clear, popup);
+    let block = Block::default().borders(Borders::ALL).title(" Scan Failed ").style(Style::default().fg(Color::Red));
+    let text = format!("{msg}\n\nPress any key to continue.");
+    frame.render_widget(Paragraph::new(text).block(block), popup);
 }
