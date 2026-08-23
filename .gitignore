@@ -3,6 +3,10 @@ node_modules/
 
 # Build output
 dist/
+# The workspace root Cargo.toml puts build output here instead of
+# src-tauri/target/ now, but keep the old entry too in case anyone still
+# has a stale non-workspace target dir locally.
+target/
 src-tauri/target/
 src-tauri/fuzz/target/
 coverage/

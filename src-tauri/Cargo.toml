@@ -152,10 +152,7 @@ default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
 integration = []
 
-[profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-strip = "symbols"
-debug = false
-incremental = false
+# [profile.release] moved to the workspace root Cargo.toml — Cargo only
+# honors profile sections there once a package is part of a workspace;
+# leaving it here would silently be ignored (confirmed: `cargo build`
+# prints "profiles for the non root package will be ignored" otherwise).

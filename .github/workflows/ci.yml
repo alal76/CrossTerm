@@ -55,15 +55,15 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('src-tauri/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-registry-
 
       - name: Cache cargo target
         uses: actions/cache@v6
         with:
-          path: src-tauri/target
-          key: ${{ runner.os }}-cargo-target-${{ hashFiles('src-tauri/Cargo.lock') }}
+          path: target
+          key: ${{ runner.os }}-cargo-target-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-target-
 
@@ -79,11 +79,9 @@ jobs:
         run: npm install
 
       - name: Install cargo-audit
-        working-directory: src-tauri
         run: cargo install cargo-audit --locked
 
       - name: Audit Rust dependencies
-        working-directory: src-tauri
         # RUSTSEC-2023-0071: RSA timing side-channel via rsa crate (marginal
         #   attack surface here; pre-existing ignore).
         # RUSTSEC-2026-0154 / -0153: russh / russh-cryptovec DoS-style
@@ -129,12 +127,12 @@ jobs:
         with:
           name: installers-${{ matrix.target }}
           path: |
-            src-tauri/target/release/bundle/**/*.dmg
-            src-tauri/target/release/bundle/**/*.app
-            src-tauri/target/release/bundle/**/*.msi
-            src-tauri/target/release/bundle/**/*.exe
-            src-tauri/target/release/bundle/**/*.AppImage
-            src-tauri/target/release/bundle/**/*.deb
+            target/release/bundle/**/*.dmg
+            target/release/bundle/**/*.app
+            target/release/bundle/**/*.msi
+            target/release/bundle/**/*.exe
+            target/release/bundle/**/*.AppImage
+            target/release/bundle/**/*.deb
           if-no-files-found: warn
           retention-days: 14
 
@@ -219,7 +217,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: android-cargo-registry-${{ hashFiles('src-tauri/Cargo.lock') }}
+          key: android-cargo-registry-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             android-cargo-registry-
 
@@ -284,7 +282,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('src-tauri/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-registry-
 
@@ -295,7 +293,6 @@ jobs:
         run: cargo install cargo-audit --locked
 
       - name: Audit Rust dependencies
-        working-directory: src-tauri
         # RUSTSEC-2023-0071: RSA timing side-channel via rsa crate (marginal
         #   attack surface here; pre-existing ignore).
         # RUSTSEC-2026-0154 / -0153: russh / russh-cryptovec DoS-style
@@ -351,15 +348,15 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('src-tauri/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-registry-
 
       - name: Cache cargo target
         uses: actions/cache@v6
         with:
-          path: src-tauri/target
-          key: ${{ runner.os }}-cargo-integration-${{ hashFiles('src-tauri/Cargo.lock') }}
+          path: target
+          key: ${{ runner.os }}-cargo-integration-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-integration-
 
@@ -457,15 +454,15 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('src-tauri/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-registry-
 
       - name: Cache cargo target
         uses: actions/cache@v6
         with:
-          path: src-tauri/target
-          key: ${{ runner.os }}-cargo-e2e-${{ hashFiles('src-tauri/Cargo.lock') }}
+          path: target
+          key: ${{ runner.os }}-cargo-e2e-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-e2e-
 
@@ -568,7 +565,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('src-tauri/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-registry-
 
@@ -613,9 +610,15 @@ jobs:
         # the reporting step further down) from one instrumented run — this
         # used to run the entire single-threaded, instrumented test suite a
         # second time from scratch just to get the JSON percentage out.
+        # tarpaulin resolves --output-dir and --exclude-files relative to
+        # the workspace root (confirmed locally: with src-tauri now a
+        # workspace member, `--output-dir ../coverage-rust` landed one
+        # directory *above* the repo entirely, and `--exclude-files
+        # "src/main.rs"` stopped matching src-tauri/src/main.rs) — both
+        # paths below are workspace-root-relative to match.
         run: |
-          cargo tarpaulin --out Lcov --out Json --output-dir ../coverage-rust \
-            --exclude-files "src/main.rs" \
+          cargo tarpaulin --out Lcov --out Json --output-dir coverage-rust \
+            --exclude-files "src-tauri/src/main.rs" \
             --timeout 120 \
             -- --test-threads=1 --skip test_ping_loopback --skip test_ssh_generate_key_rsa_creates_key_pair
 

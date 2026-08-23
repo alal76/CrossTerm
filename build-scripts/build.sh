@@ -52,7 +52,7 @@ case "$TARGET" in
     fi
     echo "==> Building CrossTerm desktop bundle for $HOST_OS..."
     npx tauri build
-    echo "==> Done. Bundles: src-tauri/target/release/bundle/"
+    echo "==> Done. Bundles: target/release/bundle/"
     ;;
 
   android)
