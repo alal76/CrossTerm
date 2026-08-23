@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = ["src-tauri", "crossterm-audit-tui"]
+
+# src-tauri stays a fully standalone-buildable package (all existing
+# `cd src-tauri && cargo ...` commands in scripts/CI continue to work
+# unchanged) — this root file only adds crossterm-audit-tui as a sibling
+# workspace member with its own, much smaller dependency graph (no Tauri/
+# GTK/WebKit at all), per docs/network-audit-tui-plan.md.
+
+# Was previously in src-tauri/Cargo.toml directly; Cargo only honors
+# [profile.*] sections at the workspace root once a package joins a
+# workspace, so it moved here verbatim to avoid silently losing LTO/strip
+# on the real release builds users download. crossterm-audit-tui inherits
+# this too, which is fine — same tradeoffs apply to any release binary.
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = "symbols"
+debug = false
+incremental = false
