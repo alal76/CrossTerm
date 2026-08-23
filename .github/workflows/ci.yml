@@ -79,11 +79,9 @@ jobs:
         run: npm install
 
       - name: Install cargo-audit
-        working-directory: src-tauri
         run: cargo install cargo-audit --locked
 
       - name: Audit Rust dependencies
-        working-directory: src-tauri
         # RUSTSEC-2023-0071: RSA timing side-channel via rsa crate (marginal
         #   attack surface here; pre-existing ignore).
         # RUSTSEC-2026-0154 / -0153: russh / russh-cryptovec DoS-style
@@ -295,7 +293,6 @@ jobs:
         run: cargo install cargo-audit --locked
 
       - name: Audit Rust dependencies
-        working-directory: src-tauri
         # RUSTSEC-2023-0071: RSA timing side-channel via rsa crate (marginal
         #   attack surface here; pre-existing ignore).
         # RUSTSEC-2026-0154 / -0153: russh / russh-cryptovec DoS-style
