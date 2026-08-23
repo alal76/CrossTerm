@@ -2,11 +2,16 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { X, Sparkles } from "lucide-react";
 
-const APP_VERSION = "2.1.0";
+const APP_VERSION = "2.2.0";
 const DISMISSED_VERSION_KEY = "crossterm:whats-new-dismissed";
 
 const RELEASE_NOTES = `
 ## What's New in CrossTerm ${APP_VERSION}
+
+### New Features
+- \`crossterm-audit-tui\` (the standalone network-audit terminal UI added last release) can now run a scan itself: press \`n\` from the host browser, type a CIDR, and it runs \`network-explore-cli\` in the background and refreshes with the results — no more running the scan separately first.
+
+## CrossTerm 2.1.0
 
 ### New Features
 - Added \`crossterm-audit-tui\`, a new standalone command-line tool (separate from this app, not bundled into it) for auditing network reach from a container or headless server: a small MC/nano-style terminal UI for browsing \`network-explore-cli\` scan results — discovered hosts, open ports, TLS certificate and mDNS details — without needing a desktop session.
