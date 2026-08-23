@@ -610,9 +610,15 @@ jobs:
         # the reporting step further down) from one instrumented run — this
         # used to run the entire single-threaded, instrumented test suite a
         # second time from scratch just to get the JSON percentage out.
+        # tarpaulin resolves --output-dir and --exclude-files relative to
+        # the workspace root (confirmed locally: with src-tauri now a
+        # workspace member, `--output-dir ../coverage-rust` landed one
+        # directory *above* the repo entirely, and `--exclude-files
+        # "src/main.rs"` stopped matching src-tauri/src/main.rs) — both
+        # paths below are workspace-root-relative to match.
         run: |
-          cargo tarpaulin --out Lcov --out Json --output-dir ../coverage-rust \
-            --exclude-files "src/main.rs" \
+          cargo tarpaulin --out Lcov --out Json --output-dir coverage-rust \
+            --exclude-files "src-tauri/src/main.rs" \
             --timeout 120 \
             -- --test-threads=1 --skip test_ping_loopback --skip test_ssh_generate_key_rsa_creates_key_pair
 
