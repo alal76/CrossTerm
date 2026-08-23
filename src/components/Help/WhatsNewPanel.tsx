@@ -2,11 +2,19 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { X, Sparkles } from "lucide-react";
 
-const APP_VERSION = "2.0.17";
+const APP_VERSION = "2.1.0";
 const DISMISSED_VERSION_KEY = "crossterm:whats-new-dismissed";
 
 const RELEASE_NOTES = `
 ## What's New in CrossTerm ${APP_VERSION}
+
+### New Features
+- Added \`crossterm-audit-tui\`, a new standalone command-line tool (separate from this app, not bundled into it) for auditing network reach from a container or headless server: a small MC/nano-style terminal UI for browsing \`network-explore-cli\` scan results — discovered hosts, open ports, TLS certificate and mDNS details — without needing a desktop session.
+
+### Under the Hood
+- Converted the project to a Cargo workspace to support the new tool alongside the existing app, which required fixing every build script, CI cache key, and artifact path that assumed the old single-package layout (several would have silently broken or gone stale otherwise).
+
+## CrossTerm 2.0.17
 
 ### Bug Fixes
 - Fixed the "aircrack-ng Security Tools" setting not actually being enforced: the Aircrack tab in Network Explorer stayed visible and usable even with the setting switched off, as long as you'd clicked through its ethics disclaimer once. The setting is now checked on both sides, so it's off means off.
